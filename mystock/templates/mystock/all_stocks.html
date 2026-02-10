@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Stocks Dashboard | Pro Trader</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* --- Trading Terminal Dark Theme Fixes --- */
+        :root { 
+            --bg-body: #0c0e12; 
+            --bg-card: #161a1e; 
+            --text-main: #ffffff; 
+            --text-muted: #a0a0a0;
+            --accent-yellow: #f0b90b; 
+            --up-green: #00c076; 
+            --down-red: #ff3b3b; 
+            --ce-bg: #1e1414; 
+            --pe-bg: #141e18; 
+            --border-color: #2b2f3a;
+        }
+
+        body { 
+            background-color: var(--bg-body); 
+            color: var(--text-main); 
+            font-size: 13px; 
+            font-family: 'Inter', sans-serif; 
+            margin: 0;
+            padding: 10px;
+        }
+
+        .table-container { 
+            background-color: var(--bg-card); 
+            border-radius: 8px; 
+            padding: 20px; 
+            border: 1px solid var(--border-color);
+        }
+
+        /* --- Filter Bar --- */
+        .filter-bar {
+            background: #1e222d;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        /* --- Table Font & Visibility --- */
+        .table { 
+            color: var(--text-main) !important; 
+            border-color: var(--border-color) !important;
+        }
+        
+        thead th {
+            background-color: #1e222d !important;
+            color: #ffffff !important; 
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 11px;
+            border: 1px solid var(--border-color) !important;
+            vertical-align: middle;
+            cursor: pointer; /* हाथ का निशान बनाएँ */
+            user-select: none; /* टेक्स्ट सेलेक्ट होने से रोकें */
+        }
+
+        thead th:hover {
+            background-color: #2b2f3a !important; /* होवर पर रंग बदलें */
+        }
+        /* सॉर्ट आइकॉन स्टाइल */
+        .sort-icon {
+            font-size: 10px;
+            margin-left: 4px;
+            color: #666;
+        }
+        
+        th:hover .sort-icon {
+            color: var(--accent-yellow);
+        }
+        tbody tr td {
+            color: #ffffff !important; 
+            font-weight: 500;
+            border: 1px solid var(--border-color) !important;
+            padding: 8px 4px !important;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+
+        /* विभाजक (Divider) */
+        .divider { border-right: 3px solid var(--accent-yellow) !important; }
+
+        .ce-bg { background-color: var(--ce-bg) !important; } 
+        .pe-bg { background-color: var(--pe-bg) !important; } 
+        
+        .header-ce { color: var(--down-red) !important; border-bottom: 3px solid var(--down-red) !important; } 
+        .header-pe { color: var(--up-green) !important; border-bottom: 3px solid var(--up-green) !important; }
+
+        .spot-price { font-weight: bold; color: var(--accent-yellow) !important; background-color: rgba(240, 185, 11, 0.1) !important; }
+        
+        /* लिंक स्टाइल */
+        .text-primary a { color: #4db8ff !important; text-decoration: none; font-weight: bold; }
+        .text-primary a:hover { text-decoration: underline; }
+
+        .badge { font-size: 10px; padding: 5px 8px; }
+
+        /* Symbol और Time कॉलम के लिए विशेष स्टाइल */
+        .symbol-col {
+            background-color: #1c2029 !important;
+            color: var(--accent-yellow) !important; 
+            font-weight: 700 !important;
+            border-right: 1px solid var(--border-color) !important;
+        }
+
+        .time-col {
+            background-color: #1c2029 !important;
+            color: #00d2ff !important; 
+            font-family: 'Courier New', monospace; 
+        }
+
+        .symbol-col a {
+            color: var(--accent-yellow) !important;
+            text-decoration: none;
+        }
+        .symbol-col a:hover {
+            text-decoration: underline;
+            color: #ffffff !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="m-0 fw-bold"><span style="color: var(--accent-yellow);">Stocks </span> DASHBOARD</h2>
+        <div class="d-flex align-items-center gap-3">
+            <div id="rowCountContainer" style="background: #2b2f3a; padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                <span style="color: var(--text-muted); font-size: 11px;">TOTAL STOCKS: </span>
+                <span id="totalRowCount" style="color: var(--accent-yellow); font-weight: bold; font-size: 14px;">0</span>
+            </div>
+            <div id="refreshStatus" style="color: var(--text-muted);">UPDATE IN <span id="timer" style="color: var(--accent-yellow);">30</span>s</div>
+        </div>
+    </div>
+    
+    <div class="filter-bar">
+        <div class="row g-2 align-items-center">
+            <div class="col-md-2">
+                <input type="text" id="searchInput" class="form-control" placeholder="🔍 Symbol" onkeyup="applyAllFilters()">
+            </div>
+            <div class="col-md-1">
+                <select id="viewFilter" class="form-select" onchange="filterColumns()">
+                    <option value="all">ALL</option>
+                    <option value="ce">CALL Only</option>
+                    <option value="pe">PUT Only</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select id="ltpFilter" class="form-select" onchange="applyAllFilters()">
+                    <option value="all">LTP Range</option>
+                    <option value="0-500">0 - 500</option>
+                    <option value="500-1000">500 - 1000</option>
+                    <option value="1000-2000">1000 - 2000</option>
+                    <option value="2000+">2000+</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select id="distFilter" class="form-select" onchange="applyAllFilters()">
+                    <option value="all">Distance %</option>
+                    <option value="0-1">Under 1%</option>
+                    <option value="1-3">1% - 3%</option>
+                    <option value="3+">Above 3%</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select id="strengthFilter" class="form-select" onchange="applyAllFilters()">
+                    <option value="all">Strength</option>
+                    <option value="Strong">Strong</option>
+                    <option value="WTT">WTT</option>
+                    <option value="WTB">WTB</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <select id="weaknessFilter" class="form-select" onchange="applyAllFilters()">
+                    <option value="all">Weak </option>
+                    <option value="80+">80+ (>=80)</option>
+                    <option value="75-80">75 - 80</option>
+                    <option value="65-75">65 - 75</option>
+                    <option value="<65">< 65</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-outline-warning w-100" onclick="refreshData()">RELOAD</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-bordered text-center align-middle" id="stockTable" data-order="asc">
+            <thead>
+                <tr>
+                    <th rowspan="2" onclick="sortTable(0)">Symbol <span class="sort-icon">⇅</span></th>
+                    <th rowspan="2" onclick="sortTable(1)">Time <span class="sort-icon">⇅</span></th>
+                    <th rowspan="2" class="divider" onclick="sortTable(2)">Spot Price <span class="sort-icon">⇅</span></th>
+                    <th colspan="10" class="header-ce divider ce-col-head">CALL SIDE (Resistance)</th>
+                    <th colspan="10" class="header-pe pe-col-head">PUT SIDE (Support)</th>
+                </tr>
+                <tr>
+                    <!-- CE COLUMNS (3-12) -->
+                    <th class="ce-col" onclick="sortTable(3)">Strike <span class="sort-icon">⇅</span></th>
+                    <th class="ce-col" onclick="sortTable(4)">Reversal <span class="sort-icon">⇅</span></th>
+                    <th class="ce-col" onclick="sortTable(5)">Dist % <span class="sort-icon">⇅</span></th> 
+                    <th class="ce-col" onclick="sortTable(6)">SL <span class="sort-icon">⇅</span></th>
+                    <th class="ce-col" onclick="sortTable(7)">Strength <span class="sort-icon">⇅</span></th>
+                    <th class="ce-col" onclick="sortTable(8)">Weak % <span class="sort-icon">⇅</span></th>
+                    <th class="ce-col" onclick="sortTable(9)">Reversal <span class="sort-icon">⇅</span></th>
+                    <th class="ce-col" onclick="sortTable(10)">Dist % <span class="sort-icon">⇅</span></th> 
+                    <th class="ce-col" onclick="sortTable(11)">SL <span class="sort-icon">⇅</span></th>
+                    <th class="ce-col divider" onclick="sortTable(12)">Risk <span class="sort-icon">⇅</span></th>
+
+                    <!-- PE COLUMNS (13-22) -->
+                    <th class="pe-col" onclick="sortTable(13)">Strike <span class="sort-icon">⇅</span></th>
+                    <th class="pe-col" onclick="sortTable(14)">Reversal <span class="sort-icon">⇅</span></th>
+                    <th class="pe-col" onclick="sortTable(15)">Dist % <span class="sort-icon">⇅</span></th> 
+                    <th class="pe-col" onclick="sortTable(16)">SL <span class="sort-icon">⇅</span></th>
+                    <th class="pe-col" onclick="sortTable(17)">Strength <span class="sort-icon">⇅</span></th>
+                    <th class="pe-col" onclick="sortTable(18)">Weak % <span class="sort-icon">⇅</span></th>
+                    
+                    <th class="pe-col" onclick="sortTable(19)">Reversal <span class="sort-icon">⇅</span></th>
+                    <th class="pe-col" onclick="sortTable(20)">Dist % <span class="sort-icon">⇅</span></th> 
+                    <th class="pe-col" onclick="sortTable(21)">SL <span class="sort-icon">⇅</span></th>
+                    <th class="pe-col" onclick="sortTable(22)">Risk <span class="sort-icon">⇅</span></th>
+                </tr>
+            </thead>
+            <tbody id="tableContent">
+                {% include "mystock/stock_table_rows.html" %} 
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // --- कॉलम दिखाने/छिपाने का लॉजिक (अब Index आधारित) ---
+    function filterColumns() {
+        let mode = document.getElementById('viewFilter').value;
+        let table = document.getElementById('stockTable');
+        
+        // 1. हेडर को क्लास के आधार पर टॉगल करें (मेन हेडर्स के लिए)
+        let ceHeads = document.querySelectorAll('.header-ce, .ce-col-head');
+        let peHeads = document.querySelectorAll('.header-pe, .pe-col-head');
+
+        // Main headers toggle
+        if (mode === 'ce') {
+            ceHeads.forEach(el => el.style.display = '');
+            peHeads.forEach(el => el.style.display = 'none');
+        } else if (mode === 'pe') {
+            peHeads.forEach(el => el.style.display = '');
+            ceHeads.forEach(el => el.style.display = 'none');
+        } else {
+            ceHeads.forEach(el => el.style.display = '');
+            peHeads.forEach(el => el.style.display = '');
+        }
+
+        // 2. सब-हेडर और डेटा रो को छिपाना
+        let allRows = table.rows;
+
+        for (let i = 0; i < allRows.length; i++) {
+            let row = allRows[i];
+            let cells = row.cells;
+
+            // अगर यह सब-हेडर वाली लाइन है (दूसरी लाइन)
+            if (i === 1) { 
+                // इस लाइन में 20 कॉलम हैं (0-9 CE हैं, 10-19 PE हैं)
+                for (let j = 0; j < cells.length; j++) {
+                    let isCe = j < 10;
+                    let isPe = j >= 10;
+
+                    if (mode === 'ce') {
+                        cells[j].style.display = isPe ? 'none' : '';
+                    } else if (mode === 'pe') {
+                        cells[j].style.display = isCe ? 'none' : '';
+                    } else {
+                        cells[j].style.display = '';
+                    }
+                }
+            }
+            // अगर यह डेटा वाली लाइन है (तीसरी लाइन से शुरू)
+            else if (i >= 2) {
+                // इस लाइन में 23 कॉलम हैं (0,1,2 कॉमन हैं)
+                // 3-12 CE हैं
+                // 13-22 PE हैं
+                for (let j = 3; j < cells.length; j++) {
+                    let isCe = (j >= 3 && j <= 12);
+                    let isPe = (j >= 13 && j <= 22);
+
+                    if (mode === 'ce') {
+                        if (isPe) cells[j].style.display = 'none';
+                        else if (isCe) cells[j].style.display = '';
+                    } else if (mode === 'pe') {
+                        if (isCe) cells[j].style.display = 'none';
+                        else if (isPe) cells[j].style.display = '';
+                    } else {
+                        cells[j].style.display = '';
+                    }
+                }
+            }
+        }
+        
+        applyAllFilters(); // फिल्टर दोबारा लगाएं ताकि लेआउट सही रहे
+    }
+
+    // --- डेटा फ़िल्टर लॉजिक ---
+    function applyAllFilters() {
+        let search = document.getElementById('searchInput').value.toUpperCase();
+        let ltpVal = document.getElementById('ltpFilter').value;
+        let distVal = document.getElementById('distFilter').value;
+        let strVal = document.getElementById('strengthFilter').value;
+        let weakVal = document.getElementById('weaknessFilter').value;
+        let viewMode = document.getElementById('viewFilter').value;
+
+        let rows = document.querySelectorAll("#stockTable tbody tr");
+
+        rows.forEach(row => {
+            // यदि रो पूरी लोड नहीं हुई है तो स्किप करें
+            if (row.cells.length < 23) return; 
+
+            let symbol = row.cells[0].textContent.toUpperCase();
+            let ltp = parseFloat(row.cells[2].textContent) || 0;
+            
+            // कॉलम इंडेक्स सही किए गए
+            let dist = (viewMode === 'pe') ? parseFloat(row.cells[15].textContent) : parseFloat(row.cells[5].textContent);
+            let strength = (viewMode === 'pe') ? row.cells[17].textContent.trim() : row.cells[7].textContent.trim();
+            let weakness = (viewMode === 'pe') ? parseFloat(row.cells[18].textContent) : parseFloat(row.cells[8].textContent);
+
+            let matchSearch = symbol.includes(search);
+            
+            let matchLTP = (ltpVal === "all") || 
+                           (ltpVal === "0-500" && ltp <= 500) || 
+                           (ltpVal === "500-1000" && ltp > 500 && ltp <= 1000) || 
+                           (ltpVal === "1000-2000" && ltp > 1000 && ltp <= 2000) || 
+                           (ltpVal === "2000+" && ltp > 2000);
+            
+            let matchDist = (distVal === "all") || 
+                            (distVal === "0-1" && dist <= 1) || 
+                            (distVal === "1-3" && dist > 1 && dist <= 3) || 
+                            (distVal === "3+" && dist > 3);
+            
+            let matchStr = (strVal === "all") || strength.includes(strVal);
+            
+            let matchWeak = (weakVal === "all") || 
+                            (weakVal === "80+" && weakness >= 80) || 
+                            (weakVal === "75-80" && weakness < 80 && weakness >= 75) || 
+                            (weakVal === "65-75" && weakness < 75 && weakness >= 65) || 
+                            (weakVal === "<65" && weakness < 65);
+
+            row.style.display = (matchSearch && matchLTP && matchDist && matchStr && matchWeak) ? "" : "none";
+        });
+        updateRowCount();
+    }
+
+    function updateRowCount() {
+        let visibleRows = 0;
+        document.querySelectorAll("#stockTable tbody tr").forEach(row => {
+            if (row.style.display !== "none" && !row.classList.contains('empty-row')) {
+                visibleRows++;
+            }
+        });
+        document.getElementById('totalRowCount').innerText = visibleRows;
+    }
+
+    // ऑटो रिफ्रेश लॉजिक
+    let timeLeft = 30;
+    setInterval(() => {
+        timeLeft--;
+        let timerElem = document.getElementById('timer');
+        if(timerElem) timerElem.innerText = timeLeft;
+        if (timeLeft <= 0) { refreshData(); timeLeft = 30; }
+    }, 1000);
+
+    function refreshData() {
+        fetch(window.location.href)
+            .then(res => res.text())
+            .then(html => {
+                let doc = new DOMParser().parseFromString(html, 'text/html');
+                document.getElementById('tableContent').innerHTML = doc.getElementById('tableContent').innerHTML;
+                filterColumns();
+            });
+    }
+
+    // Sort Function
+    function sortTable(n) {
+        let table = document.getElementById("stockTable");
+        let rows = Array.from(table.rows).slice(2);
+        let dir = table.getAttribute("data-order") === "asc" ? "desc" : "asc";
+        
+        rows.sort((a, b) => {
+            let x = a.cells[n].innerText.replace(/[%▲▼]/g, "").trim();
+            let y = b.cells[n].innerText.replace(/[%▲▼]/g, "").trim();
+            let xNum = parseFloat(x);
+            let yNum = parseFloat(y);
+            if (!isNaN(xNum) && !isNaN(yNum)) return dir === "asc" ? xNum - yNum : yNum - xNum;
+            return dir === "asc" ? x.localeCompare(y) : y.localeCompare(x);
+        });
+        
+        rows.forEach(row => table.tBodies[0].appendChild(row));
+        table.setAttribute("data-order", dir);
+    }
+</script>
+</body>
+</html>

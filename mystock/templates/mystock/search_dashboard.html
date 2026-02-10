@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ symbol }} Option Chain</title>
+    <style>
+        /* आपकी Styles (Dark Theme) */
+        :root { 
+            --bg-dark: #121212; --card-bg: #1e1e1e; --itm-bg: #262626; 
+            --strike-bg: #000066; --text-main: #e0e0e0; --accent-yellow: #ffeb3b; 
+            --up-green: #00e676; --down-red: #ff5252; --otm-bg: #121212;
+        }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; overflow-x: hidden; }
+        
+        /* Header Info */
+        .header-info { 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 10px 15px; background: var(--card-bg); border-bottom: 2px solid #333; 
+            position: sticky; top: 0; z-index: 100; height: 50px;
+        }
+        .spot-price { font-size: 1.3em; color: var(--accent-yellow); font-weight: bold; }
+        
+        /* Table Styles */
+        table { width: 100%; border-collapse: collapse; background: var(--card-bg); table-layout: fixed; }
+        th, td { border: 1px solid #333; padding: 2px; text-align: center; font-size: 12px; height: 28px; }
+        th { background: var(--strike-bg); color: #fff; position: sticky; top: 70px; z-index: 10; }
+        
+        /* Cell Highlights */
+        .itm-bg { background-color: var(--itm-bg) !important; }
+        .otm-bg { background-color: var(--otm-bg) !important; }
+        .bg-green { background-color: #1b5e20 !important; color: #fff !important; }
+        .bg-red { background-color: #b71c1c !important; color: #fff !important; }
+        .bg-yellow { background-color: #fbc02d !important; color: #000 !important; }
+        .pos-val { color: var(--up-green) !important; }
+        .neg-val { color: var(--down-red) !important; }
+        .white-text { color: #ffffff !important; }
+        
+        /* Strike & Spot Divider */
+        .strike { background: var(--strike-bg); font-weight: bold; color: white; position: relative; }
+        .spot-line-row td { border-top: 3px solid #ff1744 !important; }
+        .spot-label { 
+            position: absolute; top: -12px; left: 50%; transform: translateX(-50%); 
+            background: var(--accent-yellow); color: #000; padding: 2px 10px; 
+            font-size: 12px; font-weight: bold; border-radius: 12px; z-index: 5; 
+        }
+
+        .pct-text { font-size: 10px; opacity: 0.8; display: block; line-height: 1; color: #aaa; }
+        .search-form select, .search-form input { background: #333; color: #fff; border: 1px solid #555; padding: 5px; border-radius: 4px; }
+        .btn-fetch { background: var(--up-green); color: #000; font-weight: bold; cursor: pointer; border: none; padding: 6px 15px; border-radius: 4px; }
+        
+        .rev-val { font-weight: bold; color: #ffa726; font-size: 11px; }
+        .breakout { color: #00e676 !important; font-weight: 900; }
+        .breakdown { color: #ff5252 !important; font-weight: 900; }
+    </style>
+</head>
+<body>
+
+<div class="header-info">
+    <div style="display: flex; gap: 10px; align-items: center;">
+        
+        <select name="symbol" id="symbol-select" onchange="resetAndSubmit()">
+            {% for s in all_symbols %}
+                <option value="{{ s }}" {% if s == symbol %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+
+        <form action="" method="GET" id="expiry-form" style="display: inline;">
+            <input type="hidden" name="symbol" value="{{ symbol }}">
+            <select name="expiry" id="expiry-select" onchange="this.form.submit()">
+                {% if expiry_list %}
+                    {% for date in expiry_list %}
+                        <option value="{{ date }}" {% if date == expiry %}selected{% endif %}>
+                            {{ date }}
+                        </option>
+                    {% endfor %}
+                {% else %}
+                    <option value="">No Expiry Found</option>
+                {% endif %}
+            </select>
+            <button type="submit" class="btn-fetch">GET DATA</button>
+        </form>
+
+        <button type="button" onclick="updateExpiries()" class="btn-fetch" style="background: var(--accent-yellow);">
+            🔄 UPDATE EXPIRIES
+        </button>
+    </div>
+
+    <div id="live-header-stats" style="display: flex; gap: 20px; align-items: center; font-family: sans-serif;">
+        <div class="spot-price" id="display-spot">
+            <strong style="color: #fff;">{{ symbol }}</strong> SPOT: {{ spot|floatformat:2 }}
+        </div>
+        
+        <div>EXP: <strong id="display-expiry" style="color:var(--accent-yellow);">{{ expiry }}</strong></div>
+        
+        <div>SYNC: <strong id="display-time">{{ latest_time|date:"H:i:s" }}</strong></div>
+        
+        <div style="background: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 4px;">
+            Lot Size: <strong style="color: #00ff00;">{{ Lot_size }}</strong>
+        </div>
+    </div>
+</div>
+
+<div id="table-container">
+    {% include 'mystock/table_partial.html' %}
+</div>
+
+<script>
+    // 1. सिंबल बदलने पर एक्सपायरी हटाकर रीलोड करना
+    function resetAndSubmit() {
+        const symbol = document.getElementById('symbol-select').value;
+        // पुरानी Expiry को URL से हटा दें
+        window.location.href = `?symbol=${symbol}`;
+    }
+
+    // 2. ऑटो-रिफ्रेश फंक्शन (AJAX via Fetch)
+    function refreshStockData() {
+        const symbol = document.getElementById('symbol-select').value;
+        const expiry = document.getElementById('expiry-select').value;
+        
+        if (!symbol || !expiry) return;
+
+        // URL में टाइमस्टैम्प जोड़ें (Cache रोकने के लिए)
+        const url = `/search-dashboard/?symbol=${symbol}&expiry=${expiry}&_t=${new Date().getTime()}`;
+
+        fetch(url, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.text())
+        .then(html => {
+            // अगर खाली डेटा आया हो तो कुछ न करें
+            if (!html || html.trim().length < 20) return;
+
+            // 1. टेबल कंटेनर को अपडेट करें
+            const tableContainer = document.getElementById('table-container');
+            tableContainer.innerHTML = html;
+
+            // 2. अब HTML में आ चुके Hidden Inputs से वैल्यू निकालें
+            const newSpot = document.getElementById('hidden-spot-price');
+            const newTime = document.getElementById('hidden-latest-time');
+            const newLot = document.getElementById('hidden-lot-size');
+
+            // 3. हेडर अपडेट करें
+            // Spot Price Update
+            if (newSpot && newSpot.value) {
+                document.getElementById('display-spot').innerHTML = 
+                    `<strong style="color: #fff;">${symbol}</strong> SPOT: ${newSpot.value}`;
+            }
+
+            // Time Update
+            if (newTime && newTime.value) {
+                const timeEl = document.getElementById('display-time');
+                timeEl.innerText = newTime.value;
+                
+                // यूजर को दिखाने के लिए कि टाइम अपडेट हुआ (हरा रंग चमकेगा)
+                timeEl.style.color = "#00e676"; 
+                setTimeout(() => timeEl.style.color = "var(--text-main)", 1000);
+            }
+
+            // Lot Size Update (HTML में id="display-lot" होना जरूरी है)
+            if (newLot && newLot.value) {
+                const lotEl = document.getElementById('display-lot');
+                if (lotEl) lotEl.innerText = newLot.value;
+            }
+        })
+        .catch(err => console.warn("Live Update Error:", err));
+    }
+
+    // 3. एक्सपायरी अपडेट बटन use
+    function updateExpiries() {
+        if(confirm("सभी सिम्बल्स की एक्सपायरी डेट्स अपडेट करें? (समय लग सकता है)")) {
+            const btn = event.target;
+            btn.innerText = "Updating...";
+            btn.disabled = true;
+
+            fetch('/update-expiries/')
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                location.reload(); 
+            })
+            .catch(err => {
+                alert("Update Failed!");
+                console.error(err);
+            })
+            .finally(() => {
+                btn.innerText = "🔄 UPDATE EXPIRIES";
+                btn.disabled = false;
+            });
+        }
+    }
+
+    // 4. ऑटो-स्क्रॉल
+    function scrollToSpot() {
+        const spotRow = document.querySelector('.spot-line-row');
+        if (spotRow) {
+            spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
+    // हर 5 सेकंड में रिफ्रेश
+    setInterval(refreshStockData, 5000);
+
+    // लोड होने पर स्क्रॉल
+    window.onload = () => {
+        setTimeout(scrollToSpot, 500);
+    };
+</script>
+
+</body>
+</html>

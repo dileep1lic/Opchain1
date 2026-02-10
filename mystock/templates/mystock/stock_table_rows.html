@@ -1,0 +1,64 @@
+{% for stock in stocks_data %}
+<tr>
+    <td class="symbol-col">
+        <a href="{% url 'search_dashboard' %}?symbol={{ stock.Symbol }}&expiry={{ stock.Expiry_Date|date:'Y-m-d' }}" target="_blank">
+            {{ stock.Symbol }}
+        </a>
+    </td>
+
+    <td class="time-col">{{ stock.Time|date:"H:i" }}</td>
+
+    <td class="spot-price divider">{{ stock.Spot_Price }}</td>
+
+    <td class="ce-bg ce-col">{{ stock.Strike_Price_Ce1 }}</td>
+    <td class="ce-bg ce-col">{{ stock.Reversl_Ce }}</td>
+    <td class="ce-bg ce-col dist-text">{{ stock.dist_ce_1 }} %</td>
+    <td class="ce-bg ce-col sl-text">{{ stock.Stop_Loss_Ce1 }}</td>
+    <td class="ce-bg ce-col">
+        {% if stock.s_t_b_ce == 'Strong' %}
+            <span class="badge bg-success">Strong</span>
+        {% elif stock.s_t_b_ce == 'WTT' %}
+            <span class="badge bg-danger">WTT ▲</span>
+        {% elif stock.s_t_b_ce == 'WTB' %}
+            <span class="badge bg-primary">WTB ▼</span>
+        {% else %}
+            {{ stock.s_t_b_ce }}
+        {% endif %}
+    </td>
+    <td class="ce-bg ce-col" {% if stock.week_Ce_2 > 75 %}style="color: #ff3b3b !important; font-weight: bold;"{% endif %}>
+        {{ stock.week_Ce_2 }} %
+    </td>
+    <td class="ce-bg ce-col">{{ stock.Reversl_Ce_2 }}</td>
+    <td class="ce-bg ce-col dist-text">{{ stock.dist_ce_2 }} %</td>
+    <td class="ce-bg ce-col sl-text">{{ stock.Stop_Loss_Ce2 }}</td>
+
+    <td class="ce-bg ce-col divider fw-bold">{{ stock.Bullish_Risk }}</td>
+
+    <td class="pe-bg pe-col">{{ stock.Strike_Price_Pe1 }}</td>
+    <td class="pe-bg pe-col">{{ stock.Reversl_Pe }}</td>
+    <td class="pe-bg pe-col dist-text">{{ stock.dist_pe_1 }} %</td>
+    <td class="pe-bg pe-col sl-text">{{ stock.Stop_Loss_Pe1 }}</td>
+    <td class="pe-bg pe-col">
+        {% if stock.s_t_b_pe == 'Strong' %}
+            <span class="badge bg-success">Strong</span>
+        {% elif stock.s_t_b_pe == 'WTT' %}
+            <span class="badge bg-primary">WTT ▲</span>
+        {% elif stock.s_t_b_pe == 'WTB' %}
+            <span class="badge bg-danger">WTB ▼</span>
+        {% else %}
+            {{ stock.s_t_b_pe }}
+        {% endif %}
+    </td>
+    <td class="pe-bg pe-col" {% if stock.week_Pe_2 > 75 %}style="color: #00c076 !important; font-weight: bold;"{% endif %}>
+        {{ stock.week_Pe_2 }} %
+    </td>
+    <td class="ce-bg ce-col">{{ stock.Reversl_Pe_2 }}</td>
+    <td class="ce-bg ce-col dist-text">{{ stock.dist_pe_2 }} %</td>
+    <td class="ce-bg ce-col sl-text">{{ stock.Stop_Loss_Pe2 }}</td>
+    <td class="pe-bg pe-col fw-bold">{{ stock.Bearish_Risk }}</td>
+</tr>
+{% empty %}
+<tr>
+    <td colspan="17" class="text-center" style="color: var(--text-muted); padding: 20px;">No Live Data Available</td>
+</tr>
+{% endfor %}

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Nifty Live Option Chain - AJAX Dashboard</title>
+    <style>
+        /* आपका सारा पुराना CSS यहाँ रहेगा (मैंने उसे वैसा ही रखा है) */
+        :root {
+            --bg-dark: #121212; --card-bg: #1e1e1e; --itm-bg: #262626; 
+            --otm-bg: #121212; --strike-bg: #000066; --text-main: #e0e0e0;
+            --accent-yellow: #ffeb3b; --up-green: #00e676; --down-red: #ff5252;
+        }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; }
+        .header-info { 
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 5px 15px; background: var(--card-bg); border-bottom: 2px solid #333; 
+            position: sticky; top: 0; z-index: 100; height: 55px;
+        }
+        .spot-price { font-size: 1.3em; color: var(--accent-yellow); font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; background: var(--card-bg); table-layout: fixed; }
+        th, td { border: 1px solid #333; padding: 2px 1px; text-align: center; font-size: 12px; height: 22px; }
+        th { background: var(--strike-bg); color: #fff; position: sticky; top: 55px; z-index: 10; height: 35px; }
+        .itm-bg { background-color: var(--itm-bg) !important; }
+        .bg-green { background-color: #1b5e20 !important; color: #fff !important; }
+        .bg-red   { background-color: #b71c1c !important; color: #fff !important; }
+        .bg-yellow { background-color: #fbc02d !important; color: #000 !important; }
+        .pos-val { color: var(--up-green) !important; }
+        .neg-val { color: var(--down-red) !important; }
+        .strike { background: var(--strike-bg); font-weight: bold; color: white; position: relative; }
+        .spot-line-row td { border-top: 3px solid #ff1744 !important; }
+        .spot-label {
+            position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+            background: var(--accent-yellow); color: #000; padding: 2px 10px;
+            font-size: 13px; font-weight: 900; border-radius: 12px; z-index: 5;
+        }
+        .sync-card { background: #262626; border: 1px solid #444; border-radius: 4px; padding: 4px 10px; display: flex; align-items: center; gap: 10px; }
+        .sync-btn { cursor: pointer; border: none; padding: 4px 10px; border-radius: 3px; font-weight: bold; }
+        .btn-start { background-color: var(--up-green); color: #000; }
+        .btn-stop { background-color: var(--down-red); color: #fff; }
+
+        .pct-text { 
+        font-size: 11px;
+        font-weight: bold; 
+        opacity: 0.8; 
+        display: block; /* यह OI के नीचे परसेंट को लाएगा जिससे जगह बचेगी */
+        /* color: #fff;  */
+        line-height: 1.1;
+        }
+        /* नए बटन के लिए स्टाइल */
+        .btn-link { background-color: var(--btn-blue); color: #fff; text-decoration: none; display: inline-block; }
+        .btn-link:hover { background-color: #1565c0; }
+
+        .pct-text { 
+        font-size: 11px; font-weight: bold; opacity: 0.8; display: block; line-height: 1.1;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header-info">
+    <div id="header-stats" style="display: flex; gap: 20px; align-items: center;">
+        <div><strong>{{ data.0.Symbol|default:"NIFTY" }}</strong></div>
+        <div>EXP: <strong style="color:var(--accent-yellow);">{{ expiry_date|date:"d-m-Y" }}</strong></div>
+        <div class="spot-price">SPOT: {{ spot|floatformat:2 }}</div>
+        <div>SYNC: <strong>{{ latest_time|date:"H:i:s" }}</strong></div>
+    </div>
+
+    <div class="control-box" style="display: flex; gap: 10px;">
+        <div class="sync-card">
+            <span class="card-title">Search Stocks</span>
+            <a href="{% url 'search_dashboard' %}" target="_blank" style="text-decoration: none;">
+                <button class="sync-btn btn-link">
+                    OPEN ↗
+                </button>
+            </a>
+        </div>
+        <div class="sync-card">
+            <span class="card-title">All Stocks</span>
+            <a href="{% url 'stock_dashboard' %}" target="_blank" style="text-decoration: none;">
+                <button class="sync-btn btn-link">
+                    OPEN ↗
+                </button>
+            </a>
+        </div>
+        <div class="sync-card">
+            <span class="card-title">NIFTY (5s)</span>
+            <div id="nifty-status" class="status-indicator">
+                {% if nifty_active %}<span class="pos-val">✅ Running</span>{% else %}<span class="neg-val">❌ Stopped</span>{% endif %}
+            </div>
+            <button id="nifty-btn" onclick="toggleSync('nifty_loop')" class="sync-btn {% if nifty_active %}btn-stop{% else %}btn-start{% endif %}">
+                {% if nifty_active %}STOP{% else %}START{% endif %}
+            </button>
+        </div>
+
+        <div class="sync-card">
+            <span class="card-title">OTHERS (120s)</span>
+            <div id="others-status" class="status-indicator">
+                {% if others_active %}<span class="pos-val">✅ Running</span>{% else %}<span class="neg-val">❌ Stopped</span>{% endif %}
+            </div>
+            <button id="others-btn" onclick="toggleSync('others_loop')" class="sync-btn {% if others_active %}btn-stop{% else %}btn-start{% endif %}">
+                {% if others_active %}STOP{% else %}START{% endif %}
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="table-container">
+    {% include 'mystock/table_partial.html' %}
+</div>
+
+<script>
+// 1. CSRF Token हासिल करने के लिए
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// 2. बटन टॉगल फंक्शन (AJAX)
+function toggleSync(loopName) {
+    fetch(`/toggle/${loopName}/`, {
+        method: "POST",
+        headers: { 
+            "X-CSRFToken": getCookie("csrftoken"), 
+            "Content-Type": "application/json" 
+        }
+    })
+    .then(res => res.json())
+    .then(data => {
+        // बटन और स्टेटस के ID को डायनेमिकली पकड़ें (nifty या others)
+        const prefix = loopName.split('_')[0]; 
+        const btn = document.getElementById(`${prefix}-btn`);
+        const status = document.getElementById(`${prefix}-status`);
+
+        if (data.is_active) {
+            // अगर एक्टिव है तो STOP बटन दिखाएं
+            btn.innerText = "STOP";
+            btn.className = "sync-btn btn-stop";
+            status.innerHTML = `<span class="pos-val">✅ Running</span>`;
+        } else {
+            // अगर एक्टिव नहीं है तो START बटन दिखाएं
+            btn.innerText = "START";
+            btn.className = "sync-btn btn-start";
+            status.innerHTML = `<span class="neg-val">❌ Stopped</span>`;
+        }
+    })
+    .catch(err => console.error("Error:", err));
+}
+
+// 3. टेबल ऑटो-रिफ्रेश फंक्शन
+function refreshData() {
+    fetch('/table-update-url/')
+    .then(response => response.text())
+    .then(html => {
+        if(html.trim() !== "") {
+            // 1. टेबल अपडेट करें
+            document.getElementById('table-container').innerHTML = html;
+
+            // 2. ताज़ा समय और स्पॉट प्राइस निकालें (Hidden Inputs से)
+            const newTime = document.getElementById('hidden-latest-time').value;
+            const newSpot = document.getElementById('hidden-spot-price').value;
+
+            // 3. हेडर में वैल्यू अपडेट करें
+            // ध्यान दें: हमने हेडर के अंदर के <strong> टैग्स को अपडेट किया है
+            const headerStats = document.getElementById('header-stats');
+            
+            // SPOT अपडेट (तीसरा div)
+            headerStats.querySelector('.spot-price').innerHTML = `SPOT: ${newSpot}`;
+            
+            // SYNC TIME अपडेट (चौथा div - SYNC के अंदर का strong)
+            headerStats.querySelector('div:last-child strong').innerText = newTime;
+
+            // scrollToSpot(); // आपका पुराना फंक्शन
+        }
+    })
+    .catch(err => console.warn("Update Error:", err));
+}
+
+function scrollToSpot() {
+    const spotRow = document.querySelector('.spot-line-row');
+    if (spotRow) { spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+}
+
+// हर 5 सेकंड में अपडेट करें
+setInterval(refreshData, 5000);
+
+// पेज लोड होने पर पहली बार स्क्रॉल करें
+window.onload = scrollToSpot;
+</script>
+
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="10"> <title>Option Chain Dashboard</title>
+    <style>
+        body { font-family: sans-serif; background: #f4f4f4; }
+        table { width: 100%; border-collapse: collapse; background: white; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 12px; }
+        th { background: #333; color: white; position: sticky; top: 0; }
+        .strike { background: #eee; font-weight: bold; }
+        .ce { background: #e8f5e9; }
+        .pe { background: #ffebee; }
+        .spot-row { background: #fff59d; font-weight: bold; }
+        .header-info { display: flex; justify-content: space-between; padding: 10px; background: #fff; border-bottom: 2px solid #333; }
+    </style>
+</head>
+<body>
+
+<div class="header-info">
+    <div><strong>Symbol:</strong> {{ data.0.Symbol }}</div>
+    <div><strong>Spot Price:</strong> {{ data.0.Spot_Price }}</div>
+    <div><strong>Last Sync:</strong> {{ latest_time }}</div>
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th colspan="6">CALLS (CE)</th>
+            <th>STRIKE</th>
+            <th colspan="6">PUTS (PE)</th>
+        </tr>
+        <tr>
+            <th>IV</th>
+            <th>DELTA</th>
+            <th>CHG OI</th>
+            <th>OI</th>
+            <th>VOLUME</th>
+            <th>CLTP</th>
+            <th>LTP</th>
+            <th>REV CE</th>            
+            <th>STRIKE</th>
+            <th>REV PE</th>
+            <th>LTP</th>
+            <th>CLTP</th>
+            <th>VOLUME</th>
+            <th>OI %</th>
+            <th>CHG OI</th>
+            <th>DELTA</th>
+            <th>IV</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in data %}
+        <tr {% if data.0.Spot_Price > row.Strike_Price and data.1.Spot_Price < row.Strike_Price %} class="spot-row" {% endif %}>
+            <td class="ce">{{ row.CE_IV|default:"0" }}</td>
+            <td class="ce">{{ row.CE_Delta|default:"0" }}</td>
+            <td class="ce">{{ row.CE_COI|default:"0" }}</td>
+            <td class="ce">{{ row.CE_OI_percent|default:"0" }}%</td>
+            <td class="ce">{{ row.CE_Volume|default:"0" }} </td>
+            <td class="ce">{{ row.CE_CLTP|default:"0" }}</td>
+            <td class="ce">{{ row.CE_LTP|default:"0" }}</td>
+            <td class="ce">{{ row.Reversl_Ce|default:"0" }}</td>
+            <td class="strike">{{ row.Strike_Price }}</td>
+            <td class="ce">{{ row.Reversl_Pe|default:"0" }}</td>
+            <td class="pe">{{ row.PE_LTP|default:"0" }}</td>
+            <td class="pe">{{ row.PE_CLTP|default:"0" }}</td>
+            <td class="pe">{{ row.PE_Volume|default:"0" }}</td>
+            <td class="pe">{{ row.PE_OI|default:"0" }}%</td>
+            <td class="pe">{{ row.PE_COI|default:"0" }}</td>
+            <td class="pe">{{ row.PE_Delta|default:"0" }}</td>
+            <td class="pe">{{ row.PE_IV|default:"0" }}</td> 
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+</body>
+</html>

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Stocks Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; font-size: 14px; }
+        
+        .table-container { 
+            margin: 20px; 
+            background-color: white; 
+            border-radius: 8px; 
+            box-shadow: 0 0 10px rgba(0,0,0,0.1); 
+            padding: 20px; 
+        }
+
+        /* --- FIX 1: Header Text White --- */
+        thead th {
+            color: white !important;
+            vertical-align: middle;
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        
+        /* --- FIX 2: Header Hover Effect --- */
+        thead th:hover {
+            box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.2) !important; 
+        }
+
+        /* Custom Colors */
+        .ce-bg { background-color: #ffe6e6 !important; color: black !important; } 
+        .pe-bg { background-color: #e6fffa !important; color: black !important; } 
+        
+        .header-ce { background-color: #dc3545 !important; } /* Dark Red */
+        .header-pe { background-color: #198754 !important; } /* Dark Green */
+
+        .spot-price { font-weight: bold; color: #333; }
+        .sl-text { color: #d63384; font-weight: bold; }
+        
+        /* NEW: Distance Text Style */
+        .dist-text { font-weight: bold; color: #0d6efd; } /* Bootstrap Blue */
+    </style>
+</head>
+<body>
+
+<div class="container-fluid table-container">
+    <h2 class="text-center mb-4">Stock Market Live Levels</h2>
+    
+    <input type="text" id="searchInput" class="form-control mb-3" placeholder="Search Symbol (e.g. RELIANCE)...">
+
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover text-center align-middle" id="stockTable">
+            <thead class="table-dark">
+                <tr>
+                    <th rowspan="2" onclick="sortTable(0)">Symbol ⇅</th>
+                    <th rowspan="2" onclick="sortTable(1)">Time ⇅</th>
+                    <th rowspan="2" onclick="sortTable(2)">LTP (Spot) ⇅</th>
+                    
+                    <th colspan="7" class="header-ce">CE (Resistance)</th>
+                    
+                    <th colspan="7" class="header-pe">PE (Support)</th>
+                </tr>
+                <tr>
+                    <th onclick="sortTable(3)">Strike ⇅</th>
+                    <th onclick="sortTable(4)">Reversal ⇅</th>
+                    <th onclick="sortTable(5)">Dist % ⇅</th> <th onclick="sortTable(6)">SL ⇅</th>
+                    <th onclick="sortTable(7)">Strength ⇅</th>
+                    <th onclick="sortTable(8)">Weakness ⇅</th>
+                    <th onclick="sortTable(9)">Risk ⇅</th>
+
+                    <th onclick="sortTable(10)">Strike ⇅</th>
+                    <th onclick="sortTable(11)">Reversal ⇅</th>
+                    <th onclick="sortTable(12)">Dist % ⇅</th> <th onclick="sortTable(13)">SL ⇅</th>
+                    <th onclick="sortTable(14)">Strength ⇅</th>
+                    <th onclick="sortTable(15)">Weakness ⇅</th>
+                    <th onclick="sortTable(16)">Risk ⇅</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stock in stocks_data %}
+                <tr>
+                    <td class="fw-bold text-primary">
+                        <a href="{% url 'search_dashboard' %}?symbol={{ stock.Symbol }}&expiry={{ stock.Expiry_Date|date:'Y-m-d' }}" 
+                        target="_blank" 
+                        class="text-decoration-none text-primary">
+                            {{ stock.Symbol }}
+                        </a>
+                    </td>
+                    <td>{{ stock.Time|date:"H:i" }}</td>
+                    <td class="spot-price">{{ stock.Spot_Price }}</td>
+
+                    <td class="ce-bg">{{ stock.Strike_Price_Ce1 }}</td>
+                    <td class="ce-bg">{{ stock.Reversl_Ce }}</td>
+                    
+                    <td class="ce-bg dist-text">{{ stock.dist_ce_1 }} %</td>
+
+                    <td class="ce-bg sl-text">{{ stock.Stop_Loss_Ce1 }}</td>
+                    
+                    <td class="ce-bg sl-text">
+                        {% if stock.s_t_b_ce == 'Strong' %}
+                            <span class="badge bg-success">Strong</span>
+                        {% elif stock.s_t_b_ce == 'WTT' %}
+                            <span class="badge bg-danger">WTT ▲</span>
+                        {% elif stock.s_t_b_ce == 'WTB' %}
+                            <span class="badge bg-primary">WTB ▼</span>
+                        {% else %}
+                            {{ stock.s_t_b_ce }}
+                        {% endif %}
+                    </td>
+
+                    <td class="ce-bg" {% if stock.week_Ce_2 > 75 %}style="background-color: #fa071f !important; color: white !important; font-weight: bold;"{% endif %}>
+                        {{ stock.week_Ce_2 }} %
+                    </td>
+                    <td class="ce-bg ">{{stock.Bullish_Risk}}</td>
+
+                    <td class="pe-bg">{{ stock.Strike_Price_Pe1 }}</td>
+                    <td class="pe-bg">{{ stock.Reversl_Pe }}</td>
+                    
+                    <td class="pe-bg dist-text">{{ stock.dist_pe_1 }} %</td>
+
+                    <td class="pe-bg sl-text">{{ stock.Stop_Loss_Pe1 }}</td>
+
+                    <td class="pe-bg sl-text">
+                        {% if stock.s_t_b_pe == 'Strong' %}
+                            <span class="badge bg-success">Strong</span>
+                        {% elif stock.s_t_b_pe == 'WTT' %}
+                            <span class="badge bg-primary">WTT ▲</span>
+                        {% elif stock.s_t_b_pe == 'WTB' %}
+                            <span class="badge bg-danger">WTB ▼</span>
+                        {% else %}
+                            {{ stock.s_t_b_pe }}
+                        {% endif %}
+                    </td>
+
+                    <td class="pe-bg" {% if stock.week_Pe_2 > 75 %}style="background-color: #fa071f !important; color: white !important; font-weight: bold;"{% endif %}>
+                        {{ stock.week_Pe_2 }} %
+                    </td>
+                    <td class="pe-bg ">{{stock.Bearish_Risk}} </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="17" class="text-center">No Data Available</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Search Function
+    document.getElementById('searchInput').addEventListener('keyup', function() {
+        let filter = this.value.toUpperCase();
+        let rows = document.querySelector("#stockTable tbody").rows;
+        for (let i = 0; i < rows.length; i++) {
+            let symbolCol = rows[i].cells[0].textContent;
+            if (symbolCol.toUpperCase().indexOf(filter) > -1) {
+                rows[i].style.display = "";
+            } else {
+                rows[i].style.display = "none";
+            }
+        }
+    });
+
+    // Sort Function
+    function sortTable(n) {
+        var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+        table = document.getElementById("stockTable");
+        switching = true;
+        dir = "asc"; 
+
+        while (switching) {
+            switching = false;
+            rows = table.getElementsByTagName("tbody")[0].rows;
+
+            for (i = 0; i < (rows.length - 1); i++) {
+                shouldSwitch = false;
+                x = rows[i].getElementsByTagName("TD")[n];
+                y = rows[i + 1].getElementsByTagName("TD")[n];
+                
+                if (!x || !y) continue;
+
+                var xContent = x.textContent.replace(/[%▲▼]/g, "").trim();
+                var yContent = y.textContent.replace(/[%▲▼]/g, "").trim();
+
+                var xValue = isNaN(parseFloat(xContent)) ? xContent.toLowerCase() : parseFloat(xContent);
+                var yValue = isNaN(parseFloat(yContent)) ? yContent.toLowerCase() : parseFloat(yContent);
+
+                if (dir == "asc") {
+                    if (xValue > yValue) { shouldSwitch = true; break; }
+                } else if (dir == "desc") {
+                    if (xValue < yValue) { shouldSwitch = true; break; }
+                }
+            }
+            if (shouldSwitch) {
+                rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                switching = true;
+                switchcount++;
+            } else {
+                if (switchcount == 0 && dir == "asc") {
+                    dir = "desc";
+                    switching = true;
+                }
+            }
+        }
+    }
+</script>
+
+</body>
+</html>
