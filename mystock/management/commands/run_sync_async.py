@@ -8,6 +8,7 @@ from datetime import datetime, time as dt_time
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
+from datetime import timedelta
 from .async_live import (
     save_sr_async_wrapper,
     get_smart_expiry,
@@ -15,7 +16,7 @@ from .async_live import (
     load_master_contract
 )
 from .symbol import symbols as all_symbols
-from mystock.models import OptionChain, SyncControl
+from mystock.models import OptionChain, SyncControl, SupportResistance
 
 # Logging setup
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -96,6 +97,17 @@ class Command(BaseCommand):
 
             if self.is_trading_hours():
                 try:
+                    # =========================================================
+                    # 🧹 CLEANUP: Delete data older than 30 MINUTES for NIFTY
+                                       
+                    #  30 मिनट सेट किया
+                    cutoff_time = timezone.now() - timedelta(minutes=5)
+                    
+                    # print(f"♻️ Cleaning NIFTY data older than 30 mins...")
+
+                    # DB Query को sync_to_async में डाला ताकि लूप फास्ट रहे
+                    await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
+
                     df = await calculate_data_async_optimized(session, fixes_sym, expiry)
                     if df is not None and not df.empty:
                         entries = [OptionChain(
@@ -142,6 +154,14 @@ class Command(BaseCommand):
 
     async def others_sr_loop(self, session, symbols, expiry):
         """Modified Loop: Process 10 symbols, wait 2s, repeat."""
+        
+        # =========================================================
+        # 🧹 CLEANUP: Delete data older than 1 hour for this Symbol
+        # =========================================================
+        cutoff_time = timezone.now() - timedelta(minutes=5)
+        print(f"♻️ Cleaning Stocks data older than 30 mins...")
+        # सिंबल के हिसाब से पुराना डेटा डिलीट करें ताकि DB भारी न हो
+        await sync_to_async(SupportResistance.objects.filter(Time__lt=cutoff_time).delete)()
         
         # Helper function - removed semaphore since batching controls load
         async def process_one(sym):
@@ -193,7 +213,7 @@ class Command(BaseCommand):
 
                         # 4. Wait 2 seconds before next batch (but skip sleep after last batch)
                         if i + batch_size < len(symbols):
-                            await asyncio.sleep(2)
+                            await asyncio.sleep(0)
                     # --- BATCHING LOGIC END ---
                     
                     duration = t_time.time() - start_time
@@ -201,7 +221,7 @@ class Command(BaseCommand):
                 except Exception as e:
                     print(f"Others Loop Error: {e}") 
                 # Full cycle sleep (can adjust this if needed)
-                await asyncio.sleep(120)
+                await asyncio.sleep(180)
             else:
                 print("⏸️  Others Loop Outside Trading Hours.")
                 await asyncio.sleep(5) 
