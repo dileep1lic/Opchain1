@@ -21,7 +21,7 @@ except Exception as e:
     logger.error(f"Error loading NSE.csv: {e}")
     NSE_DATA = {}
 
-def get_instrument_key(symbol):
+def get_instrument_key1(symbol):
     key = NSE_DATA.get(symbol)
     if key: return key
     fallback = {
@@ -31,6 +31,55 @@ def get_instrument_key(symbol):
         'MIDCPNIFTY': 'NSE_INDEX|NIFTY MID SELECT'
     }
     return fallback.get(symbol)
+
+def get_instrument_key(symbol):
+    """
+    सिंबल के लिए Instrument Key निकालता है।
+    Indices के लिए फिक्स्ड मैप और Stocks के लिए CSV (instrument_df) का उपयोग करता है।
+    """
+    global instrument_df
+    
+    # 1. Indices के लिए हार्डकोडेड मैपिंग (यह सबसे सुरक्षित और तेज़ है)
+    indices_map = {
+        'NIFTY': 'NSE_INDEX|Nifty 50',
+        'BANKNIFTY': 'NSE_INDEX|Nifty Bank',
+        'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
+        'MIDCPNIFTY': 'NSE_INDEX|NIFTY MID SELECT',
+        'SAMMAAN': 'NSE_EQ|INE148I01020',
+        'M&M': 'NSE_EQ|INE101A01026',  
+        'L&T': 'NSE_EQ|INE018A01030',
+    }
+    
+    if symbol in indices_map:
+        return indices_map[symbol]
+
+    # 2. अगर फाइल लोड नहीं है, तो लोड करें
+    if instrument_df is None:
+        load_master_contract()
+
+    try:
+        # 3. Stocks के लिए 'NSE_EQ' (Equity) सेगमेंट में ढूंढें
+        # Option Chain के लिए हमें Underlying (Equity) की Key चाहिए होती है।
+        
+        # फिल्टर: ट्रेडिंग सिंबल मैच हो और एक्सचेंज NSE_EQ हो
+        stock_row = instrument_df[
+            (instrument_df['tradingsymbol'] == symbol) & 
+            (instrument_df['exchange'] == 'NSE_EQ')
+        ]
+
+        if not stock_row.empty:
+            return stock_row.iloc[0]['instrument_key']
+        
+        # 4. अगर NSE_EQ में नहीं मिला, तो BSE_EQ या किसी और में ढूंढें (Fallback)
+        fallback_row = instrument_df[instrument_df['tradingsymbol'] == symbol]
+        if not fallback_row.empty:
+            return fallback_row.iloc[0]['instrument_key']
+
+    except Exception as e:
+        print(f"❌ Key Error for {symbol}: {e}")
+
+    # अगर कुछ नहीं मिला
+    return None
 
 def get_Name_Lot_size(symbol):
     key = get_instrument_key(symbol)
@@ -74,7 +123,7 @@ def get_Name_Lot_size(symbol):
 # ग्लोबल वेरिएबल ताकि फाइल एक ही बार लोड हो
 instrument_df = None
 
-def load_master_contract():
+def load_master_contract1():
     global instrument_df
     if instrument_df is not None:
         return
@@ -122,6 +171,45 @@ def get_Name_Lot_size_Fast(symbol):
         pass
 
     return symbol, 1
+
+import os
+
+def load_master_contract():
+    global instrument_df
+    if instrument_df is not None:
+        return
+
+    file_path = 'complete.csv'
+    
+    # अगर फाइल पुरानी है या नहीं है, तो डाउनलोड करें
+    # (आप चाहें तो इसे रोज़ एक बार डाउनलोड करने का लॉजिक लगा सकते हैं)
+    if not os.path.exists(file_path):
+        print("📥 Downloading latest master contract...")
+        url = "https://assets.upstox.com/feed/instruments/nse-eq.csv.gz" 
+        # नोट: हम सीधे NSE Equity ले रहे हैं ताकि फाइल छोटी रहे और तेज़ चले
+        # अगर आपको पूरा चाहिए तो: https://assets.upstox.com/feed/instruments/complete.csv.gz
+        
+        # यहाँ हम complete.csv ही यूज़ करेंगे जैसा आपका कोड है
+        url = "https://assets.upstox.com/feed/instruments/complete.csv.gz"
+        
+        response = requests.get(url)
+        with open(file_path, 'wb') as f:
+            f.write(response.content)
+        print("✅ Download Complete!")
+
+    try:
+        # फाइल लोड करें (Pandas gzip को खुद संभाल लेता है अगर एक्सटेंशन .gz हो, 
+        # लेकिन अगर आपने unzip करके .csv सेव की है तो ये कोड है)
+        instrument_df = pd.read_csv(file_path)
+        
+        # कॉलम के नाम साफ़ करें और स्ट्रिंग बनाएं
+        instrument_df['tradingsymbol'] = instrument_df['tradingsymbol'].astype(str).str.strip()
+        instrument_df['exchange'] = instrument_df['exchange'].astype(str).str.strip()
+        
+        print(f"✅ Master File Loaded! Total Instruments: {len(instrument_df)}")
+    except Exception as e:
+        print(f"❌ File Load Error: {e}")
+
 # ---------------------------------------------------------
 # NEW SMART EXPIRY LOGIC START
 # ---------------------------------------------------------
