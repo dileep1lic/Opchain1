@@ -10,27 +10,10 @@ from asgiref.sync import sync_to_async
 import numpy as np
 from mystock.models import SupportResistance, ExpiryCache 
 import requests
+from datetime import timedelta
 
 
 logger = logging.getLogger(__name__)
-
-# NSE Data Load (1000x faster search)
-try:
-    NSE_DATA = pd.read_csv('NSE.csv').set_index('tradingsymbol')['instrument_key'].to_dict()
-except Exception as e:
-    logger.error(f"Error loading NSE.csv: {e}")
-    NSE_DATA = {}
-
-def get_instrument_key1(symbol):
-    key = NSE_DATA.get(symbol)
-    if key: return key
-    fallback = {
-        'NIFTY': 'NSE_INDEX|Nifty 50',
-        'BANKNIFTY': 'NSE_INDEX|Nifty Bank',
-        'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
-        'MIDCPNIFTY': 'NSE_INDEX|NIFTY MID SELECT'
-    }
-    return fallback.get(symbol)
 
 def get_instrument_key(symbol):
     """
@@ -122,20 +105,6 @@ def get_Name_Lot_size(symbol):
 
 # ग्लोबल वेरिएबल ताकि फाइल एक ही बार लोड हो
 instrument_df = None
-
-def load_master_contract1():
-    global instrument_df
-    if instrument_df is not None:
-        return
-    try:
-        # लोकल फाइल लोड करें
-        instrument_df = pd.read_csv('complete.csv')
-        # डेटा को साफ़ करें
-        instrument_df['tradingsymbol'] = instrument_df['tradingsymbol'].astype(str).str.strip()
-        instrument_df['name'] = instrument_df['name'].astype(str).str.strip()
-        print(f"✅ फाइल सफलतापूर्वक लोड हो गई! कुल स्टॉक्स: {len(instrument_df)}")
-    except Exception as e:
-        print(f"❌ फाइल लोड करने में गलती: {e}")
 
 def get_Name_Lot_size_Fast(symbol):
     """F&O लॉट साइज को प्राथमिकता देने वाला फ़ंक्शन"""
@@ -509,6 +478,13 @@ def build_pe_ce_logic(df):
 
 
 def save_top2_support_resistance(df, symbol):
+    # # =========================================================
+    # # 🧹 CLEANUP: Delete data older than 1 hour for this Symbol
+    # # =========================================================
+    # cutoff_time = timezone.now() - timedelta(minutes=5)
+    # print(f"♻️ Cleaning Stocks data older than 30 mins...")
+    # # सिंबल के हिसाब से पुराना डेटा डिलीट करें ताकि DB भारी न हो
+    # SupportResistance.objects.filter(Time__lt=cutoff_time).delete()
     try:
         if df is None or df.empty: return False
 
@@ -577,6 +553,9 @@ def save_top2_support_resistance(df, symbol):
                 expiry_val = str(expiry_val)
             except:
                 expiry_val = None
+
+        
+        
         # --- 4. Database Save ---
         SupportResistance.objects.create(
             Time=timezone.localtime(),
