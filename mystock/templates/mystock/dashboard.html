@@ -2,102 +2,204 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Nifty Live Option Chain - AJAX Dashboard</title>
+    <title>Nifty Live Option Chain - Pro Dashboard</title>
     <style>
-        /* आपका सारा पुराना CSS यहाँ रहेगा (मैंने उसे वैसा ही रखा है) */
+        /* --- 1. CORE VARIABLES --- */
         :root {
-            --bg-dark: #121212; --card-bg: #1e1e1e; --itm-bg: #262626; 
-            --otm-bg: #121212; --strike-bg: #000066; --text-main: #e0e0e0;
-            --accent-yellow: #ffeb3b; --up-green: #00e676; --down-red: #ff5252;
+            --bg-dark: #0f1115;
+            --header-bg: #181b21;
+            --card-bg: #1e1e1e; 
+            
+            /* New Colors */
+            --accent-blue: #2962ff;
+            --accent-yellow: #ffc107;
+            --accent-green: #00c853;
+            --accent-red: #ff1744;
+            --text-primary: #ffffff;
+            --text-secondary: #909399;
+            --border-color: #333;
+
+            /* --- OLD COLOR VARIABLES (Restored) --- */
+            --itm-bg: #262626;         
+            --strike-bg: #000066;      
+            --up-green: #00e676;       
+            --down-red: #ff5252;       
         }
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; }
-        .header-info { 
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 5px 15px; background: var(--card-bg); border-bottom: 2px solid #333; 
-            position: sticky; top: 0; z-index: 100; height: 55px;
+
+        body {
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 0;
         }
-        .spot-price { font-size: 1.3em; color: var(--accent-yellow); font-weight: bold; }
-        table { width: 100%; border-collapse: collapse; background: var(--card-bg); table-layout: fixed; }
+
+        /* --- 2. NEW HEADER STYLES --- */
+        .trading-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--header-bg);
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            flex-wrap: wrap;
+            gap: 15px;
+            min-height: 60px;
+        }
+
+        .stats-group { display: flex; gap: 25px; align-items: center; }
+        .stat-item { display: flex; flex-direction: column; justify-content: center; }
+        .label { font-size: 10px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin-bottom: 2px; }
+        .value { font-size: 15px; font-weight: 700; color: var(--text-primary); font-family: 'Roboto Mono', monospace; }
+
+        .symbol-val { color: var(--accent-blue); font-size: 18px; }
+        .expiry-val { color: var(--accent-yellow); }
+        .spot-val   { color: var(--accent-green); }
+        .sync-val   { color: #e0e0e0; }
+
+        .controls-group { display: flex; gap: 12px; align-items: center; }
+        .control-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 5px 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-width: 80px;
+        }
+        .card-title { font-size: 9px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; }
+
+        .action-btn {
+            border: none; border-radius: 4px; padding: 4px 12px;
+            font-size: 11px; font-weight: 700; cursor: pointer;
+            transition: all 0.2s ease; text-decoration: none; display: inline-block;
+            text-align: center; min-width: 60px;
+        }
+        .action-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .btn-blue { background: rgba(41, 98, 255, 0.15); color: #64b5f6; border: 1px solid rgba(41, 98, 255, 0.3); }
+        .btn-green { background: rgba(0, 200, 83, 0.15); color: var(--accent-green); border: 1px solid rgba(0, 200, 83, 0.3); }
+        .btn-red { background: rgba(255, 23, 68, 0.15); color: var(--accent-red); border: 1px solid rgba(255, 23, 68, 0.3); }
+
+        .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-running { background-color: var(--accent-green); box-shadow: 0 0 0 0 rgba(0, 200, 83, 0.7); animation: pulse-green 2s infinite; }
+        .status-stopped { background-color: var(--accent-red); }
+        
+        @keyframes pulse-green {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 200, 83, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(0, 200, 83, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 200, 83, 0); }
+        }
+
+        /* --- 3. RESTORED TABLE COLOR STYLES --- */
+        table { width: 100%; border-collapse: collapse; background: var(--card-bg); table-layout: fixed; margin-top: 0; }
         th, td { border: 1px solid #333; padding: 2px 1px; text-align: center; font-size: 12px; height: 22px; }
-        th { background: var(--strike-bg); color: #fff; position: sticky; top: 55px; z-index: 10; height: 35px; }
+        
+        th { 
+            background: var(--strike-bg); color: #fff; 
+            position: sticky; 
+            top: 82px; 
+            z-index: 10; height: 35px; 
+        }
+
         .itm-bg { background-color: var(--itm-bg) !important; }
+        
+        .pos-val { color: var(--up-green) !important; font-weight: bold; }
+        .neg-val { color: var(--down-red) !important; font-weight: bold; }
+        
         .bg-green { background-color: #1b5e20 !important; color: #fff !important; }
         .bg-red   { background-color: #b71c1c !important; color: #fff !important; }
         .bg-yellow { background-color: #fbc02d !important; color: #000 !important; }
-        .pos-val { color: var(--up-green) !important; }
-        .neg-val { color: var(--down-red) !important; }
-        .strike { background: var(--strike-bg); font-weight: bold; color: white; position: relative; }
-        .spot-line-row td { border-top: 3px solid #ff1744 !important; }
+
+        .strike { 
+            background: var(--strike-bg); 
+            font-weight: bold; 
+            color: white; 
+            position: relative; 
+            font-size: 13px;
+        }
+
+        /* --- यहाँ मैंने वापस लाल लाइन कर दी है --- */
+        .spot-line-row td { 
+            border-top: 3px solid #ff1744 !important; 
+        }
+        
         .spot-label {
             position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
-            background: var(--accent-yellow); color: #000; padding: 2px 10px;
-            font-size: 13px; font-weight: 900; border-radius: 12px; z-index: 5;
+            background: var(--accent-yellow); color: #000; padding: 2px 8px;
+            font-size: 11px; font-weight: 900; border-radius: 10px; z-index: 5;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
         }
-        .sync-card { background: #262626; border: 1px solid #444; border-radius: 4px; padding: 4px 10px; display: flex; align-items: center; gap: 10px; }
-        .sync-btn { cursor: pointer; border: none; padding: 4px 10px; border-radius: 3px; font-weight: bold; }
-        .btn-start { background-color: var(--up-green); color: #000; }
-        .btn-stop { background-color: var(--down-red); color: #fff; }
 
         .pct-text { 
-        font-size: 11px;
-        font-weight: bold; 
-        opacity: 0.8; 
-        display: block; /* यह OI के नीचे परसेंट को लाएगा जिससे जगह बचेगी */
-        /* color: #fff;  */
-        line-height: 1.1;
+            font-size: 10px; font-weight: normal; opacity: 0.7; display: block; line-height: 1.1; margin-top: 2px;
         }
-        /* नए बटन के लिए स्टाइल */
-        .btn-link { background-color: var(--btn-blue); color: #fff; text-decoration: none; display: inline-block; }
-        .btn-link:hover { background-color: #1565c0; }
 
-        .pct-text { 
-        font-size: 11px; font-weight: bold; opacity: 0.8; display: block; line-height: 1.1;
+        @media (max-width: 900px) {
+            .trading-header { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+            .stats-group { justify-content: space-between; width: 100%; }
+            .controls-group { justify-content: space-between; width: 100%; overflow-x: auto; padding-bottom: 5px; }
+            th { top: 130px; }
         }
     </style>
 </head>
 <body>
 
-<div class="header-info">
-    <div id="header-stats" style="display: flex; gap: 20px; align-items: center;">
-        <div><strong>{{ data.0.Symbol|default:"NIFTY" }}</strong></div>
-        <div>EXP: <strong style="color:var(--accent-yellow);">{{ expiry_date|date:"d-m-Y" }}</strong></div>
-        <div class="spot-price">SPOT: {{ spot|floatformat:2 }}</div>
-        <div>SYNC: <strong>{{ latest_time|date:"H:i:s" }}</strong></div>
+<div class="trading-header">
+    <div class="stats-group">
+        <div class="stat-item">
+            <span class="label">Symbol</span>
+            <span class="value symbol-val">{{ data.0.Symbol|default:"NIFTY" }}</span>
+        </div>
+        <div class="stat-item">
+            <span class="label">Expiry</span>
+            <span class="value expiry-val">{{ expiry_date|date:"d-M" }}</span>
+        </div>
+        <div class="stat-item">
+            <span class="label">Spot Price</span>
+            <span id="header-spot" class="value spot-val">{{ spot|floatformat:2 }}</span>
+        </div>
+        <div class="stat-item">
+            <span class="label">Last Sync</span>
+            <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
+        </div>
     </div>
 
-    <div class="control-box" style="display: flex; gap: 10px;">
-        <div class="sync-card">
-            <span class="card-title">Search Stocks</span>
-            <a href="{% url 'search_dashboard' %}" target="_blank" style="text-decoration: none;">
-                <button class="sync-btn btn-link">
-                    OPEN ↗
-                </button>
+    <div class="controls-group">
+        <div class="control-card">
+            <span class="card-title">Search</span>
+            <a href="{% url 'search_dashboard' %}" target="_blank">
+                <button class="action-btn btn-blue">OPEN ↗</button>
             </a>
         </div>
-        <div class="sync-card">
-            <span class="card-title">All Stocks</span>
-            <a href="{% url 'stock_dashboard' %}" target="_blank" style="text-decoration: none;">
-                <button class="sync-btn btn-link">
-                    OPEN ↗
-                </button>
+        <div class="control-card">
+            <span class="card-title">Market</span>
+            <a href="{% url 'stock_dashboard' %}" target="_blank">
+                <button class="action-btn btn-blue">ALL ↗</button>
             </a>
         </div>
-        <div class="sync-card">
-            <span class="card-title">NIFTY (5s)</span>
-            <div id="nifty-status" class="status-indicator">
-                {% if nifty_active %}<span class="pos-val">✅ Running</span>{% else %}<span class="neg-val">❌ Stopped</span>{% endif %}
+        <div class="control-card">
+            <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
+                <div id="nifty-dot" class="status-dot {% if nifty_active %}status-running{% else %}status-stopped{% endif %}"></div>
+                <span class="card-title" style="margin:0;">NIFTY (5s)</span>
             </div>
-            <button id="nifty-btn" onclick="toggleSync('nifty_loop')" class="sync-btn {% if nifty_active %}btn-stop{% else %}btn-start{% endif %}">
+            <button id="nifty-btn" onclick="toggleSync('nifty_loop')" 
+                    class="action-btn {% if nifty_active %}btn-red{% else %}btn-green{% endif %}">
                 {% if nifty_active %}STOP{% else %}START{% endif %}
             </button>
         </div>
-
-        <div class="sync-card">
-            <span class="card-title">OTHERS (120s)</span>
-            <div id="others-status" class="status-indicator">
-                {% if others_active %}<span class="pos-val">✅ Running</span>{% else %}<span class="neg-val">❌ Stopped</span>{% endif %}
+        <div class="control-card">
+            <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
+                <div id="others-dot" class="status-dot {% if others_active %}status-running{% else %}status-stopped{% endif %}"></div>
+                <span class="card-title" style="margin:0;">OTHERS</span>
             </div>
-            <button id="others-btn" onclick="toggleSync('others_loop')" class="sync-btn {% if others_active %}btn-stop{% else %}btn-start{% endif %}">
+            <button id="others-btn" onclick="toggleSync('others_loop')" 
+                    class="action-btn {% if others_active %}btn-red{% else %}btn-green{% endif %}">
                 {% if others_active %}STOP{% else %}START{% endif %}
             </button>
         </div>
@@ -109,7 +211,6 @@
 </div>
 
 <script>
-// 1. CSRF Token हासिल करने के लिए
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -125,7 +226,6 @@ function getCookie(name) {
     return cookieValue;
 }
 
-// 2. बटन टॉगल फंक्शन (AJAX)
 function toggleSync(loopName) {
     fetch(`/toggle/${loopName}/`, {
         method: "POST",
@@ -136,50 +236,35 @@ function toggleSync(loopName) {
     })
     .then(res => res.json())
     .then(data => {
-        // बटन और स्टेटस के ID को डायनेमिकली पकड़ें (nifty या others)
         const prefix = loopName.split('_')[0]; 
         const btn = document.getElementById(`${prefix}-btn`);
-        const status = document.getElementById(`${prefix}-status`);
+        const dot = document.getElementById(`${prefix}-dot`);
 
         if (data.is_active) {
-            // अगर एक्टिव है तो STOP बटन दिखाएं
             btn.innerText = "STOP";
-            btn.className = "sync-btn btn-stop";
-            status.innerHTML = `<span class="pos-val">✅ Running</span>`;
+            btn.className = "action-btn btn-red"; 
+            dot.className = "status-dot status-running";
         } else {
-            // अगर एक्टिव नहीं है तो START बटन दिखाएं
             btn.innerText = "START";
-            btn.className = "sync-btn btn-start";
-            status.innerHTML = `<span class="neg-val">❌ Stopped</span>`;
+            btn.className = "action-btn btn-green"; 
+            dot.className = "status-dot status-stopped";
         }
     })
     .catch(err => console.error("Error:", err));
 }
 
-// 3. टेबल ऑटो-रिफ्रेश फंक्शन
 function refreshData() {
-    fetch('/table-update-url/')
+    fetch('/table-update-url/') 
     .then(response => response.text())
     .then(html => {
         if(html.trim() !== "") {
-            // 1. टेबल अपडेट करें
             document.getElementById('table-container').innerHTML = html;
 
-            // 2. ताज़ा समय और स्पॉट प्राइस निकालें (Hidden Inputs से)
-            const newTime = document.getElementById('hidden-latest-time').value;
-            const newSpot = document.getElementById('hidden-spot-price').value;
+            const newTime = document.getElementById('hidden-latest-time')?.value;
+            const newSpot = document.getElementById('hidden-spot-price')?.value;
 
-            // 3. हेडर में वैल्यू अपडेट करें
-            // ध्यान दें: हमने हेडर के अंदर के <strong> टैग्स को अपडेट किया है
-            const headerStats = document.getElementById('header-stats');
-            
-            // SPOT अपडेट (तीसरा div)
-            headerStats.querySelector('.spot-price').innerHTML = `SPOT: ${newSpot}`;
-            
-            // SYNC TIME अपडेट (चौथा div - SYNC के अंदर का strong)
-            headerStats.querySelector('div:last-child strong').innerText = newTime;
-
-            // scrollToSpot(); // आपका पुराना फंक्शन
+            if(newSpot) document.getElementById('header-spot').innerText = newSpot;
+            if(newTime) document.getElementById('header-time').innerText = newTime;
         }
     })
     .catch(err => console.warn("Update Error:", err));
@@ -190,10 +275,7 @@ function scrollToSpot() {
     if (spotRow) { spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 }
 
-// हर 5 सेकंड में अपडेट करें
 setInterval(refreshData, 5000);
-
-// पेज लोड होने पर पहली बार स्क्रॉल करें
 window.onload = scrollToSpot;
 </script>
 
