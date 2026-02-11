@@ -19,22 +19,22 @@
         {% for row in data %}
         <tr class="{% if row.is_spot_divider %}spot-line-row{% endif %}">
             <td class="{% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %}">
-                {{ row.CE_IV|floatformat:1 }}<br><span class="pct-text">{{ row.CE_Delta|floatformat:2 }}</span>
+                {{ row.CE_IV|floatformat:1 }}<br><span class="pct-text">({{ row.CE_Delta|floatformat:2 }})</span>
             </td>
             
             <td class="{% if row.CE_COI > 0 %}pos-val{% else %}neg-val{% endif %} {{ row.CE_COI_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %}">
                 {{ row.CE_COI|floatformat:0 }}
-                <span class="pct-text">{{ row.CE_COI_percent|floatformat:1 }}%</span>
+                <span class="pct-text">({{ row.CE_COI_percent|floatformat:1 }} %)</span>
             </td>
 
             <td class="{{ row.CE_OI_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 {{ row.CE_OI|floatformat:0 }}
-                <span class="pct-text">{{ row.CE_OI_percent|floatformat:1 }}%</span>
+                <span class="pct-text">({{ row.CE_OI_percent|floatformat:1 }} %)</span>
             </td>
 
             <td class="{{ row.CE_Volume_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 {{ row.CE_Volume|floatformat:0 }}
-                <span class="pct-text">{{ row.CE_Volume_percent|floatformat:1 }}%</span>
+                <span class="pct-text">({{ row.CE_Volume_percent|floatformat:1 }} %)</span>
             </td>
 
             <td class="{% if row.CE_CLTP > 0 %}pos-val{% else %}neg-val{% endif %} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %}">
@@ -60,21 +60,21 @@
 
             <td class="{{ row.PE_Volume_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 {{ row.PE_Volume|floatformat:0 }}
-                <span class="pct-text">{{ row.PE_Volume_percent|floatformat:1 }}%</span>
+                <span class="pct-text">({{ row.PE_Volume_percent|floatformat:1 }} %)</span>
             </td>
 
             <td class="{{ row.PE_OI_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 {{ row.PE_OI|floatformat:0 }}
-                <span class="pct-text">{{ row.PE_OI_percent|floatformat:1 }}%</span>
+                <span class="pct-text">({{ row.PE_OI_percent|floatformat:1 }} %)</span>
             </td>
 
             <td class="{% if row.PE_COI > 0 %}pos-val{% else %}neg-val{% endif %} {{ row.PE_COI_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %}">
                 {{ row.PE_COI|floatformat:0 }}
-                <span class="pct-text">{{ row.PE_COI_percent|floatformat:1 }}%</span>
+                <span class="pct-text">({{ row.PE_COI_percent|floatformat:1 }} %)</span>
             </td>
 
             <td class="{% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %}">
-                {{ row.PE_IV|floatformat:1 }}<br><span class="pct-text">{{ row.PE_Delta|floatformat:2 }}</span>
+                {{ row.PE_IV|floatformat:1 }}<br><span class="pct-text">({{ row.PE_Delta|floatformat:2 }})</span>
             </td>
         </tr>
         {% empty %}
