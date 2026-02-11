@@ -193,7 +193,7 @@ class Command(BaseCommand):
 
                         # 4. Wait 2 seconds before next batch (but skip sleep after last batch)
                         if i + batch_size < len(symbols):
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(2)
                     # --- BATCHING LOGIC END ---
                     
                     duration = t_time.time() - start_time
