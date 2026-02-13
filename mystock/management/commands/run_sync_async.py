@@ -13,7 +13,8 @@ from .async_live import (
     save_sr_async_wrapper,
     get_smart_expiry,
     calculate_data_async_optimized,
-    load_master_contract
+    load_master_contract,
+    save_temp_async_wrapper
 )
 from .symbol import symbols as all_symbols
 from mystock.models import OptionChain, SyncControl, SupportResistance
@@ -168,7 +169,11 @@ class Command(BaseCommand):
             try:
                 df = await calculate_data_async_optimized(session, sym, expiry)
                 if df is not None and not df.empty:
+                    # 1. Save Support Resistance (Existing)
                     await save_sr_async_wrapper(df, sym)
+
+                    # 2. Save FULL DATA to TempOptionChain (New)
+                    await save_temp_async_wrapper(df, sym)
                     return True
             except Exception as e:
                 logger.error(f"Error {sym}: {e}")
