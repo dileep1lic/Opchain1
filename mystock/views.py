@@ -519,6 +519,7 @@ def all_stocks_dashboard(request):
 def stock_search_view(request):
     """
     Search view with Smart Expiry Logic and Auto-Refresh support.
+    Reads data from TempOptionChain table.
     """
     # 1. सिंबल प्राप्त करें (डिफ़ॉल्ट NIFTY)
     symbol = request.GET.get('symbol', 'NIFTY').upper()
@@ -527,120 +528,86 @@ def stock_search_view(request):
     url_expiry = request.GET.get('expiry', '')
 
     # 2. SMART EXPIRY FETCH
-    # यह फंक्शन DB चेक करेगा, और अगर डेटा नहीं है तो API से लाएगा
     expiry_list = get_smart_expiry(symbol)
     
-    # 3. EXPIRY SELECTION LOGIC (सबसे महत्वपूर्ण हिस्सा)
-    # अगर URL वाली एक्सपायरी इस सिंबल की लिस्ट में मौजूद है, तो उसे चुनें।
-    # वरना (या सिंबल बदलने पर) लिस्ट की पहली एक्सपायरी (Current Expiry) चुनें।
+    # 3. EXPIRY SELECTION LOGIC
     if url_expiry and url_expiry in expiry_list:
         selected_expiry = url_expiry
     else:
         selected_expiry = expiry_list[0] if expiry_list else ''
 
-    # 4. AJAX Check (टेबल रिफ्रेश के लिए)
+    # 4. AJAX Check
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
-    # 5. DATA FETCHING (Async Logic)
-    if symbol and selected_expiry:
-        # पुराने डेटा को हटाएं
-        TempOptionChain.objects.all().delete()
-        
-        @sync_to_async
-        def save_entries(entries):
-            return TempOptionChain.objects.bulk_create(entries)
+    # 5. DATA FETCHING FROM DB (TempOptionChain)
+    # हम सीधे DB से डेटा निकालेंगे जो Background Loop ने सेव किया है
+    queryset = TempOptionChain.objects.filter(Symbol=symbol).order_by('Strike_Price')
+    
+    # अगर एक्सपायरी सेलेक्टेड है, तो उससे फिल्टर करें
+    if selected_expiry:
+        queryset = queryset.filter(Expiry_Date=selected_expiry)
 
-        async def fetch_and_save():
-            async with aiohttp.ClientSession() as session:
-                # सही expiry (selected_expiry) का उपयोग करें
-                df = await calculate_data_async_optimized(session, symbol, selected_expiry)
-                
-                if df is not None and not df.empty:
-                    entries = [TempOptionChain(
-                        Time=row['Time'], 
-                        Symbol=symbol, 
-                        Expiry_Date=selected_expiry,
-                        Strike_Price=row['Strike_Price'],
-                        Lot_size=row.get('Lot_size', 1), 
-                        Spot_Price=row['Spot_Price'],
-                        
-                        # CE Data
-                        CE_Delta=row.get('CE_Delta', 0),
-                        CE_IV=row.get('CE_IV', 0),                         
-                        CE_COI_percent=row.get('CE_COI_percent', 0),
-                        CE_COI=row.get('CE_COI', 0),
-                        CE_OI=row.get('CE_OI', 0), 
-                        CE_OI_percent=row.get('CE_OI_percent', 0), 
-                        CE_Volume_percent=row.get('CE_Volume_percent', 0), 
-                        CE_Volume=row.get('CE_Volume', 0),
-                        CE_LTP=row.get('CE_LTP', 0),
-                        CE_CLTP=row.get('CE_CLTP', 0), 
-                        Reversl_Ce=row.get('Reversl_Ce', 0),
+    latest_data = list(queryset)
 
-                        # PE Data
-                        Reversl_Pe=row.get('Reversl_Pe', 0),                         
-                        PE_LTP=row.get('PE_LTP', 0),
-                        PE_CLTP=row.get('PE_CLTP', 0),
-                        PE_Volume=row.get('PE_Volume', 0), 
-                        PE_Volume_percent=row.get('PE_Volume_percent', 0),
-                        PE_OI=row.get('PE_OI', 0), 
-                        PE_OI_percent=row.get('PE_OI_percent', 0),
-                        PE_COI=row.get('PE_COI', 0),
-                        PE_COI_percent=row.get('PE_COI_percent', 0),
-                        PE_Delta=row.get('PE_Delta', 0), 
-                        PE_IV=row.get('PE_IV', 0),
-                    ) for _, row in df.iterrows()]
-                    await save_entries(entries)
-
-        try:
-            # Async Loop चलाना
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(fetch_and_save())
-            loop.close()
-        except Exception as e:
-            print(f"Error in async fetch: {e}")
-
-    # 6. RANKING & COLOR LOGIC (Dashboard जैसा)
-    latest_data = list(TempOptionChain.objects.all().order_by('Strike_Price'))
     spot_price = 0
     latest_time = None
     lot_size = 1
+    display_data = []
 
     if latest_data:
-        spot_price = latest_data[0].Spot_Price
-        latest_time = latest_data[0].Time
-        lot_size = latest_data[0].Lot_size
+        # बेसिक मेटा-डेटा निकालें (पहले रो से)
+        first_row = latest_data[0]
+        spot_price = first_row.Spot_Price
+        latest_time = first_row.Time
+        lot_size = first_row.Lot_size
 
+        # 6. RANKING & COLOR LOGIC (Dashboard जैसा)
         metrics = ['CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
                    'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent']
 
         for metric in metrics:
+            # मेट्रिक के हिसाब से सॉर्ट करें (Descending)
             ranked = sorted(latest_data, key=lambda x: getattr(x, metric) or 0, reverse=True)
             base_class = metric.replace('_percent', '_class')
             
-            if len(ranked) > 0: setattr(ranked[0], base_class, "bg-green")
-            if len(ranked) > 1 and (getattr(ranked[1], metric) or 0) >= 75: 
-                setattr(ranked[1], base_class, "bg-red")
-            if len(ranked) > 2 and (getattr(ranked[2], metric) or 0) >= 65: 
-                setattr(ranked[2], base_class, "bg-yellow")
+            # 1st Rank -> Green
+            if len(ranked) > 0: 
+                setattr(ranked[0], base_class, "bg-green")
+            
+            # 2nd Rank -> Red (Only if value >= 75%)
+            if len(ranked) > 1:
+                val2 = getattr(ranked[1], metric) or 0
+                if val2 >= 75: 
+                    setattr(ranked[1], base_class, "bg-red")
+            
+            # 3rd Rank -> Yellow (Only if value >= 65%)
+            if len(ranked) > 2:
+                val3 = getattr(ranked[2], metric) or 0
+                if val3 >= 65: 
+                    setattr(ranked[2], base_class, "bg-yellow")
 
-        # Filtering ±15 Strikes
+        # 7. WINDOW FILTERING (±15 Strikes around Spot Price)
+        # स्पॉट प्राइस के सबसे करीब वाली स्ट्राइक ढूंढें
         closest_obj = min(latest_data, key=lambda x: abs(x.Strike_Price - spot_price))
-        idx = latest_data.index(closest_obj)
-        display_data = latest_data[max(0, idx-15) : idx+16]
+        closest_idx = latest_data.index(closest_obj)
+        
+        # रेंज सेट करें (15 ऊपर, 15 नीचे)
+        start_idx = max(0, closest_idx - 15)
+        end_idx = min(len(latest_data), closest_idx + 16)
+        
+        display_data = latest_data[start_idx : end_idx]
 
+        # 8. SPOT DIVIDER LOGIC
+        # जहाँ स्ट्राइक प्राइस > स्पॉट प्राइस हो, वहां डिवाइडर मार्क करें
         for row in display_data:
             if row.Strike_Price > spot_price:
-                row.is_spot_divider = True
+                row.is_spot_divider = True # Template में इसका इस्तेमाल करें
                 break
-    else:
-        display_data = []
-
+    
     context = {
         'data': display_data, 
         'symbol': symbol, 
-        'expiry': selected_expiry, # यह अब हमेशा सही एक्सपायरी होगी
+        'expiry': selected_expiry, 
         'spot': spot_price, 
         'latest_time': latest_time,
         'Lot_size': lot_size,
@@ -648,7 +615,7 @@ def stock_search_view(request):
         'expiry_list': expiry_list,
     }
 
-    # अगर AJAX रिक्वेस्ट है (Auto-Refresh) तो सिर्फ टेबल भेजें
+    # अगर AJAX रिक्वेस्ट है (Auto-Refresh) तो सिर्फ टेबल भेजें 
     if is_ajax:
         return render(request, 'mystock/table_partial.html', context)
     
