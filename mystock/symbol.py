@@ -1,7 +1,7 @@
 # symbols.py
 # 🔹 List of all stock symbols for trading scripts
 symbols = [
-"NIFTY","BANKNIFTY","FINNIFTY", "MIDCPNIFTY",
+    "BANKNIFTY","FINNIFTY", "MIDCPNIFTY",
     "360ONE", "ABB", "ABCAPITAL", "ADANIENT", "ADANIGREEN", "ADANIPORTS", 
     "ALKEM", "AMBER", "AMBUJACEM", "ANGELONE", "APLAPOLLO", "APOLLOHOSP", 
     "ASHOKLEY", "ASIANPAINT", "ASTRAL", "AUBANK", "AUROPHARMA", "AXISBANK", 
