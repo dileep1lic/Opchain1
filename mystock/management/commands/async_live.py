@@ -340,6 +340,9 @@ async def get_option_chain_async(session, symbol, expiry_Date, retries=2):
 
 async def calculate_data_async_optimized(session, symbol, expiry_Date):
     """पूरी कैलकुलेशन प्रोसेस"""
+    if symbol == "NIFTY":
+        expiry_Date = '2026-02-17'
+    
     response_data = await get_option_chain_async(session, symbol, expiry_Date)
     
 
@@ -478,13 +481,7 @@ def build_pe_ce_logic(df):
 
 
 def save_top2_support_resistance(df, symbol):
-    # # =========================================================
-    # # 🧹 CLEANUP: Delete data older than 1 hour for this Symbol
-    # # =========================================================
-    # cutoff_time = timezone.now() - timedelta(minutes=5)
-    # print(f"♻️ Cleaning Stocks data older than 30 mins...")
-    # # सिंबल के हिसाब से पुराना डेटा डिलीट करें ताकि DB भारी न हो
-    # SupportResistance.objects.filter(Time__lt=cutoff_time).delete()
+    
     try:
         if df is None or df.empty: return False
 
@@ -554,8 +551,6 @@ def save_top2_support_resistance(df, symbol):
             except:
                 expiry_val = None
 
-        
-        
         # --- 4. Database Save ---
         SupportResistance.objects.create(
             Time=timezone.localtime(),
@@ -604,3 +599,71 @@ def save_top2_support_resistance(df, symbol):
     except Exception as e:
         print(f"Error saving DB for {symbol}: {e}")
         return False
+
+from mystock.models import SupportResistance, ExpiryCache, TempOptionChain  # TempOptionChain add kiya
+
+
+def save_full_temp_chain(df, symbol):
+    """
+    पूरे DataFrame को TempOptionChain टेबल में सेव करता है।
+    सेव करने से पहले उस सिंबल का पुराना डेटा डिलीट कर देता है।
+    """
+    try:
+        if df is None or df.empty:
+            return
+
+        # 1. उस सिंबल का पुराना डेटा हटाएं (ताकि टेबल बहुत भारी न हो)
+        TempOptionChain.objects.filter(Symbol=symbol).delete()
+
+        # 2. DataFrame से Model Objects बनाएं
+        entries = [
+            TempOptionChain(
+                Time=row.get('Time'),
+                Symbol=row.get('Symbol'),
+                Expiry_Date=row.get('expiry'), # Note: df column matches dictionary key
+                Lot_size=row.get('Lot_size'),
+                Strike_Price=row.get('Strike_Price'),
+                Spot_Price=row.get('Spot_Price'),
+                
+                # CE Data
+                CE_Delta=row.get('CE_Delta'),
+                CE_RANGE=row.get('CE_RANGE'),
+                CE_IV=row.get('CE_IV'),
+                CE_COI_percent=row.get('CE_COI_percent'),
+                CE_COI=row.get('CE_COI'),
+                CE_OI_percent=row.get('CE_OI_percent'),
+                CE_OI=row.get('CE_OI'),
+                CE_Volume_percent=row.get('CE_Volume_percent'),
+                CE_Volume=row.get('CE_Volume'),
+                CE_CLTP=row.get('CE_CLTP'),
+                CE_LTP=row.get('CE_LTP'),
+                Reversl_Ce=row.get('Reversl_Ce'),
+
+                # PE Data
+                Reversl_Pe=row.get('Reversl_Pe'),
+                PE_LTP=row.get('PE_LTP'),
+                PE_CLTP=row.get('PE_CLTP'),
+                PE_Volume=row.get('PE_Volume'),
+                PE_Volume_percent=row.get('PE_Volume_percent'),
+                PE_OI=row.get('PE_OI'),
+                PE_OI_percent=row.get('PE_OI_percent'),
+                PE_COI=row.get('PE_COI'),
+                PE_COI_percent=row.get('PE_COI_percent'),
+                PE_IV=row.get('PE_IV'),
+                PE_RANGE=row.get('PE_RANGE'),
+                PE_Delta=row.get('PE_Delta'),
+            )
+            for _, row in df.iterrows()
+        ]
+
+        # 3. Bulk Create (Fast Save)
+        TempOptionChain.objects.bulk_create(entries)
+        # print(f"✅ Full Chain Saved for {symbol}")
+
+    except Exception as e:
+        print(f"❌ Error saving TempChain for {symbol}: {e}")
+
+@sync_to_async
+def save_temp_async_wrapper(df, symbol):
+    """Async Wrapper ताकी मेन लूप ब्लॉक न हो"""
+    return save_full_temp_chain(df, symbol)
