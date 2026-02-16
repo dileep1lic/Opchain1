@@ -43,7 +43,7 @@ class Command(BaseCommand):
     # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
-    is_trading_hours = lambda self: dt_time(8, 15) <= datetime.now().time() <= dt_time(15, 30)
+    is_trading_hours = lambda self: dt_time(9, 1) <= datetime.now().time() <= dt_time(15, 30)
 
     def handle(self, *args, **options):
         logger.info('🚀 Starting High-Speed Async Engine...') 
@@ -102,7 +102,7 @@ class Command(BaseCommand):
                     # 🧹 CLEANUP: Delete data older than 30 MINUTES for NIFTY
                                        
                     #  30 मिनट सेट किया
-                    cutoff_time = timezone.now() - timedelta(minutes=5)
+                    cutoff_time = timezone.now() - timedelta(days=1)
                     
                     # print(f"♻️ Cleaning NIFTY data older than 30 mins...")
 
@@ -159,8 +159,8 @@ class Command(BaseCommand):
         # =========================================================
         # 🧹 CLEANUP: Delete data older than 1 hour for this Symbol
         # =========================================================
-        cutoff_time = timezone.now() - timedelta(minutes=5)
-        print(f"♻️ Cleaning Stocks data older than 30 mins...")
+        cutoff_time = timezone.now() - timedelta(days=1)
+        # print(f"♻️ Cleaning Stocks data older than 30 mins...")
         # सिंबल के हिसाब से पुराना डेटा डिलीट करें ताकि DB भारी न हो
         await sync_to_async(SupportResistance.objects.filter(Time__lt=cutoff_time).delete)()
         
