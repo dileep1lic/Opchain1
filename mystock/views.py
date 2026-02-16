@@ -522,7 +522,7 @@ def stock_search_view(request):
     Reads data from TempOptionChain table.
     """
     # 1. सिंबल प्राप्त करें (डिफ़ॉल्ट NIFTY)
-    symbol = request.GET.get('symbol', 'NIFTY').upper()
+    symbol = request.GET.get('symbol', 'BANKNIFTY').upper()
     
     # URL से एक्सपायरी (अगर है तो)
     url_expiry = request.GET.get('expiry', '')
