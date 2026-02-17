@@ -629,3 +629,135 @@ def trigger_expiry_update(request):
         get_smart_expiry(symbol)
         
     return JsonResponse({"status": "success", "message": "Expiry dates updated successfully!"})
+
+
+import io
+import base64
+import urllib
+import pytz
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+from datetime import datetime
+from django.shortcuts import render
+from django.http import HttpResponse
+from django.utils import timezone
+
+def specific_strike_oi_chart(request):
+    symbol = request.GET.get('symbol', 'NIFTY')
+    strike_price = request.GET.get('strike')
+
+    if not strike_price:
+        return HttpResponse("Please provide a strike price.")
+
+    try:
+        strike_price = float(strike_price)
+    except ValueError:
+        return HttpResponse("Invalid strike price.")
+
+    # ✅ 1. IST Timezone Setup
+    ist = pytz.timezone('Asia/Kolkata')
+    today = timezone.localdate()  # आज की तारीख (IST में)
+
+    # ✅ 2. Data Fetch
+    # हम list() का उपयोग कर रहे हैं ताकि QuerySet तुरंत Evaluate हो जाए
+    data = list(
+        OptionChain.objects.filter(
+            Symbol=symbol,
+            Strike_Price=strike_price,
+            Time__date=today
+        ).order_by('Time').values(
+            'Time', 'CE_OI', 'PE_OI', 'CE_OI_percent', 'PE_OI_percent'
+        )
+    )
+
+    if not data:
+        return HttpResponse(f"No data found for {symbol} Strike {strike_price} on {today}")
+
+    # ✅ 3. Data Processing (UTC -> IST Convert)
+    times = [timezone.localtime(entry['Time'], ist) for entry in data]
+    ce_oi = [entry['CE_OI'] for entry in data]
+    pe_oi = [entry['PE_OI'] for entry in data]
+    ce_pct = [entry['CE_OI_percent'] for entry in data]
+    pe_pct = [entry['PE_OI_percent'] for entry in data]
+
+    # ---------------- CHART GENERATION FUNCTION ---------------- #
+    def generate_chart(y_ce, y_pe, title, ylabel):
+        plt.style.use('dark_background')
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        # Background Colors
+        fig.patch.set_facecolor('#0f1115')
+        ax.set_facecolor('#0f1115')
+
+        # Lines
+        ax.plot(times, y_ce, label='Call (CE)', color='#ff1744', linewidth=2)
+        ax.plot(times, y_pe, label='Put (PE)', color='#00e676', linewidth=2)
+
+        # Fill Area (Glow Effect)
+        if "Total" in title:
+            ax.fill_between(times, y_ce, color='#ff1744', alpha=0.1)
+            ax.fill_between(times, y_pe, color='#00e676', alpha=0.1)
+
+        # Zero Line for % Chart
+        if "Percent" in title:
+            ax.axhline(0, color='white', linewidth=1, linestyle='--', alpha=0.5)
+
+        # Labels & Titles
+        ax.set_title(title, fontsize=12, color='white', fontweight='bold')
+        ax.set_ylabel(ylabel, color='#909399', fontsize=10)
+
+        # Grid Style
+        ax.grid(True, linestyle=':', alpha=0.2, color='white')
+
+        # Clean Borders
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['bottom'].set_color('#333')
+        ax.spines['left'].set_color('#333')
+
+        # ✅ TIME FORMATTING (The Magic Part)
+        # tz=ist लगाने से यह अपने आप IST में टाइम दिखाएगा
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz=ist))
+        
+        # 15-Minute Locator
+        ax.xaxis.set_major_locator(mdates.MinuteLocator(byminute=[0, 15, 30, 45], interval=1))
+
+        # Tick Params
+        ax.tick_params(axis='x', colors='#909399', labelsize=9, rotation=0)
+        ax.tick_params(axis='y', colors='#909399', labelsize=9)
+
+        plt.tight_layout()
+
+        # Save Logic
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format='png', facecolor=fig.get_facecolor())
+        buffer.seek(0)
+        
+        # Clean Memory
+        image_png = buffer.getvalue()
+        buffer.close()
+        plt.close(fig)
+
+        graphic = base64.b64encode(image_png)
+        return urllib.parse.quote(graphic)
+
+    # ✅ 4. Create Both Charts
+    chart_oi = generate_chart(ce_oi, pe_oi, f'Total OI ({strike_price})', 'Open Interest')
+    chart_pct = generate_chart(ce_pct, pe_pct, f'OI Change % ({strike_price})', 'Change %')
+
+    return render(request, 'mystock/oi_chart.html', {
+        'chart_oi': chart_oi,
+        'chart_pct': chart_pct,
+        'symbol': symbol,
+        'strike': strike_price
+    })
+
+
+
+
+
+
+
+
+
