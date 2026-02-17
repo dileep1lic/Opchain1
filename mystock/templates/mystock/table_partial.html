@@ -28,7 +28,12 @@
             </td>
 
             <td class="{{ row.CE_OI_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
-                {{ row.CE_OI|floatformat:0 }}
+                <a href="/chart/oi/?symbol={{ row.Symbol }}&strike={{ row.Strike_Price }}" 
+                onclick="window.open(this.href, 'OIChart', 'width=900,height=600,toolbar=no,menubar=no,location=no,status=no,resizable=yes'); return false;"
+                style="color: inherit; text-decoration: underline; text-decoration-style: dotted; cursor: pointer;"
+                title="Open Chart Popup">
+                    {{ row.CE_OI|floatformat:0 }}
+                </a>
                 <span class="pct-text">({{ row.CE_OI_percent|floatformat:1 }} %)</span>
             </td>
 
@@ -71,10 +76,14 @@
             </td>
 
             <td class="{{ row.PE_OI_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
-                {{ row.PE_OI|floatformat:0 }}
+                <a href="/chart/oi/?symbol={{ row.Symbol }}&strike={{ row.Strike_Price }}" 
+                onclick="window.open(this.href, 'OIChart', 'width=900,height=600,toolbar=no,menubar=no,location=no,status=no,resizable=yes'); return false;"
+                style="color: inherit; text-decoration: underline; text-decoration-style: dotted; cursor: pointer;"
+                title="Open Chart Popup">
+                    {{ row.PE_OI|floatformat:0 }}
+                </a>
                 <span class="pct-text">({{ row.PE_OI_percent|floatformat:1 }} %)</span>
             </td>
-
             <td class="{% if row.PE_COI > 0 %}pos-val{% else %}neg-val{% endif %} {{ row.PE_COI_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %}">
                 {{ row.PE_COI|floatformat:0 }}
                 <span class="pct-text">({{ row.PE_COI_percent|floatformat:1 }} %)</span>
