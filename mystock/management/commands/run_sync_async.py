@@ -157,11 +157,11 @@ class Command(BaseCommand):
         """Modified Loop: Process 10 symbols, wait 2s, repeat."""
         
         # =========================================================
-        # 🧹 CLEANUP: Delete data older than 1 hour for this Symbol
+        # 🧹 CLEANUP: Delete data older than 1 DAY (Keep today's history for Charts)
         # =========================================================
-        cutoff_time = timezone.now() - timedelta(days=1)
-        # print(f"♻️ Cleaning Stocks data older than 30 mins...")
-        # सिंबल के हिसाब से पुराना डेटा डिलीट करें ताकि DB भारी न हो
+        cutoff_time = timezone.now() - timedelta(days=1) 
+
+        # यह लाइन async_live.py में सही है
         await sync_to_async(SupportResistance.objects.filter(Time__lt=cutoff_time).delete)()
         
         # Helper function - removed semaphore since batching controls load
