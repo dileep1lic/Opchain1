@@ -9,5 +9,7 @@ urlpatterns = [
     path('stock-dashboard/', views.all_stocks_dashboard, name='stock_dashboard'),
     path('search-dashboard/', views.stock_search_view, name='search_dashboard'),
     path('update-expiries/', views.trigger_expiry_update, name='update_expiries'),
-    path('chart/oi/', views.specific_strike_oi_chart, name='strike_oi_chart'),
+
+    path('chart/view/', views.render_chart_page, name='chart_page'), # HTML पेज
+    path('api/oi-data/', views.specific_strike_oi_data, name='oi_data_api'), # JSON डेटा
 ]
