@@ -3,7 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <title>COI Analysis</title>
+    
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+
     <style>
         body { margin: 0; padding: 0; background-color: #0f1115; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
         .top-bar { height: 40px; background: #181b21; display: flex; align-items: center; justify-content: center; gap: 10px; border-bottom: 1px solid #333; }
@@ -11,6 +17,7 @@
         .btn { background: #333; border: 1px solid #444; color: #ccc; padding: 5px 15px; font-size: 11px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
         .btn:hover { background: #444; color: white; }
         .btn.active { background: #2962ff; color: white; border-color: #2962ff; }
+        .btn-reset { background: #d32f2f; color: white; border: 1px solid #b71c1c; } /* Reset button style */
         .chart-wrapper { flex-grow: 1; position: relative; width: 100%; height: 100%; padding: 10px; box-sizing: border-box; }
     </style>
 </head>
@@ -21,6 +28,8 @@
         
         <button class="btn active" onclick="switchChart('total')">TOTAL COI</button>
         <button class="btn" onclick="switchChart('percent')">CHANGE %</button>
+        
+        <button class="btn btn-reset" onclick="resetZoomChart()">RESET ZOOM</button>
     </div>
 
     <div class="chart-wrapper">
@@ -33,14 +42,12 @@
     
     const urlParams = new URLSearchParams(window.location.search);
     const symbol = urlParams.get('symbol');
-    
-    // Fix 2: JavaScript logic for clean strike
     let strike = urlParams.get('strike');
     let displayStrike = strike ? parseFloat(strike).toFixed(0) : '';
 
     async function fetchData() {
         try {
-            // API call में ओरिजिनल 'strike' ही भेजें (taaki match ho)
+            // URL में slash (/) का ध्यान रखें
             const response = await fetch(`/api/coi-data/?symbol=${symbol}&strike=${strike}`);
             globalData = await response.json();
             
@@ -60,11 +67,11 @@
         if (type === 'total') {
             dataset1 = globalData.ce_coi;
             dataset2 = globalData.pe_coi;
-            title = `Total COI (${displayStrike})`; // Title me clean strike
+            title = `Total COI (${displayStrike})`; 
         } else {
             dataset1 = globalData.ce_pct;
             dataset2 = globalData.pe_pct;
-            title = `COI Change % (${displayStrike})`; // Title me clean strike
+            title = `COI Change % (${displayStrike})`; 
         }
 
         myChart = new Chart(ctx, {
@@ -100,9 +107,30 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
+                
+                // --- ZOOM CONFIGURATION START ---
                 plugins: {
                     legend: { labels: { color: 'white' } },
                     title: { display: true, text: title, color: 'white', font: { size: 14 } },
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x', // सिर्फ टाइम (X-axis) पर पैन होगा
+                            modifierKey: null, // बिना किसी की-बोर्ड बटन के ड्रैग होगा
+                        },
+                        zoom: {
+                            wheel: {
+                                enabled: true, // माउस व्हील से जूम
+                            },
+                            pinch: {
+                                enabled: true // मोबाइल पर पिंच जूम
+                            },
+                            mode: 'x', // सिर्फ X-axis (Time) जूम होगा
+                            drag: {
+                                enabled: false // बॉक्स बनाकर जूम नहीं करना
+                            }
+                        }
+                    },
                     tooltip: {
                         backgroundColor: 'rgba(20, 20, 20, 0.9)',
                         titleColor: '#ffc107',
@@ -113,6 +141,8 @@
                         displayColors: true,
                     }
                 },
+                // --- ZOOM CONFIGURATION END ---
+                
                 scales: {
                     x: {
                         ticks: { color: '#909399', maxTicksLimit: 8 },
@@ -127,9 +157,19 @@
         });
     }
 
+    // चार्ट रीसेट करने का फंक्शन
+    window.resetZoomChart = function() {
+        if (myChart) {
+            myChart.resetZoom();
+        }
+    }
+
     window.switchChart = function(mode) {
         document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
-        event.target.classList.add('active');
+        // Reset button पर active class न लगे, इसके लिए चेक
+        if (!event.target.classList.contains('btn-reset')) {
+            event.target.classList.add('active');
+        }
         drawChart(mode);
     }
 
