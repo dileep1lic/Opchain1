@@ -1,27 +1,18 @@
 import requests
 import time
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-from django.shortcuts import render, redirect
+from django.shortcuts import render
 from requests.exceptions import SSLError, ConnectionError, Timeout
-from .models import OptionChain, SupportResistance, SyncControl, ExpiryCache, TempOptionChain
-from .credentials import access_token
+from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain
 from django.utils import timezone
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Subquery, Q
 from django.views.decorators.cache import never_cache
 from django.http import HttpResponse, JsonResponse
-from asgiref.sync import sync_to_async
 from django.views.decorators.cache import cache_page
-import asyncio
-import aiohttp
-from .management.commands.async_live import calculate_data_async_optimized, get_smart_expiry 
+from .management.commands.async_live import get_smart_expiry 
 from .symbol import symbols as ALL_SYMBOLS
-
-
-# Token ko ek jagah define karein (Ideally settings.py ya .env mein hona chahiye)
-# ACCESS_TOKEN = "your_access_token_here" 
-# EXPIRY_DATE = "2026-02-03"
+from django.views.decorators.clickjacking import xframe_options_exempt
+import pytz
 
 def safe_get(url, headers=None, params=None, retries=3, timeout=10):
     """
@@ -48,293 +39,6 @@ def safe_get(url, headers=None, params=None, retries=3, timeout=10):
             print(f"HTTP Error occurred: {e}")
             return None
     return None
-# This code not used anywhere else, so defining here for completeness
-# def get_instrument_key(symbol):
-#     scripts = pd.read_csv('NSE.csv')
-#     filtered = scripts[scripts['tradingsymbol'] == symbol]
-
-#     if not filtered.empty:
-#         return filtered['instrument_key'].values[0]
-
-#     fallback = {
-#         'NIFTY': 'NSE_INDEX|Nifty 50',
-#         'BANKNIFTY': 'NSE_INDEX|Nifty Bank',
-#         'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
-#         'MIDCPNIFTY': 'NSE_INDEX|NIFTY MID SELECT',
-#         'CRUDEOIL': 'MCX_FO|436953'
-#     }
-#     return fallback.get(symbol, None)
-
-# def get_option_chain(symbol, expiry_Date):
-#     key = get_instrument_key(symbol)
-#     if not key:
-#         print(f"⚠ Instrument key nahi mili: {symbol}")
-#         return None
-
-#     url = 'https://api.upstox.com/v2/option/chain'
-#     params = {'instrument_key': key, 'expiry_date': expiry_Date}
-#     headers = {
-#         'Accept': 'application/json',
-#         'Authorization': f'Bearer {access_token}'
-#     }
-
-#     try:
-#         # 1. Timeout ko thoda badhana behtar hai kyunki Option Chain ka data heavy hota hai
-#         res = requests.get(url, params=params, headers=headers, timeout=10)
-
-#         # 2. Check karein ki request successful thi ya nahi (e.g., 200 OK)
-#         res.raise_for_status() 
-
-#         data = res.json()
-
-#         # 3. Data validation
-#         if "data" not in data or not data["data"]:
-#             print(f"⚠ Empty option chain received for {symbol} on {expiry_Date}!")
-#             return None
-
-#         return data
-
-#     except requests.exceptions.HTTPError as e:
-#         # Agar Token expire ho gaya ya galat URL hai
-#         print(f"❌ HTTP Error: {e.response.status_code} - {e.response.text}")
-#     except requests.exceptions.Timeout:
-#         print("❌ Request Timeout: Upstox server response nahi de raha.")
-#     except Exception as e:
-#         print(f"❌ Unexpected Error: {e}")
-    
-#     return None
-
-# def get_Name_Lot_size(symbol):
-#     key = get_instrument_key(symbol)
-#     if not key:
-#         return None, None
-
-#     url = "https://api.upstox.com/v2/option/contract"
-#     headers = {
-#         'Accept': 'application/json',
-#         'Authorization': f'Bearer {access_token}'
-#     }
-
-#     try:
-#         # Aapne pehle 'safe_get' banaya hai, wahi use karein
-#         response = safe_get(
-#             url,
-#             headers=headers,
-#             params={'instrument_key': key}
-#         )
-
-#         # Agar safe_get ne None return kiya ya data nahi mila
-#         if not response or "data" not in response or not response["data"]:
-#             print(f"⚠ No contract data found for {symbol}")
-#             return None, None
-
-#         # Pehla instrument lein (usually index ya stock contract)
-#         contract_data = response["data"][0]
-        
-#         underlying = contract_data.get("underlying_symbol")
-#         lot_size = contract_data.get("lot_size")
-
-#         return underlying, lot_size
-
-#     except Exception as e:
-#         print(f"⚠ Lot size fetch failed for {symbol}: {str(e)}")
-#         return None, None
-    
-# def data_to_df(symbol, expiry_Date):
-#     response_data = get_option_chain(symbol, expiry_Date)
-#     if not response_data:
-#         return None
-
-#     symbol_name, lot_size = get_Name_Lot_size(symbol)
-    
-#     # Lot size 0 ya None nahi hona chahiye (Division error se bachne ke liye)
-#     if not symbol_name or not lot_size or lot_size == 0:
-#         print(f"⚠ Invalid lot size for {symbol}")
-#         return None
-
-#     data = response_data.get("data", [])
-#     now = datetime.now() # Django model ke liye object hi rehne dein, string nahi
-
-#     rows = []
-#     for entry in data:
-#         strike = entry.get("strike_price")
-
-#         # --- Helper function for cleaner code ---
-#         def get_market_data(option_type):
-#             opt = entry.get(option_type) or {}
-#             md = opt.get("market_data") or {}
-#             greeks = opt.get("option_greeks") or {}
-#             return md, greeks
-
-#         ce_md, ce_g = get_market_data("call_options")
-#         pe_md, pe_g = get_market_data("put_options")
-
-#         # Row data structure (Aapke Model ke columns ke hisaab se)
-#         current_sync_time = timezone.now()
-#         rows.append({
-#             "Time": current_sync_time,
-#             "Symbol": symbol_name,
-#             "Expry_Date": expiry_Date,
-#             "Strike_Price": strike,
-#             "Spot_Price": response_data.get("underlying_spot_price", 0), # Spot price add kiya
-            
-#             # CE DATA
-#             "CE_Delta": ce_g.get("delta", 0),
-#             "CE_IV": ce_g.get("iv", 0),
-#             "CE_COI": (ce_md.get("oi", 0) - ce_md.get("prev_oi", 0)) / lot_size,
-#             "CE_OI": ce_md.get("oi", 0) / lot_size,
-#             "CE_Volume": ce_md.get("volume", 0) / lot_size,
-#             "CE_LTP": ce_md.get("ltp", 0),
-#             "CE_CLTP": ce_md.get("ltp", 0) - ce_md.get("close_price", 0),
-
-#             # PE DATA
-#             "PE_Delta": pe_g.get("delta", 0),
-#             "PE_IV": pe_g.get("iv", 0),
-#             "PE_COI": (pe_md.get("oi", 0) - pe_md.get("prev_oi", 0)) / lot_size,
-#             "PE_OI": pe_md.get("oi", 0) / lot_size,
-#             "PE_Volume": pe_md.get("volume", 0) / lot_size,
-#             "PE_LTP": pe_md.get("ltp", 0),
-#             "PE_CLTP": pe_md.get("ltp", 0) - pe_md.get("close_price", 0),
-#         })
-
-#     df = pd.DataFrame(rows)
-    
-#     # Empty columns jo baad mein calculate honge
-#     other_cols = ["CE_RANGE", "CE_COI_percent", "CE_OI_percent", "CE_Volume_percent", 
-#                   "Reversl_Ce", "Reversl_Pe", "PE_Volume_percent", "PE_OI_percent", 
-#                   "PE_COI_percent", "PE_RANGE"]
-    
-#     for col in other_cols:
-#         df[col] = 0.0
-
-#     df = df.sort_values(by="Strike_Price").reset_index(drop=True)
-#     return df
-
-# def calculate_data(symbol, expiry_Date):
-#     # 1. Option chain fetch karein
-#     response_data = get_option_chain(symbol, expiry_Date)
-#     if not response_data or 'data' not in response_data:
-#         return None
-
-#     # Spot Price nikalne ka safe tarika
-#     try:
-#         spot_price = response_data['data'][0].get('underlying_spot_price', 0)
-#     except (IndexError, KeyError):
-#         spot_price = 0
-
-#     # 2. DataFrame mein convert karein
-#     df = data_to_df(symbol, expiry_Date)
-#     if df is None or df.empty:
-#         return None
-
-#     # Column names ko pehle hi underscore mein badal dete hain 
-#     # taaki calculation ke waqt confusion na ho
-#     df.columns = df.columns.str.replace(" ", "_")
-
-#     # 3. Reversal Calculations (Vectorized approach)
-#     # shift(-1) niche wali row se data leta hai, shift(1) upar wali se
-#     df["Reversl_Ce"] = ((df["PE_LTP"] - df["CE_LTP"].shift(-1)) + spot_price).round(2)
-#     df["Reversl_Pe"] = ((df["PE_LTP"].shift(1) - df["CE_LTP"]) + spot_price).round(2)
-
-#     # 4. Range aur Percentage Calculations
-#     ce_oi = df["CE_OI"].replace(0, np.nan)
-#     pe_oi = df["PE_OI"].replace(0, np.nan)
-
-#     df["CE_RANGE"] = ((np.maximum(ce_oi - pe_oi, 0) / ce_oi) * 100).round(2).fillna(0)
-#     df["PE_RANGE"] = ((np.maximum(pe_oi - ce_oi, 0) / pe_oi) * 100).round(2).fillna(0)
-
-#     df["Spot_Price"] = spot_price
-
-#     # Percentage helper function
-#     def pct(col):
-#         maxv = col.max()
-#         return ((col / maxv * 100).round(2)) if maxv > 0 else 0.00
-
-#     # Saare percentage columns update karein
-#     df["CE_OI_percent"] = pct(df["CE_OI"])
-#     df["PE_OI_percent"] = pct(df["PE_OI"])
-#     df["CE_Volume_percent"] = pct(df["CE_Volume"])
-#     df["PE_Volume_percent"] = pct(df["PE_Volume"])
-#     df["CE_COI_percent"] = pct(df["CE_COI"])
-#     df["PE_COI_percent"] = pct(df["PE_COI"])
-
-#     # Final cleanup: NaN values ko 0 kar dein taaki Database reject na kare
-#     df = df.fillna(0)
-
-#     return df
-
-# def sync_option_chain_to_db(request):
-#     """
-#     Ye view function API se data lekar database mein save karta hai.
-#     """
-#     symbol = "NIFTY"
-#     expiry = "2026-02-10" # Aap ise dynamic bhi bana sakte hain
-    
-#     # 1. Data Hasil Karein (Aapka calculate_data function call ho raha hai)
-#     df = calculate_data(symbol, expiry)
-    
-#     if df is None or df.empty:
-#         return HttpResponse("Data fetch nahi ho paya ya khali hai. Token check karein.", status=500)
-
-#     # 2. Database mein purana data clear karna (Optional)
-#     # Agar aap chahte hain ki sirf latest data rahe toh niche wali line uncomment karein:
-#     # OptionChain.objects.all().delete()
-
-#     # 3. DataFrame Rows ko Model Objects mein badlein
-#     option_entries = []
-    
-#     for _, row in df.iterrows():
-#         # String Time ko Python datetime mein badleinge
-#         if isinstance(row['Time'], str):
-#             row_time = datetime.strptime(row['Time'], '%d/%m/%Y %H:%M:%S')
-#         else:
-#             row_time = row['Time']
-
-#         obj = OptionChain(
-#             Time=row_time,
-#             Symbol=row['Symbol'],
-#             expry_date=row['expry_date'],
-#             Strike_Price=row['Strike_Price'],
-#             Spot_Price=row['Spot_Price'],
-            
-#             # CE Data
-#             CE_Delta=row.get('CE_Delta'),
-#             CE_RANGE=row.get('CE_RANGE'),
-#             CE_IV=row.get('CE_IV'),
-#             CE_COI_percent=row.get('CE_COI_percent'),
-#             CE_COI=row.get('CE_COI'),
-#             CE_OI_percent=row.get('CE_OI_percent'),
-#             CE_OI=row.get('CE_OI'),
-#             CE_Volume_percent=row.get('CE_Volume_percent'),
-#             CE_Volume=row.get('CE_Volume'),
-#             CE_CLTP=row.get('CE_CLTP'),
-#             CE_LTP=row.get('CE_LTP'),
-#             Reversl_Ce=row.get('Reversl_Ce'),
-
-#             # PE Data
-#             Reversl_Pe=row.get('Reversl_Pe'),
-#             PE_LTP=row.get('PE_LTP'),
-#             PE_CLTP=row.get('PE_CLTP'),
-#             PE_Volume=row.get('PE_Volume'),
-#             PE_Volume_percent=row.get('PE_Volume_percent'),
-#             PE_OI=row.get('PE_OI'),
-#             PE_OI_percent=row.get('PE_OI_percent'),
-#             PE_COI=row.get('PE_COI'),
-#             PE_COI_percent=row.get('PE_COI_percent'),
-#             PE_IV=row.get('PE_IV'),
-#             PE_RANGE=row.get('PE_RANGE'),
-#             PE_Delta=row.get('PE_Delta'),
-#         )
-#         option_entries.append(obj)
-
-#     # 4. Bulk Create (Tezi se save karne ke liye)
-#     try:
-#         OptionChain.objects.bulk_create(option_entries)
-#         return HttpResponse(f"Shabash! {len(option_entries)} rows successfully save ho gayi hain.")
-#     except Exception as e:
-#         return HttpResponse(f"Database Error: {str(e)}", status=500)
-
-# ==================================================================================
 
 # Dashboard Views Start Here
 def option_chain_dashboard(request):
@@ -452,24 +156,24 @@ def table_update_api(request):
     
     # यह table_partial.html में सिर्फ <tbody> और उसकी Rows होनी चाहिए
     return render(request, 'mystock/table_partial.html', context)
-
-# @never_cache  # यह ब्राउज़र को पुराना पेज दिखाने से रोकेगा
-def dashboard(request):
-    # 'get_or_create' का उपयोग करें ताकि अगर रिकॉर्ड न हो तो बन जाए
-    nifty_obj, _ = SyncControl.objects.get_or_create(name="nifty_loop")
-    others_obj, _ = SyncControl.objects.get_or_create(name="others_loop")
+# 
+@never_cache  # यह ब्राउज़र को पुराना पेज दिखाने से रोकेगा
+# def dashboard(request):
+#     # 'get_or_create' का उपयोग करें ताकि अगर रिकॉर्ड न हो तो बन जाए
+#     nifty_obj, _ = SyncControl.objects.get_or_create(name="nifty_loop")
+#     others_obj, _ = SyncControl.objects.get_or_create(name="others_loop")
     
-    # बाकी डेटा फेच करें
-    data = OptionChain.objects.filter(Symbol="NIFTY").order_by('-Time')[:50]
+#     # बाकी डेटा फेच करें
+#     data = OptionChain.objects.filter(Symbol="NIFTY").order_by('-Time')[:50]
     
-    context = {
-        'data': data,
-        'nifty_active': nifty_obj.is_active,  # यहाँ से HTML को वैल्यू मिलेगी
-        'others_active': others_obj.is_active,
-        'spot': data[0].Spot_Price if data else 0,
-        'latest_time': data[0].Time if data else None,
-    }
-    return render(request, 'dashboard.html', context)
+#     context = {
+#         'data': data,
+#         'nifty_active': nifty_obj.is_active,  # यहाँ से HTML को वैल्यू मिलेगी
+#         'others_active': others_obj.is_active,
+#         'spot': data[0].Spot_Price if data else 0,
+#         'latest_time': data[0].Time if data else None,
+#     }
+#     return render(request, 'dashboard.html', context)
 
 def toggle_sync(request, loop_name):
     if request.method != "POST":
@@ -484,7 +188,7 @@ def toggle_sync(request, loop_name):
         "is_active": ctrl.is_active
     })
 
-from django.db.models import Q
+
 @cache_page(10) 
 def all_stocks_dashboard(request):
     # 1. सब-क्वेरी: सबसे पहले हर सिंबल की बिल्कुल लेटेस्ट ID निकालें
@@ -630,13 +334,6 @@ def trigger_expiry_update(request):
         
     return JsonResponse({"status": "success", "message": "Expiry dates updated successfully!"})
 
-
-
-from django.http import JsonResponse
-import pytz
-from django.utils import timezone
-from .models import OptionChain
-
 # 1. API View (जो सिर्फ डेटा देगा)
 def specific_strike_oi_data(request):
     symbol = request.GET.get('symbol', 'NIFTY')
@@ -679,6 +376,7 @@ def specific_strike_oi_data(request):
     return JsonResponse(response)
 
 # 2. Page View (जो खाली HTML पेज खोलेगा)
+@xframe_options_exempt
 def render_chart_page(request):
     return render(request, 'mystock/oi_chart_js.html', {
         'symbol': request.GET.get('symbol'),
@@ -726,7 +424,8 @@ def specific_strike_coi_data(request):
 
     return JsonResponse(response)
 
-# 2. Page View (जो खाली HTML पेज खोलेगा)
+# 2. अपने चार्ट पेज वाले फंक्शन के ऊपर यह लाइन लिखें
+@xframe_options_exempt
 def render_chart_page_coi(request):
     return render(request, 'mystock/coi_chart_js.html', {
         'symbol': request.GET.get('symbol'),
