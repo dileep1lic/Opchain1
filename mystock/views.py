@@ -685,6 +685,53 @@ def render_chart_page(request):
         'strike': request.GET.get('strike')
     })
 
+# 1. API View (जो सिर्फ COI डेटा देगा)
+def specific_strike_coi_data(request):
+    symbol = request.GET.get('symbol', 'NIFTY')
+    strike_price = request.GET.get('strike')
+
+    if not strike_price:
+        return JsonResponse({"error": "Strike required"}, status=400)
+
+    ist = pytz.timezone('Asia/Kolkata')
+    today = timezone.localdate()
+
+    # डेटा निकालें (सिर्फ जरूरी फील्ड्स)
+    data = list(
+        OptionChain.objects.filter(
+            Symbol=symbol,
+            Strike_Price=strike_price,
+            Time__date=today
+        ).order_by('Time').values(
+            'Time', 'CE_COI', 'PE_COI', 'CE_COI_percent', 'PE_COI_percent'
+        )
+    )
+
+    if not data:
+        return JsonResponse({"error": "No data found"}, status=404)
+
+    # Time Format (HH:MM)
+    times = [
+        timezone.localtime(entry['Time'], ist).strftime("%H:%M")
+        for entry in data
+    ]
+
+    response = {
+        "times": times,
+        "ce_coi": [entry['CE_COI'] for entry in data],
+        "pe_coi": [entry['PE_COI'] for entry in data],
+        "ce_pct": [entry['CE_COI_percent'] for entry in data],
+        "pe_pct": [entry['PE_COI_percent'] for entry in data],
+    }
+
+    return JsonResponse(response)
+
+# 2. Page View (जो खाली HTML पेज खोलेगा)
+def render_chart_page_coi(request):
+    return render(request, 'mystock/coi_chart_js.html', {
+        'symbol': request.GET.get('symbol'),
+        'strike': request.GET.get('strike')
+    })
 
 
 
