@@ -43,7 +43,7 @@ class Command(BaseCommand):
     # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
-    is_trading_hours = lambda self: dt_time(20, 1) <= datetime.now().time() <= dt_time(21, 30)
+    is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(15, 30)
 
     def handle(self, *args, **options):
         logger.info('🚀 Starting High-Speed Async Engine...') 
