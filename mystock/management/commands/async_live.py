@@ -340,8 +340,8 @@ async def get_option_chain_async(session, symbol, expiry_Date, retries=2):
 
 async def calculate_data_async_optimized(session, symbol, expiry_Date):
     """पूरी कैलकुलेशन प्रोसेस"""
-    if symbol == "NIFTY":
-        expiry_Date = '2026-02-17'
+    # if symbol == "NIFTY":
+    #     expiry_Date = '2026-02-17'
     
     response_data = await get_option_chain_async(session, symbol, expiry_Date)
     
