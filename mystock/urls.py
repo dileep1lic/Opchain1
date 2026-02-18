@@ -10,7 +10,7 @@ urlpatterns = [
     path('search-dashboard/', views.stock_search_view, name='search_dashboard'),
     path('update-expiries/', views.trigger_expiry_update, name='update_expiries'),
 
-    path('chart/view/', views.render_chart_page, name='chart_page'), # HTML पेज
+    path('chart/view/oi/', views.render_chart_page, name='chart_page_oi'), # HTML पेज
     path('api/oi-data/', views.specific_strike_oi_data, name='oi_data_api'), # JSON डेटा
     # COI
     path('chart/view/coi/', views.render_chart_page_coi, name='chart_page_coi'), # HTML पेज
