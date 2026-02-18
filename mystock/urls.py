@@ -12,4 +12,7 @@ urlpatterns = [
 
     path('chart/view/', views.render_chart_page, name='chart_page'), # HTML पेज
     path('api/oi-data/', views.specific_strike_oi_data, name='oi_data_api'), # JSON डेटा
+    # COI
+    path('chart/view/coi/', views.render_chart_page_coi, name='chart_page_coi'), # HTML पेज
+    path('api/coi-data/', views.specific_strike_coi_data, name='coi_data_api'), # JSON डेटा
 ]
