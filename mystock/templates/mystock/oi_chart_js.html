@@ -3,7 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <title>OI Analysis</title>
+    
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+
     <style>
         body { margin: 0; padding: 0; background-color: #0f1115; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
         .top-bar { height: 40px; background: #181b21; display: flex; align-items: center; justify-content: center; gap: 10px; border-bottom: 1px solid #333; }
@@ -11,6 +17,11 @@
         .btn { background: #333; border: 1px solid #444; color: #ccc; padding: 5px 15px; font-size: 11px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
         .btn:hover { background: #444; color: white; }
         .btn.active { background: #2962ff; color: white; border-color: #2962ff; }
+        
+        /* Reset button style (Red) */
+        .btn-reset { background: #c62828; color: white; border: 1px solid #b71c1c; margin-left: 10px; }
+        .btn-reset:hover { background: #d32f2f; }
+
         .chart-wrapper { flex-grow: 1; position: relative; width: 100%; height: 100%; padding: 10px; box-sizing: border-box; }
     </style>
 </head>
@@ -21,6 +32,8 @@
         
         <button class="btn active" onclick="switchChart('total')">TOTAL OI</button>
         <button class="btn" onclick="switchChart('percent')">CHANGE %</button>
+
+        <button class="btn btn-reset" onclick="resetZoomChart()">RESET ZOOM</button>
     </div>
 
     <div class="chart-wrapper">
@@ -34,13 +47,11 @@
     const urlParams = new URLSearchParams(window.location.search);
     const symbol = urlParams.get('symbol');
     
-    // Fix 2: JavaScript logic for clean strike
     let strike = urlParams.get('strike');
     let displayStrike = strike ? parseFloat(strike).toFixed(0) : '';
 
     async function fetchData() {
         try {
-            // API call में ओरिजिनल 'strike' ही भेजें (taaki match ho)
             const response = await fetch(`/api/oi-data/?symbol=${symbol}&strike=${strike}`);
             globalData = await response.json();
             
@@ -60,11 +71,11 @@
         if (type === 'total') {
             dataset1 = globalData.ce_oi;
             dataset2 = globalData.pe_oi;
-            title = `Total OI (${displayStrike})`; // Title me clean strike
+            title = `Total OI (${displayStrike})`;
         } else {
             dataset1 = globalData.ce_pct;
             dataset2 = globalData.pe_pct;
-            title = `OI Change % (${displayStrike})`; // Title me clean strike
+            title = `OI Change % (${displayStrike})`;
         }
 
         myChart = new Chart(ctx, {
@@ -103,6 +114,21 @@
                 plugins: {
                     legend: { labels: { color: 'white' } },
                     title: { display: true, text: title, color: 'white', font: { size: 14 } },
+                    
+                    // --- ZOOM SETTINGS START ---
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x', // सिर्फ दाएं-बाएं ड्रैग होगा
+                        },
+                        zoom: {
+                            wheel: { enabled: true }, // माउस व्हील से ज़ूम
+                            pinch: { enabled: true }, // मोबाइल पिंच ज़ूम
+                            mode: 'x', // सिर्फ टाइम एक्सिस ज़ूम होगा
+                        }
+                    },
+                    // --- ZOOM SETTINGS END ---
+
                     tooltip: {
                         backgroundColor: 'rgba(20, 20, 20, 0.9)',
                         titleColor: '#ffc107',
@@ -127,9 +153,21 @@
         });
     }
 
+    // ज़ूम रिसेट करने का फंक्शन
+    window.resetZoomChart = function() {
+        if (myChart) {
+            myChart.resetZoom();
+        }
+    }
+
     window.switchChart = function(mode) {
-        document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
-        event.target.classList.add('active');
+        // सिर्फ डेटा वाले बटन से active क्लास हटाएं, रिसेट बटन से नहीं
+        const buttons = document.querySelectorAll('.btn:not(.btn-reset)');
+        buttons.forEach(b => b.classList.remove('active'));
+        
+        if (!event.target.classList.contains('btn-reset')) {
+            event.target.classList.add('active');
+        }
         drawChart(mode);
     }
 
