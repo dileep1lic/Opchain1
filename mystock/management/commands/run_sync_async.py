@@ -100,25 +100,25 @@ class Command(BaseCommand):
                 # =========================================================
                 # 🧹 CLEANUP: Delete data before 9:15 AM (Today)
                 
-                # अभी का समय लें
-                now = timezone.now()
+                # # अभी का समय लें
+                # now = timezone.now()
                 
-                # Cutoff time को आज सुबह 9:15:00 पर सेट करें
-                cutoff_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
+                # # Cutoff time को आज सुबह 9:15:00 पर सेट करें
+                # cutoff_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
                 
-                print(f"♻️ Cleaning NIFTY data before {cutoff_time}...")
+                # print(f"♻️ Cleaning NIFTY data before {cutoff_time}...")
 
-                # DB Query: 9:15 से कम (lt = less than) वाले सारे रिकॉर्ड्स डिलीट करें
-                await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
+                # # DB Query: 9:15 से कम (lt = less than) वाले सारे रिकॉर्ड्स डिलीट करें
+                # await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
                 try:
                     # =========================================================
                     # 🧹 CLEANUP: Delete data older than 30 MINUTES for NIFTY
-                    # cutoff_time = timezone.now() - timedelta(days=1)
+                    cutoff_time = timezone.now() - timedelta(days=1)
                     
-                    # print(f"♻️ Cleaning NIFTY data older than 30 mins...")
+                    print(f"♻️ Cleaning NIFTY data older than 30 mins...")
 
-                    # # DB Query को sync_to_async में डाला ताकि लूप फास्ट रहे
-                    # await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
+                    # DB Query को sync_to_async में डाला ताकि लूप फास्ट रहे
+                    await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
 
                     df = await calculate_data_async_optimized(session, fixes_sym, expiry)
                     if df is not None and not df.empty:
