@@ -125,16 +125,33 @@ def table_update_api(request):
 
     # Ranking Logic (बिल्कुल सही है)
     metrics = ['CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
-               'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent']
+            'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent']
 
     for metric in metrics:
         ranked = sorted(all_data, key=lambda x: getattr(x, metric) or 0, reverse=True)
         base_class = metric.replace('_percent', '_class')
-        if len(ranked) > 0: setattr(ranked[0], base_class, "bg-green")
-        if len(ranked) > 1 and (getattr(ranked[1], metric) or 0) >= 75: 
-            setattr(ranked[1], base_class, "bg-red")
-        if len(ranked) > 2 and (getattr(ranked[2], metric) or 0) >= 65: 
-            setattr(ranked[2], base_class, "bg-yellow")
+        
+        # रैंक 1 के लिए (हमेशा हरा)
+        if len(ranked) > 0: 
+            setattr(ranked[0], base_class, "bg-green")
+            
+        val_2nd = 0  # रैंक 2 की वैल्यू को यहाँ सेव करेंगे ताकि रैंक 3 में इसका इस्तेमाल कर सकें
+        
+        # रैंक 2 के लिए (लाल या पीला)
+        if len(ranked) > 1:
+            val_2nd = getattr(ranked[1], metric) or 0
+            if val_2nd >= 75: 
+                setattr(ranked[1], base_class, "bg-red")
+            elif 65 <= val_2nd < 75: 
+                setattr(ranked[1], base_class, "bg-yellow")
+                
+        # रैंक 3 के लिए 
+        if len(ranked) > 2:
+            val_3rd = getattr(ranked[2], metric) or 0
+            
+            # नया नियम: रैंक 3 को पीला रंग तभी मिलेगा जब वह खुद 65+ हो और रैंक 2 की वैल्यू 75+ हो
+            if val_3rd >= 65 and val_2nd >= 75: 
+                setattr(ranked[2], base_class, "bg-yellow")
 
     # Filtering & Divider logic (बिल्कुल सही है)
     if all_data:
