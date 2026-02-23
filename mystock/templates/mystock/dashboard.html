@@ -147,47 +147,47 @@
             th { top: 130px; }
         }
 
-        /* Modal Background (Overlay) */
+       /* Modal Background (पारदर्शी ताकि टेबल दिखे) */
         .modal-overlay {
-            display: none; /* शुरू में छुपा रहेगा */
+            display: none;
             position: fixed;
             z-index: 1000;
             left: 0;
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.8); /* पीछे का बैकग्राउंड धुंधला काला */
-            align-items: center;
-            justify-content: center;
+            background-color: transparent; /* काला रंग हटा दिया */
+            pointer-events: none; /* नीचे क्लिक करने की अनुमति देता है */
         }
-
-       /* Modal Box (Center) */
+       /* Modal Box - Drag और Resize दोनों के लिए */
         .modal-content {
             background-color: #181b21;
-
-            /* Position fix (important for close button) */
-            position: relative;
-
-            /* Default Size */
-            width: 40%;
-            height: 80%;
-            min-width: 500px;
-            min-height: 400px;
-
-            /* Border & Shadow */
+            position: absolute; 
+            top: 50px;
+            left: 50px;
+            width: 500px;   /* शुरुआती चौड़ाई */
+            height: 400px;  /* शुरुआती ऊँचाई */
+            
+            /* रिसाइज फीचर */
+            resize: both;      /* दोनों तरफ से छोटा-बड़ा करने के लिए */
+            overflow: hidden;  /* रिसाइज हैंडल दिखने के लिए जरूरी */
+            min-width: 350px;  /* इससे छोटा नहीं होगा */
+            min-height: 300px;
+            
             border-radius: 8px;
             border: 1px solid #444;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-
-            /* Flex Layout */
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
             display: flex;
             flex-direction: column;
+            pointer-events: auto;
+            z-index: 1001;
+        }
 
-            /* Resize */
-            resize: both;
-            overflow: auto;   /* hidden की जगह auto */
-
-            padding-bottom: 15px;
+        /* रिसाइज हैंडल को थोड़ा बड़ा और स्पष्ट बनाने के लिए (Optional) */
+        .modal-content::-webkit-resizer {
+            background-color: #444;
+            border: 3px solid #181b21;
+            outline: 1px solid #777;
         }
 
         /* Close Button (X) */
@@ -208,14 +208,21 @@
             z-index: 10;
         }
 
-        /* Iframe (Chart Loader) */
         .chart-frame {
             width: 100%;
-            flex-grow: 1;
-
+            flex-grow: 1; /* यह चार्ट को पूरे उपलब्ध स्पेस में फैला देगा */
             border: none;
-            border-radius: 4px;
             background-color: #0f1115;
+        }
+        /* ड्रैगिंग हैंडल के लिए ऊपर की पट्टी */
+        .modal-header {
+            padding: 10px;
+            background: #222;
+            cursor: move; /* हाथ का निशान ताकि पता चले कि यह हिल सकता है */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #333;
         }
 
     </style>
@@ -258,27 +265,7 @@
 
 
 
-        <!-- <div class="control-card">
-            <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
-                <div id="nifty-dot" class="status-dot {% if nifty_active %}status-running{% else %}status-stopped{% endif %}"></div>
-                <span class="card-title" style="margin:0;">NIFTY (5s)</span>
-            </div>
-            <button id="nifty-btn" onclick="toggleSync('nifty_loop')" 
-                    class="action-btn {% if nifty_active %}btn-red{% else %}btn-green{% endif %}">
-                {% if nifty_active %}STOP{% else %}START{% endif %}
-            </button>
-        </div>
-        <div class="control-card">
-            <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
-                <div id="others-dot" class="status-dot {% if others_active %}status-running{% else %}status-stopped{% endif %}"></div>
-                <span class="card-title" style="margin:0;">OTHERS</span>
-            </div>
-            <button id="others-btn" onclick="toggleSync('others_loop')" 
-                    class="action-btn {% if others_active %}btn-red{% else %}btn-green{% endif %}">
-                {% if others_active %}STOP{% else %}START{% endif %}
-            </button>
-        </div> -->
-
+     
 
 
     </div>
@@ -288,9 +275,12 @@
     {% include 'mystock/table_partial.html' %}
 </div>
 
-<div id="chartModal" class="modal-overlay" onclick="closeModal(event)">
-    <div class="modal-content">
-        <button class="close-btn" onclick="closeModal(event)">X</button>
+<div id="chartModal" class="modal-overlay">
+    <div id="movableContent" class="modal-content">
+        <div class="modal-header" id="dragHandle">
+            <span style="font-size: 12px; color: #aaa;">DRAG TO MOVE CHART</span>
+            <button class="close-btn" onclick="closeModalDirect()">X</button>
+        </div>
         <iframe id="chartFrame" class="chart-frame" src=""></iframe>
     </div>
 </div>
@@ -381,13 +371,46 @@ function openChart(symbol, strike, type) {
     modal.style.display = 'flex';
 }
 
+// --- Modal Moving Logic ---
+const modalContent = document.getElementById("movableContent");
+const dragHandle = document.getElementById("dragHandle");
+
+let isDragging = false;
+let offset = [0, 0];
+
+dragHandle.addEventListener('mousedown', function(e) {
+    isDragging = true;
+    offset = [
+        modalContent.offsetLeft - e.clientX,
+        modalContent.offsetTop - e.clientY
+    ];
+}, true);
+
+document.addEventListener('mouseup', function() {
+    isDragging = false;
+}, true);
+
+document.addEventListener('mousemove', function(e) {
+    if (isDragging) {
+        modalContent.style.left = (e.clientX + offset[0]) + 'px';
+        modalContent.style.top  = (e.clientY + offset[1]) + 'px';
+    }
+}, true);
+
+// क्लोज बटन के लिए फंक्शन
+function closeModalDirect() {
+    document.getElementById('chartModal').style.display = 'none';
+    document.getElementById('chartFrame').src = '';
+}
+
+// पुरानी closeModal को अपडेट करें (ताकि वह बैकग्राउंड क्लिक पर बंद न हो, क्योंकि अब बैकग्राउंड पारदर्शी है)
 function closeModal(event) {
-    // अगर X बटन दबाया या बाहर क्लिक किया
-    if (event.target.id === 'chartModal' || event.target.className === 'close-btn') {
-        document.getElementById('chartModal').style.display = 'none';
-        document.getElementById('chartFrame').src = ''; // URL हटा दें ताकि वीडियो बंद हो जाए
+    if (event.target.className === 'close-btn') {
+        closeModalDirect();
     }
 }
+
+
 
 setInterval(refreshData, 5000);
 window.onload = scrollToSpot;
