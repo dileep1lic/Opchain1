@@ -394,9 +394,26 @@ async def calculate_data_async_optimized(session, symbol, expiry_Date):
         if df.empty: return None
 
         # Vectorized Calculations
-        df["Reversl_Ce"] = ((df["PE_LTP"] - df["CE_LTP"].shift(-1)) + spot_price).round(2)
-        df["Reversl_Pe"] = ((df["PE_LTP"].shift(1) - df["CE_LTP"]) + spot_price).round(2)
-        
+        # df["Reversl_Ce"] = ((df["PE_LTP"] - df["CE_LTP"].shift(-1)) + spot_price).round(2)
+        # df["Reversl_Pe"] = ((df["PE_LTP"].shift(1) - df["CE_LTP"]) + spot_price).round(2)
+      
+        # पहले पूरी गणना करें (बिना राउंड किए CE और PE दोनों के लिए)
+        calculation_ce = (
+                    ((df["PE_LTP"] - df["CE_LTP"].shift(-1))) / 
+                    ((df["CE_Delta"].shift(-1) - df["PE_Delta"]))
+                    ) + spot_price
+
+        # अब इसे 0.05 के निकटतम गुणज (Multiple) पर राउंड करें
+        df["Reversl_Ce"] = ((calculation_ce / 0.05).round() * 0.05).round(2)
+        # PE के लिए भी यही करें
+        calculation_pe = (
+                    ((df["PE_LTP"].shift(1) - df["CE_LTP"])) / 
+                    ((df["CE_Delta"] - df["PE_Delta"].shift(1)))
+                    ) + spot_price
+        # अब इसे 0.05 के निकटतम गुणज (Multiple) पर राउंड करें
+        df["Reversl_Pe"] = ((calculation_pe / 0.05).round() * 0.05).round(2)
+
+
         ce_oi = df["CE_OI"].replace(0, np.nan)
         pe_oi = df["PE_OI"].replace(0, np.nan)
         df["CE_RANGE"] = ((np.maximum(ce_oi - pe_oi, 0) / ce_oi) * 100).round(2).fillna(0)
