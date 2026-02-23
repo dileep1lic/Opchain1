@@ -161,43 +161,63 @@
             justify-content: center;
         }
 
-        /* Modal Box (Center) */
+       /* Modal Box (Center) */
         .modal-content {
             background-color: #181b21;
-            width: 90%;  /* स्क्रीन का 90% हिस्सा */
-            height: 85%; /* स्क्रीन का 85% हिस्सा */
+
+            /* Position fix (important for close button) */
+            position: relative;
+
+            /* Default Size */
+            width: 40%;
+            height: 80%;
+            min-width: 500px;
+            min-height: 400px;
+
+            /* Border & Shadow */
             border-radius: 8px;
             border: 1px solid #444;
-            position: relative;
             box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+
+            /* Flex Layout */
             display: flex;
             flex-direction: column;
+
+            /* Resize */
+            resize: both;
+            overflow: auto;   /* hidden की जगह auto */
+
+            padding-bottom: 15px;
         }
 
         /* Close Button (X) */
         .close-btn {
             position: absolute;
-            top: -10px;
-            right: -10px;
-            background: #ff1744;
+            top: 8px;
+            right: 8px;
+
+            background: #c62828;
             color: white;
             border: none;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            font-weight: bold;
+            border-radius: 6px;
+
+            width: 28px;
+            height: 28px;
+
             cursor: pointer;
-            z-index: 1001;
-            font-size: 16px;
+            z-index: 10;
         }
 
         /* Iframe (Chart Loader) */
         .chart-frame {
             width: 100%;
-            height: 100%;
+            flex-grow: 1;
+
             border: none;
-            border-radius: 8px;
+            border-radius: 4px;
+            background-color: #0f1115;
         }
+
     </style>
 </head>
 <body>
@@ -238,7 +258,7 @@
 
 
 
-        <!-- <div class="control-card">
+        <div class="control-card">
             <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
                 <div id="nifty-dot" class="status-dot {% if nifty_active %}status-running{% else %}status-stopped{% endif %}"></div>
                 <span class="card-title" style="margin:0;">NIFTY (5s)</span>
@@ -257,7 +277,7 @@
                     class="action-btn {% if others_active %}btn-red{% else %}btn-green{% endif %}">
                 {% if others_active %}STOP{% else %}START{% endif %}
             </button>
-        </div> -->
+        </div>
 
 
 
@@ -274,7 +294,9 @@
         <iframe id="chartFrame" class="chart-frame" src=""></iframe>
     </div>
 </div>
+
 <script>
+// --- Cookie Helper ---
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -290,6 +312,7 @@ function getCookie(name) {
     return cookieValue;
 }
 
+// --- Sync Toggle ---
 function toggleSync(loopName) {
     fetch(`/toggle/${loopName}/`, {
         method: "POST",
@@ -317,6 +340,7 @@ function toggleSync(loopName) {
     .catch(err => console.error("Error:", err));
 }
 
+// --- Refresh Data ---
 function refreshData() {
     fetch('/table-update-url/') 
     .then(response => response.text())
@@ -337,6 +361,32 @@ function refreshData() {
 function scrollToSpot() {
     const spotRow = document.querySelector('.spot-line-row');
     if (spotRow) { spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+}
+
+// --- CHART MODAL FUNCTIONS (Moved here for better performance) ---
+function openChart(symbol, strike, type) {
+    const modal = document.getElementById('chartModal');
+    const iframe = document.getElementById('chartFrame');
+    
+    let url = "";
+    
+    // Logic: अगर type 'oi' है तो OI चार्ट, नहीं तो COI चार्ट
+    if (type === 'oi') {
+        url = `/chart/view/oi/?symbol=${symbol}&strike=${strike}`;
+    } else {
+        url = `/chart/view/coi/?symbol=${symbol}&strike=${strike}`;
+    }
+
+    iframe.src = url;
+    modal.style.display = 'flex';
+}
+
+function closeModal(event) {
+    // अगर X बटन दबाया या बाहर क्लिक किया
+    if (event.target.id === 'chartModal' || event.target.className === 'close-btn') {
+        document.getElementById('chartModal').style.display = 'none';
+        document.getElementById('chartFrame').src = ''; // URL हटा दें ताकि वीडियो बंद हो जाए
+    }
 }
 
 setInterval(refreshData, 5000);
