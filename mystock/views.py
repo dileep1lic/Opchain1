@@ -352,7 +352,7 @@ def trigger_expiry_update(request):
     return JsonResponse({"status": "success", "message": "Expiry dates updated successfully!"})
 
 # 1. API View (जो सिर्फ डेटा देगा)
-def specific_strike_oi_data(request):
+def specific_strike_oi_data1(request):
     symbol = request.GET.get('symbol', 'NIFTY')
     strike_price = request.GET.get('strike')
 
@@ -392,6 +392,88 @@ def specific_strike_oi_data(request):
 
     return JsonResponse(response)
 
+from datetime import time as dt_time
+
+def specific_strike_oi_data(request):
+    symbol = request.GET.get('symbol', 'NIFTY')
+    strike_price = request.GET.get('strike')
+
+    if not strike_price:
+        return JsonResponse({"error": "Strike required"}, status=400)
+
+    ist = pytz.timezone('Asia/Kolkata')
+    today = timezone.localdate()
+
+    # 1. 9:15 से 15:30 तक 1 मिनट के फिक्स टाइम स्लॉट्स बनाना
+    master_times = []
+    current = datetime.combine(today, dt_time(9, 15))
+    end_time = datetime.combine(today, dt_time(15, 30))
+    
+    while current <= end_time:
+        master_times.append(current.strftime("%H:%M"))
+        current += timedelta(minutes=1) # 1 मिनट का अंतराल
+
+    # 2. डेटाबेस से डेटा निकालना
+    db_data = OptionChain.objects.filter(
+        Symbol=symbol,
+        Strike_Price=strike_price,
+        Time__date=today
+    ).order_by('Time')
+
+    if not db_data.exists():
+        return JsonResponse({"error": "No data found"}, status=404)
+
+    # डेटा में उपलब्ध सबसे आखिरी समय (ताकि भविष्य को खाली रखा जा सके)
+    latest_db_time = timezone.localtime(db_data.last().Time, ist).strftime("%H:%M")
+
+    # 3. डेटा को डिक्शनरी में मैप करना
+    data_map = {}
+    for entry in db_data:
+        t_str = timezone.localtime(entry.Time, ist).strftime("%H:%M")
+        data_map[t_str] = {
+            "ce_oi": entry.CE_COI,
+            "pe_oi": entry.PE_OI,
+            "ce_pct": entry.CE_OI_percent, # यहाँ मॉडल के हिसाब से फील्ड नाम चेक कर लें
+            "pe_pct": entry.PE_OI_percent,
+        }
+
+    # 4. Forward Fill Logic (पिछली वैल्यू भरना)
+    ce_oi_list, pe_oi_list, ce_pct_list, pe_pct_list = [], [], [], []
+    
+    last_val = None # पिछली उपलब्ध वैल्यू स्टोर करने के लिए
+    found_first_data = False
+
+    for t in master_times:
+        if t in data_map:
+            # नया डेटा मिला, इसे सेव करें और लिस्ट में डालें
+            last_val = data_map[t]
+            found_first_data = True
+            ce_oi_list.append(last_val["ce_oi"])
+            pe_oi_list.append(last_val["pe_oi"])
+            ce_pct_list.append(last_val["ce_pct"])
+            pe_pct_list.append(last_val["pe_pct"])
+        
+        elif found_first_data and t <= latest_db_time:
+            # बीच में डेटा गायब है, तो पिछली वैल्यू (Last Known) भरें
+            ce_oi_list.append(last_val["ce_oi"])
+            pe_oi_list.append(last_val["pe_oi"])
+            ce_pct_list.append(last_val["ce_pct"])
+            pe_pct_list.append(last_val["pe_pct"])
+        
+        else:
+            # 9:15 से पहले या भविष्य के समय के लिए None भेजें
+            ce_oi_list.append(None)
+            pe_oi_list.append(None)
+            ce_pct_list.append(None)
+            pe_pct_list.append(None)
+
+    return JsonResponse({
+        "times": master_times,
+        "ce_oi": ce_oi_list,
+        "pe_oi": pe_oi_list,
+        "ce_pct": ce_pct_list,
+        "pe_pct": pe_pct_list,
+    })
 # 2. Page View (जो खाली HTML पेज खोलेगा)
 @xframe_options_exempt
 def render_chart_page(request):
@@ -401,7 +483,7 @@ def render_chart_page(request):
     })
 
 # 1. API View (जो सिर्फ COI डेटा देगा)
-def specific_strike_coi_data(request):
+def specific_strike_coi_data1(request):
     symbol = request.GET.get('symbol', 'NIFTY')
     strike_price = request.GET.get('strike')
 
@@ -440,6 +522,89 @@ def specific_strike_coi_data(request):
     }
 
     return JsonResponse(response)
+
+from datetime import time as dt_time
+
+def specific_strike_coi_data(request):
+    symbol = request.GET.get('symbol', 'NIFTY')
+    strike_price = request.GET.get('strike')
+
+    if not strike_price:
+        return JsonResponse({"error": "Strike required"}, status=400)
+
+    ist = pytz.timezone('Asia/Kolkata')
+    today = timezone.localdate()
+
+    # 1. 9:15 से 15:30 तक 1 मिनट के फिक्स टाइम स्लॉट्स बनाना
+    master_times = []
+    current = datetime.combine(today, dt_time(9, 15))
+    end_time = datetime.combine(today, dt_time(15, 30))
+    
+    while current <= end_time:
+        master_times.append(current.strftime("%H:%M"))
+        current += timedelta(minutes=1) # 1 मिनट का अंतराल
+
+    # 2. डेटाबेस से डेटा निकालना
+    db_data = OptionChain.objects.filter(
+        Symbol=symbol,
+        Strike_Price=strike_price,
+        Time__date=today
+    ).order_by('Time')
+
+    if not db_data.exists():
+        return JsonResponse({"error": "No data found"}, status=404)
+
+    # डेटा में उपलब्ध सबसे आखिरी समय (ताकि भविष्य को खाली रखा जा सके)
+    latest_db_time = timezone.localtime(db_data.last().Time, ist).strftime("%H:%M")
+
+    # 3. डेटा को डिक्शनरी में मैप करना
+    data_map = {}
+    for entry in db_data:
+        t_str = timezone.localtime(entry.Time, ist).strftime("%H:%M")
+        data_map[t_str] = {
+            "ce_coi": entry.CE_COI,
+            "pe_coi": entry.PE_COI,
+            "ce_pct": entry.CE_OI_percent, # यहाँ मॉडल के हिसाब से फील्ड नाम चेक कर लें
+            "pe_pct": entry.PE_OI_percent,
+        }
+
+    # 4. Forward Fill Logic (पिछली वैल्यू भरना)
+    ce_coi_list, pe_coi_list, ce_pct_list, pe_pct_list = [], [], [], []
+    
+    last_val = None # पिछली उपलब्ध वैल्यू स्टोर करने के लिए
+    found_first_data = False
+
+    for t in master_times:
+        if t in data_map:
+            # नया डेटा मिला, इसे सेव करें और लिस्ट में डालें
+            last_val = data_map[t]
+            found_first_data = True
+            ce_coi_list.append(last_val["ce_coi"])
+            pe_coi_list.append(last_val["pe_coi"])
+            ce_pct_list.append(last_val["ce_pct"])
+            pe_pct_list.append(last_val["pe_pct"])
+        
+        elif found_first_data and t <= latest_db_time:
+            # बीच में डेटा गायब है, तो पिछली वैल्यू (Last Known) भरें
+            ce_coi_list.append(last_val["ce_coi"])
+            pe_coi_list.append(last_val["pe_coi"])
+            ce_pct_list.append(last_val["ce_pct"])
+            pe_pct_list.append(last_val["pe_pct"])
+        
+        else:
+            # 9:15 से पहले या भविष्य के समय के लिए None भेजें
+            ce_coi_list.append(None)
+            pe_coi_list.append(None)
+            ce_pct_list.append(None)
+            pe_pct_list.append(None)
+
+    return JsonResponse({
+        "times": master_times,
+        "ce_coi": ce_coi_list,
+        "pe_coi": pe_coi_list,
+        "ce_pct": ce_pct_list,
+        "pe_pct": pe_pct_list,
+    })
 
 # 2. अपने चार्ट पेज वाले फंक्शन के ऊपर यह लाइन लिखें
 @xframe_options_exempt
