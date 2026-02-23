@@ -89,33 +89,63 @@ class Command(BaseCommand):
     
 
     async def nifty_loop(self, session, expiry, fixes_sym):
-        """NIFTY Loop - No Changes"""
+        """NIFTY Loop - Optimized Cleanup before Trading Hours"""
+        # यह फ्लैग ट्रैक करेगा कि क्या आज की सफाई पूरी हो गई है
+        cleanup_done_today = None
+
         while True:
             ctrl, _ = await get_control_async(name="nifty_loop")
+            current_now = timezone.now()
+            current_date = current_now.date()
+            
+            # 1. 🧹 PRE-TRADE CLEANUP: सुबह ट्रेडिंग शुरू होने से पहले (जैसे 9:15 AM से पहले)
+            # अगर आज सफाई नहीं हुई है, तो इसे चलाएं
+            if cleanup_done_today != current_date:
+                try:
+                    print(f"🌅 Morning Maintenance starting for {fixes_sym}...")
+                    
+                    # 3 दिन पुराना डेटा डिलीट करें
+                    cutoff_time = current_now - timedelta(days=3)
+                    deleted_count, _ = await sync_to_async(
+                        OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete
+                    )()
+                    
+                    # डेटाबेस इंडेक्स को रिसेट और ऑप्टिमाइज़ करें
+                    from django.db import connection
+                    def optimize_db():
+                        with connection.cursor() as cursor:
+                            cursor.execute("VACUUM ANALYZE mystock_optionchain;")
+                    
+                    await sync_to_async(optimize_db)()
+
+                    # from django.db import connection
+                    # def optimize_db():
+                    #     with connection.cursor() as cursor:
+                    #         # SQLite के लिए:
+                    #         cursor.execute("PRAGMA optimize;")
+                    #         cursor.execute("VACUUM;") 
+                    #         # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
+                    
+                    # await sync_to_async(optimize_db)()
+                    
+                    print(f"✅ Cleanup Complete: {deleted_count} old records removed. DB Optimized.")
+                    cleanup_done_today = current_date # फ्लैग अपडेट करें ताकि दोबारा न चले
+                except Exception as e:
+                    logger.error(f"Pre-Trade Cleanup Error: {e}")
+
+            # 2. 📈 LIVE TRADING LOOP
             if not ctrl.is_active:
                 print(f"⏸️  { fixes_sym} Loop Paused.") 
                 await asyncio.sleep(10); continue
 
             if self.is_trading_hours():
-                # =========================================================
-                # 🧹 CLEANUP: Delete data before 9:15 AM (Today)
-                
-                # # अभी का समय लें
-                # now = timezone.now()
-                
-                # # Cutoff time को आज सुबह 9:15:00 पर सेट करें
-                # cutoff_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
-                
-                # print(f"♻️ Cleaning NIFTY data before {cutoff_time}...")
-
-                # # DB Query: 9:15 से कम (lt = less than) वाले सारे रिकॉर्ड्स डिलीट करें
-                # await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
+           
                 try:
                     # =========================================================
-                    # 🧹 CLEANUP: Delete data older than 30 MINUTES for NIFTY
+                    # 🧹 CLEANUP: Delete data older than 1 Day for NIFTY
                     cutoff_time = timezone.now() - timedelta(days=1)
                     
-                    print(f"♻️ Cleaning NIFTY data older than 30 mins...")
+                    print(f"♻️ Cleaning NIFTY data older than 1 Day...")
 
                     # DB Query को sync_to_async में डाला ताकि लूप फास्ट रहे
                     await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
