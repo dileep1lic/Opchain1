@@ -52,9 +52,9 @@
     <td class="pe-bg pe-col" {% if stock.week_Pe_2 > 75 %}style="color: #00c076 !important; font-weight: bold;"{% endif %}>
         {{ stock.week_Pe_2 }} %
     </td>
-    <td class="ce-bg ce-col">{{ stock.Reversl_Pe_2 }}</td>
-    <td class="ce-bg ce-col dist-text">{{ stock.dist_pe_2 }} %</td>
-    <td class="ce-bg ce-col sl-text">{{ stock.Stop_Loss_Pe2 }}</td>
+    <td class="pe-bg pe-col">{{ stock.Reversl_Pe_2 }}</td>
+    <td class="pe-bg pe-col dist-text">{{ stock.dist_pe_2 }} %</td>
+    <td class="pe-bg pe-col sl-text">{{ stock.Stop_Loss_Pe2 }}</td>
     <td class="pe-bg pe-col fw-bold">{{ stock.Bearish_Risk }}</td>
 </tr>
 {% empty %}
