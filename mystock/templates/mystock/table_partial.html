@@ -24,7 +24,8 @@
             
             <td class="{% if row.CE_COI > 0 %}pos-val{% else %}neg-val{% endif %} {{ row.CE_COI_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %}">
                 <a href="javascript:void(0)" 
-                    onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}')"
+                    onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}', 'coi')"
+                    title="View COI Chart for {{ row.Strike_Price|floatformat:0 }} Strike Price"
                     style="color: inherit; cursor: pointer; text-decoration: underline; text-decoration-style: dotted;">
                         {{ row.CE_COI|floatformat:0 }}
                 </a>
@@ -34,6 +35,7 @@
             <td class="{{ row.CE_OI_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 <a href="javascript:void(0)" 
                     onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}', 'oi')"
+                    title="View OI Chart for {{ row.Strike_Price|floatformat:0 }} Strike Price"
                     style="color: inherit; cursor: pointer; text-decoration: underline; text-decoration-style: dotted;">
                         {{ row.CE_OI|floatformat:0 }}
                 </a>
@@ -47,7 +49,6 @@
 
             <td class="{% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 <strong>{{ row.CE_LTP }}</strong>
-                
                 <span class="pct-text {% if row.CE_CLTP >= 0 %}pos-val{% else %}neg-val{% endif %}">
                     ({{ row.CE_CLTP|floatformat:1 }})
                 </span>
@@ -65,9 +66,9 @@
             <td class="rev-val {% if row.Reversl_Pe > spot %}breakdown{% endif %}">
                 {% if row.Reversl_Pe > spot %}Breakdown{% else %}{{ row.Reversl_Pe |floatformat:2 }}{% endif %}
             </td>
+
             <td class="{% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 <strong>{{ row.PE_LTP }}</strong>
-                
                 <span class="pct-text {% if row.PE_CLTP >= 0 %}pos-val{% else %}neg-val{% endif %}">
                     ({{ row.PE_CLTP|floatformat:1 }})
                 </span>
@@ -81,6 +82,7 @@
             <td class="{{ row.PE_OI_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 <a href="javascript:void(0)" 
                     onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}', 'oi')"
+                    title="View OI Chart for {{ row.Strike_Price|floatformat:0 }} Strike Price"
                     style="color: inherit; cursor: pointer; text-decoration: underline; text-decoration-style: dotted;">
                         {{ row.PE_OI|floatformat:0 }}
                 </a>
@@ -89,7 +91,8 @@
 
             <td class="{% if row.PE_COI > 0 %}pos-val{% else %}neg-val{% endif %} {{ row.PE_COI_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %}">
                 <a href="javascript:void(0)" 
-                    onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}')"
+                    onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}', 'coi')"
+                    title="View COI Chart for {{ row.Strike_Price|floatformat:0 }} Strike Price"
                     style="color: inherit; cursor: pointer; text-decoration: underline; text-decoration-style: dotted;"> 
                         {{ row.PE_COI|floatformat:0 }}
                 </a>
@@ -103,34 +106,5 @@
         {% empty %}
         <tr><td colspan="15">Waiting for live data...</td></tr>
         {% endfor %}
-
-      
-    <!--  चार्ट खोलने का फंक्शन -->
-    <script>
-        // अब यह फंक्शन 3 चीजें लेगा: Symbol, Strike और Type (oi या coi)
-        function openChart(symbol, strike, type) {
-            const modal = document.getElementById('chartModal');
-            const iframe = document.getElementById('chartFrame');
-            
-            let url = "";
-            
-            // चेक करें कि कौन सा चार्ट खोलना है
-            if (type === 'oi') {
-                url = `/chart/view/oi/?symbol=${symbol}&strike=${strike}`;
-            } else {
-                url = `/chart/view/coi/?symbol=${symbol}&strike=${strike}`;
-            }
-
-            iframe.src = url;
-            modal.style.display = 'flex'; // बॉक्स दिखाएं
-        }
-
-        function closeModal(event) {
-            if (event.target.id === 'chartModal' || event.target.className === 'close-btn') {
-                document.getElementById('chartModal').style.display = 'none';
-                document.getElementById('chartFrame').src = ''; 
-            }
-        }
-    </script>
     </tbody>
 </table>
