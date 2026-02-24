@@ -164,3 +164,17 @@ class TempOptionChain(models.Model):
 
     class Meta:
         ordering = ['Strike_Price'] # स्ट्राइक प्राइस के हिसाब से सॉर्टेड
+
+class InstrumentStore(models.Model):
+    symbol = models.CharField(max_length=50, unique=True, db_index=True)
+    instrument_key = models.CharField(max_length=100)
+    lot_size = models.IntegerField(default=1)
+    # हम यहाँ expiry_date को JSONField या String की तरह रख सकते हैं 
+    # क्योंकि एक सिंबल की कई एक्सपायरी होती हैं
+    expiry_dates = models.JSONField(default=list, blank=True) 
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.symbol} ({self.last_updated.date()})"
+
+
