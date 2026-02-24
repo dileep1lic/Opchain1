@@ -11,13 +11,15 @@ from asgiref.sync import sync_to_async
 from datetime import timedelta
 from .async_live import (
     save_sr_async_wrapper,
-    get_smart_expiry,
+    # get_smart_expiry,
     calculate_data_async_optimized,
-    load_master_contract,
-    save_temp_async_wrapper
+    # load_master_contract,
+    save_temp_async_wrapper,
+    update_instrument_store_bulk,
+    get_instrument_from_db
 )
 from .symbol import symbols as all_symbols
-from mystock.models import OptionChain, SyncControl, SupportResistance
+from mystock.models import OptionChain, SyncControl, SupportResistance, InstrumentStore
 
 # Logging setup
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -53,40 +55,73 @@ class Command(BaseCommand):
             logger.warning('Stopped by user.')
 
     # 1. शुरुआत में एक बार लोड करें
-    load_master_contract()
+    # load_master_contract()
     async def main_loop(self):
+        n_key, n_lot, n_expiries = None, 1, []
         other_symbols = [s for s in all_symbols if s != "NIFTY"]
         
-        logger.info('⏳ Fetching Smart Expiries...')
+        # --- 1. SMART UPDATE CHECK ---
+        today = datetime.now().date()
+        store_count = await sync_to_async(InstrumentStore.objects.count)()
         
-        # --- NIFTY Expiry Fetch ---
-        # get_smart_expiry लिस्ट देता है, हमें पहली डेट [0] चाहिए (Current Week)
-        nifty_list = await sync_to_async(get_smart_expiry)("NIFTY")
-        if nifty_list:
-            nifty_expiry = nifty_list[0] # Current Expiry
-        else:
-            logger.error("❌ NIFTY Expiry not found!")
+        if store_count == 0 or datetime.now().weekday() == 2:
+            last_entry = await sync_to_async(InstrumentStore.objects.first)()
+            if not last_entry or last_entry.last_updated != today:
+                logger.info("🔄 Refreshing Instrument Database...")
+                await sync_to_async(update_instrument_store_bulk)()
+
+        # --- 2. FETCH FROM DB ---
+        n_key, n_lot, n_expiries = await get_instrument_from_db("NIFTY")
+        
+        if not n_key or not n_expiries:
+            logger.error("❌ Critical: NIFTY data missing. Engine stopping.")
+            return 
+
+
+        nifty_expiry = n_expiries[0]
+
+        # बाकी का लूप अब सीधे डेटाबेस (InstrumentStore) से डेटा उठाएगा
+        other_symbols = [s for s in all_symbols if s != "NIFTY"]
+        if not n_expiries:
+            logger.error("❌ NIFTY Expiry not found! Make sure update_instrument_store_bulk is working.")
             return
 
-        # --- STOCKS Expiry Fetch ---
-        # किसी भी एक स्टॉक का नाम भेजें, यह DB में 'STOCK_MONTHLY' चेक करेगा
-        stock_list = await sync_to_async(get_smart_expiry)(other_symbols[0])
-        if stock_list:
-            common_expiry = stock_list[0] # Current Monthly Expiry
+        nifty_expiry = n_expiries[0]
+        
+        logger.info('⏳ Fetching Data from InstrumentStore...')
+        
+        # --- 2. NIFTY Data Fetch ---
+        # get_instrument_from_db अब (key, lot, expiry_list) रिटर्न करता है
+        n_key, n_lot, n_expiries = await get_instrument_from_db("NIFTY")
+        
+        if n_expiries and len(n_expiries) > 0:
+            nifty_expiry = n_expiries[0] # Current Week Expiry
         else:
-            logger.error("❌ Stock Expiry not found!")
+            logger.error("❌ NIFTY Expiry not found in Database!")
+            # बैकअप के तौर पर पुराना फंक्शन चला सकते हैं अगर DB खाली हो
+            return
+
+        # --- 3. STOCKS Expiry Fetch ---
+        # हम किसी भी एक स्टॉक (जैसे पहले स्टॉक) की एक्सपायरी लिस्ट उठा लेते हैं
+        s_key, s_lot, s_expiries = await get_instrument_from_db(other_symbols[0])
+        
+        if s_expiries and len(s_expiries) > 0:
+            # स्टॉक्स के लिए आमतौर पर मंथली एक्सपायरी [0] पर ही होती है
+            common_expiry = s_expiries[0] 
+        else:
+            logger.error("❌ Stock Expiry not found in Database!")
             return
 
         logger.info(f"✅ NIFTY Expiry: {nifty_expiry} | Stocks Expiry: {common_expiry}")
 
+        # --- 4. START ASYNC LOOPS ---
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(
-                # NIFTY loop में डायनामिक expiry भेजें
+                # NIFTY loop: डायनामिक एक्सपायरी के साथ
                 self.nifty_loop(session, nifty_expiry, self.FIXED_SYMOL),
-                # Others loop में डायनामिक common_expiry भेजें
+                # Others loop: सभी स्टॉक्स और उनकी कॉमन एक्सपायरी के साथ
                 self.others_sr_loop(session, other_symbols, common_expiry)
             )
-    
 
     async def nifty_loop(self, session, expiry, fixes_sym):
         """NIFTY Loop - Optimized Cleanup before Trading Hours"""
@@ -124,9 +159,9 @@ class Command(BaseCommand):
                     #         # SQLite के लिए:
                     #         cursor.execute("PRAGMA optimize;")
                     #         cursor.execute("VACUUM;") 
-                    #         # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
+                            # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
                     
-                    # await sync_to_async(optimize_db)()
+                    await sync_to_async(optimize_db)()
                     
                     print(f"✅ Cleanup Complete: {deleted_count} old records removed. DB Optimized.")
                     cleanup_done_today = current_date # फ्लैग अपडेट करें ताकि दोबारा न चले
@@ -141,15 +176,6 @@ class Command(BaseCommand):
             if self.is_trading_hours():
            
                 try:
-                    # =========================================================
-                    # 🧹 CLEANUP: Delete data older than 1 Day for NIFTY
-                    cutoff_time = timezone.now() - timedelta(days=1)
-                    
-                    print(f"♻️ Cleaning NIFTY data older than 1 Day...")
-
-                    # DB Query को sync_to_async में डाला ताकि लूप फास्ट रहे
-                    await sync_to_async(OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete)()
-
                     df = await calculate_data_async_optimized(session, fixes_sym, expiry)
                     if df is not None and not df.empty:
                         entries = [OptionChain(
@@ -267,8 +293,8 @@ class Command(BaseCommand):
                 except Exception as e:
                     print(f"Others Loop Error: {e}") 
                 # Full cycle sleep (can adjust this if needed)
-                await asyncio.sleep(180)
+                await asyncio.sleep(60)
             else:
                 print("⏸️  Others Loop Outside Trading Hours.")
-                await asyncio.sleep(5) 
+                await asyncio.sleep(180) 
             
