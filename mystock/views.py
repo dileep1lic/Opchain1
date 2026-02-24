@@ -9,7 +9,7 @@ from django.db.models import OuterRef, Subquery, Q
 from django.views.decorators.cache import never_cache
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.cache import cache_page
-from .management.commands.async_live import get_smart_expiry 
+from .management.commands.async_live import get_instrument_from_db, update_instrument_store_bulk 
 from .symbol import symbols as ALL_SYMBOLS
 from django.views.decorators.clickjacking import xframe_options_exempt
 import pytz
@@ -115,6 +115,11 @@ def table_update_api(request):
     latest_time = latest_entry.Time
     spot_price = latest_entry.Spot_Price
     expiry_date = latest_entry.Expiry_Date
+    # टोटल्स के लिए वेरिएबल्स
+    total_ce_oi = 0
+    total_pe_oi = 0
+    total_ce_coi = 0
+    total_pe_coi = 0
 
     all_data = list(
         OptionChain.objects.filter(
@@ -122,7 +127,7 @@ def table_update_api(request):
             Time__lte=latest_time + timedelta(seconds=1)
         ).order_by('Strike_Price')
     )
-
+    
     # Ranking Logic (बिल्कुल सही है)
     metrics = ['CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
             'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent']
@@ -153,6 +158,13 @@ def table_update_api(request):
             if val_3rd >= 65 and val_2nd >= 75: 
                 setattr(ranked[2], base_class, "bg-yellow")
 
+    # 7. TOTAL OI AND COI CALCULATION (पूरे डेटा का टोटल)
+    if all_data:
+        total_ce_oi = sum(row.CE_OI or 0 for row in all_data)
+        total_pe_oi = sum(row.PE_OI or 0 for row in all_data)
+        total_ce_coi = sum(row.CE_COI or 0 for row in all_data)
+        total_pe_coi = sum(row.PE_COI or 0 for row in all_data)
+
     # Filtering & Divider logic (बिल्कुल सही है)
     if all_data:
         closest_idx = min(range(len(all_data)), key=lambda i: abs(all_data[i].Strike_Price - spot_price))
@@ -169,6 +181,11 @@ def table_update_api(request):
         'latest_time': latest_time,
         'spot': spot_price,
         'expiry_date': expiry_date,
+        # कॉन्टेक्स्ट में पूरे डेटा का टोटल पास कर रहे हैं
+        'total_ce_oi': total_ce_oi,
+        'total_pe_oi': total_pe_oi,
+        'total_ce_coi': total_ce_coi,
+        'total_pe_coi': total_pe_coi,
     }
     
     # यह table_partial.html में सिर्फ <tbody> और उसकी Rows होनी चाहिए
@@ -237,6 +254,8 @@ def all_stocks_dashboard(request):
     
     return render(request, 'mystock/all_stocks.html', context)
 
+from asgiref.sync import async_to_sync
+
 def stock_search_view(request):
     """
     Search view with Smart Expiry Logic and Auto-Refresh support.
@@ -249,8 +268,12 @@ def stock_search_view(request):
     url_expiry = request.GET.get('expiry', '')
 
     # 2. SMART EXPIRY FETCH
-    expiry_list = get_smart_expiry(symbol)
-    
+    # expiry_list = async_to_sync(get_smart_expiry)(symbol)
+    s_key, lot_size, s_expiries = async_to_sync(get_instrument_from_db)(symbol)
+    expiry_list = s_expiries if s_expiries else expiry_list
+    expiry_list.sort()  # एक्सपायरी को सॉर्ट कर दें ताकि UI में भी सॉर्टेड दिखे
+
+
     # 3. EXPIRY SELECTION LOGIC
     if url_expiry and url_expiry in expiry_list:
         selected_expiry = url_expiry
@@ -261,10 +284,8 @@ def stock_search_view(request):
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
     # 5. DATA FETCHING FROM DB (TempOptionChain)
-    # हम सीधे DB से डेटा निकालेंगे जो Background Loop ने सेव किया है
     queryset = TempOptionChain.objects.filter(Symbol=symbol).order_by('Strike_Price')
     
-    # अगर एक्सपायरी सेलेक्टेड है, तो उससे फिल्टर करें
     if selected_expiry:
         queryset = queryset.filter(Expiry_Date=selected_expiry)
 
@@ -274,9 +295,14 @@ def stock_search_view(request):
     latest_time = None
     lot_size = 1
     display_data = []
+    
+    # टोटल्स के लिए वेरिएबल्स
+    total_ce_oi = 0
+    total_pe_oi = 0
+    total_ce_coi = 0
+    total_pe_coi = 0
 
     if latest_data:
-        # बेसिक मेटा-डेटा निकालें (पहले रो से)
         first_row = latest_data[0]
         spot_price = first_row.Spot_Price
         latest_time = first_row.Time
@@ -287,42 +313,41 @@ def stock_search_view(request):
                    'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent']
 
         for metric in metrics:
-            # मेट्रिक के हिसाब से सॉर्ट करें (Descending)
             ranked = sorted(latest_data, key=lambda x: getattr(x, metric) or 0, reverse=True)
             base_class = metric.replace('_percent', '_class')
             
-            # 1st Rank -> Green
             if len(ranked) > 0: 
                 setattr(ranked[0], base_class, "bg-green")
             
-            # 2nd Rank -> Red (Only if value >= 75%)
             if len(ranked) > 1:
                 val2 = getattr(ranked[1], metric) or 0
                 if val2 >= 75: 
                     setattr(ranked[1], base_class, "bg-red")
             
-            # 3rd Rank -> Yellow (Only if value >= 65%)
             if len(ranked) > 2:
                 val3 = getattr(ranked[2], metric) or 0
                 if val3 >= 65: 
                     setattr(ranked[2], base_class, "bg-yellow")
 
-        # 7. WINDOW FILTERING (±15 Strikes around Spot Price)
-        # स्पॉट प्राइस के सबसे करीब वाली स्ट्राइक ढूंढें
+        # 7. TOTAL OI AND COI CALCULATION (पूरे डेटा का टोटल)
+        total_ce_oi = sum(row.CE_OI or 0 for row in latest_data)
+        total_pe_oi = sum(row.PE_OI or 0 for row in latest_data)
+        total_ce_coi = sum(row.CE_COI or 0 for row in latest_data)
+        total_pe_coi = sum(row.PE_COI or 0 for row in latest_data)
+
+        # 8. WINDOW FILTERING (±15 Strikes around Spot Price)
         closest_obj = min(latest_data, key=lambda x: abs(x.Strike_Price - spot_price))
         closest_idx = latest_data.index(closest_obj)
         
-        # रेंज सेट करें (15 ऊपर, 15 नीचे)
         start_idx = max(0, closest_idx - 15)
         end_idx = min(len(latest_data), closest_idx + 16)
         
         display_data = latest_data[start_idx : end_idx]
 
-        # 8. SPOT DIVIDER LOGIC
-        # जहाँ स्ट्राइक प्राइस > स्पॉट प्राइस हो, वहां डिवाइडर मार्क करें
+        # 9. SPOT DIVIDER LOGIC
         for row in display_data:
             if row.Strike_Price > spot_price:
-                row.is_spot_divider = True # Template में इसका इस्तेमाल करें
+                row.is_spot_divider = True 
                 break
     
     context = {
@@ -334,64 +359,27 @@ def stock_search_view(request):
         'Lot_size': lot_size,
         'all_symbols': ALL_SYMBOLS,
         'expiry_list': expiry_list,
+        # कॉन्टेक्स्ट में पूरे डेटा का टोटल पास कर रहे हैं
+        'total_ce_oi': total_ce_oi,
+        'total_pe_oi': total_pe_oi,
+        'total_ce_coi': total_ce_coi,
+        'total_pe_coi': total_pe_coi,
     }
 
-    # अगर AJAX रिक्वेस्ट है (Auto-Refresh) तो सिर्फ टेबल भेजें 
     if is_ajax:
         return render(request, 'mystock/table_partial.html', context)
     
-    # अगर पहली बार पेज लोड हो रहा है
     return render(request, 'mystock/search_dashboard.html', context)
 
 def trigger_expiry_update(request):
-    symbols_to_update = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX","RELIANCE"]
+    # symbols_to_update = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX","RELIANCE"]
     
-    for symbol in symbols_to_update:
-        get_smart_expiry(symbol)
+    # for symbol in symbols_to_update:
+    update_instrument_store_bulk()
         
     return JsonResponse({"status": "success", "message": "Expiry dates updated successfully!"})
 
 # 1. API View (जो सिर्फ डेटा देगा)
-def specific_strike_oi_data1(request):
-    symbol = request.GET.get('symbol', 'NIFTY')
-    strike_price = request.GET.get('strike')
-
-    if not strike_price:
-        return JsonResponse({"error": "Strike required"}, status=400)
-
-    ist = pytz.timezone('Asia/Kolkata')
-    today = timezone.localdate()
-
-    # डेटा निकालें (सिर्फ जरूरी फील्ड्स)
-    data = list(
-        OptionChain.objects.filter(
-            Symbol=symbol,
-            Strike_Price=strike_price,
-            Time__date=today
-        ).order_by('Time').values(
-            'Time', 'CE_OI', 'PE_OI', 'CE_OI_percent', 'PE_OI_percent'
-        )
-    )
-
-    if not data:
-        return JsonResponse({"error": "No data found"}, status=404)
-
-    # Time Format (HH:MM)
-    times = [
-        timezone.localtime(entry['Time'], ist).strftime("%H:%M")
-        for entry in data
-    ]
-
-    response = {
-        "times": times,
-        "ce_oi": [entry['CE_OI'] for entry in data],
-        "pe_oi": [entry['PE_OI'] for entry in data],
-        "ce_pct": [entry['CE_OI_percent'] for entry in data],
-        "pe_pct": [entry['PE_OI_percent'] for entry in data],
-    }
-
-    return JsonResponse(response)
-
 from datetime import time as dt_time
 
 def specific_strike_oi_data(request):
@@ -482,49 +470,7 @@ def render_chart_page(request):
         'strike': request.GET.get('strike')
     })
 
-# 1. API View (जो सिर्फ COI डेटा देगा)
-def specific_strike_coi_data1(request):
-    symbol = request.GET.get('symbol', 'NIFTY')
-    strike_price = request.GET.get('strike')
-
-    if not strike_price:
-        return JsonResponse({"error": "Strike required"}, status=400)
-
-    ist = pytz.timezone('Asia/Kolkata')
-    today = timezone.localdate()
-
-    # डेटा निकालें (सिर्फ जरूरी फील्ड्स)
-    data = list(
-        OptionChain.objects.filter(
-            Symbol=symbol,
-            Strike_Price=strike_price,
-            Time__date=today
-        ).order_by('Time').values(
-            'Time', 'CE_COI', 'PE_COI', 'CE_COI_percent', 'PE_COI_percent'
-        )
-    )
-
-    if not data:
-        return JsonResponse({"error": "No data found"}, status=404)
-
-    # Time Format (HH:MM)
-    times = [
-        timezone.localtime(entry['Time'], ist).strftime("%H:%M")
-        for entry in data
-    ]
-
-    response = {
-        "times": times,
-        "ce_coi": [entry['CE_COI'] for entry in data],
-        "pe_coi": [entry['PE_COI'] for entry in data],
-        "ce_pct": [entry['CE_COI_percent'] for entry in data],
-        "pe_pct": [entry['PE_COI_percent'] for entry in data],
-    }
-
-    return JsonResponse(response)
-
-from datetime import time as dt_time
-
+# 1. API View (जो सिर्फ डेटा देगा)
 def specific_strike_coi_data(request):
     symbol = request.GET.get('symbol', 'NIFTY')
     strike_price = request.GET.get('strike')
