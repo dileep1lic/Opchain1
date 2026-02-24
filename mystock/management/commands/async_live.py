@@ -4,260 +4,209 @@ import aiohttp
 import asyncio
 import pandas as pd
 from django.utils import timezone
-from mystock.credentials import access_token  # सीधे क्रेडेंशियल्स से लें
+from mystock.credentials1 import access_token  # सीधे क्रेडेंशियल्स से लें
 from .symbol import symbols as SYMBOLS        # सिंबल लिस्ट के लिए
 from asgiref.sync import sync_to_async
 import numpy as np
-from mystock.models import SupportResistance, ExpiryCache 
+from mystock.models import SupportResistance, ExpiryCache, InstrumentStore , TempOptionChain
 import requests
-from datetime import timedelta
+from datetime import timedelta, datetime
+import os
+import gzip
+from .symbol import symbols as ALL_SYMBOLS
+from django.db import transaction
+import re
 
 
 logger = logging.getLogger(__name__)
 
-def get_instrument_key(symbol):
+@sync_to_async
+def get_instrument_from_db(symbol):
+    """डेटाबेस से इंस्ट्रूमेंट की जानकारी लेता है"""
+    try:
+        # from .models import InstrumentStore
+        obj = InstrumentStore.objects.get(symbol=symbol)
+        # (key, lot_size, expiry_list) रिटर्न करें
+        return obj.instrument_key, obj.lot_size, obj.expiry_dates
+    except Exception:
+        return None, 1, []
+
+def update_instrument_store_bulk1():
+    """बिना API के सीधे से Key, Lot और Expiry निकालना"""
+    print("🚀 Starting Bulk Update using API...")
+    
+    url = "https://assets.upstox.com/market-quote/instruments/exchange/complete.csv.gz"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    try:
+        # फाइल लोड करें
+        df_master = pd.read_csv(url, compression='gzip', storage_options=headers)
+        df_master['tradingsymbol'] = df_master['tradingsymbol'].astype(str).str.strip()
+        
+        success_count = 0
+        from mystock.models import InstrumentStore
+        from .symbol import symbols as ALL_SYMBOLS
+
+        for sym in ALL_SYMBOLS:
+            try:
+                # 1. लोट साइज और एक्सपायरी के लिए डेरिवेटिव्स ढूंढें
+                # हम उन सभी रो को देखेंगे जो इस सिंबल से शुरू होती हैं और F&O में हैं
+                deriv_rows = df_master[
+                    (df_master['tradingsymbol'].str.startswith(sym)) & 
+                    (df_master['instrument_type'].isin(['OPTSTK', 'FUTSTK', 'OPTIDX', 'FUTIDX']))
+                ]
+
+                if not deriv_rows.empty:
+                    # सही लोट साइज लें
+                    lot = int(deriv_rows.dropna(subset=['lot_size']).iloc[0]['lot_size'])
+                    
+                    # फाइल से ही सभी यूनिक एक्सपायरी डेट्स निकालें और सॉर्ट करें
+                    all_expiries = sorted(deriv_rows['expiry'].dropna().unique().tolist())
+                    
+                    # 2. इन्स्ट्रुमेंट की (Key) के लिए मेन सिंबल (Underlying) ढूंढें
+                    ikey_row = df_master[
+                        (df_master['tradingsymbol'] == sym) & 
+                        (df_master['exchange'].isin(['NSE_INDEX', 'NSE_EQ']))
+                    ].iloc[0]
+                    ikey = ikey_row['instrument_key']
+                    
+                    # DB में सेव करें
+                    InstrumentStore.objects.update_or_create(
+                        symbol=sym,
+                        defaults={
+                            'instrument_key': ikey,
+                            'lot_size': lot,
+                            'expiry_dates': all_expiries
+                        }
+                    )
+                    success_count += 1
+                    print(f"✅ {sym}: Key={ikey}, Lot={lot}, Expiries={len(all_expiries)}")
+
+            except Exception as e:
+                continue
+
+        print(f"🏁 Bulk Update Finished! Total: {success_count} symbols.")
+
+    except Exception as e:
+        print(f"🔥 Error: {e}")
+
+def update_instrument_store_bulk():
     """
-    सिंबल के लिए Instrument Key निकालता है।
-    Indices के लिए फिक्स्ड मैप और Stocks के लिए CSV (instrument_df) का उपयोग करता है।
+    Ultra-Fast Vectorized Instrument Updater
+    - Single-pass filtering
+    - GroupBy aggregation
+    - Dynamic Regex for accurate symbol matching
+    - Bulk DB update
     """
-    global instrument_df
-    
-    # 1. Indices के लिए हार्डकोडेड मैपिंग (यह सबसे सुरक्षित और तेज़ है)
-    indices_map = {
-        'NIFTY': 'NSE_INDEX|Nifty 50',
-        'BANKNIFTY': 'NSE_INDEX|Nifty Bank',
-        'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
-        'MIDCPNIFTY': 'NSE_INDEX|NIFTY MID SELECT',
-        'SAMMAAN': 'NSE_EQ|INE148I01020',
-        'M&M': 'NSE_EQ|INE101A01026',  
-        'L&T': 'NSE_EQ|INE018A01030',
-    }
-    
-    if symbol in indices_map:
-        return indices_map[symbol]
 
-    # 2. अगर फाइल लोड नहीं है, तो लोड करें
-    if instrument_df is None:
-        load_master_contract()
+    print("🚀 Starting Ultra-Fast Bulk Update...")
+
+    url = "https://assets.upstox.com/market-quote/instruments/exchange/complete.csv.gz"
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
     try:
-        # 3. Stocks के लिए 'NSE_EQ' (Equity) सेगमेंट में ढूंढें
-        # Option Chain के लिए हमें Underlying (Equity) की Key चाहिए होती है।
-        
-        # फिल्टर: ट्रेडिंग सिंबल मैच हो और एक्सचेंज NSE_EQ हो
-        stock_row = instrument_df[
-            (instrument_df['tradingsymbol'] == symbol) & 
-            (instrument_df['exchange'] == 'NSE_EQ')
-        ]
+        # ========= LOAD MASTER =========
+        df = pd.read_csv(url, compression='gzip', storage_options=headers)
 
-        if not stock_row.empty:
-            return stock_row.iloc[0]['instrument_key']
+        df['tradingsymbol'] = df['tradingsymbol'].astype(str).str.strip()
+        df['name'] = df['name'].astype(str).str.strip()
+
+        symbols_set = set(ALL_SYMBOLS)
+
+        # ========= DERIVATIVE FILTER =========
+        deriv_df = df[
+            (df['instrument_type'].isin(['OPTSTK', 'FUTSTK', 'OPTIDX', 'FUTIDX']))
+        ].copy()
+
+        # 🔥 NEW LOGIC: Dynamic Regex Based on ALL_SYMBOLS
+        # 1. सिंबल्स को लंबाई के हिसाब से घटते क्रम में सॉर्ट करें (ताकि 'BAJAJFINSV' पहले मैच हो, 'BAJAJ' बाद में)
+        # 2. re.escape का इस्तेमाल करें ताकि 'M&M' का '&' सही से हैंडल हो सके
+        sorted_symbols = sorted([re.escape(sym) for sym in symbols_set], key=len, reverse=True)
+        pattern = r'^(' + '|'.join(sorted_symbols) + r')'
         
-        # 4. अगर NSE_EQ में नहीं मिला, तो BSE_EQ या किसी और में ढूंढें (Fallback)
-        fallback_row = instrument_df[instrument_df['tradingsymbol'] == symbol]
-        if not fallback_row.empty:
-            return fallback_row.iloc[0]['instrument_key']
+        # 0th index का ग्रुप निकालें
+        deriv_df['base_symbol'] = deriv_df['tradingsymbol'].str.extract(pattern)[0]
+
+        # जो बेस सिंबल लिस्ट में हैं, सिर्फ उन्हें रखें
+        deriv_df = deriv_df[deriv_df['base_symbol'].notna()]
+
+        # ========= GROUPBY (VECTOR AGGREGATION) =========
+        grouped = deriv_df.groupby('base_symbol').agg({
+            'lot_size': 'first',
+            'expiry': lambda x: sorted(x.dropna().unique().tolist())
+        }).reset_index()
+
+        grouped.rename(columns={'base_symbol': 'symbol'}, inplace=True)
+
+        # ========= UNDERLYING KEYS (ONE TIME FILTER) =========
+        underlying_df = df[
+            (df['tradingsymbol'].isin(symbols_set)) &
+            (df['exchange'].isin(['NSE_INDEX', 'NSE_EQ']))
+        ][['tradingsymbol', 'instrument_key']]
+
+        underlying_df.rename(columns={'tradingsymbol': 'symbol'}, inplace=True)
+
+        # ========= MERGE =========
+        final_df = grouped.merge(underlying_df, on='symbol', how='inner')
+
+        if final_df.empty:
+            print("❌ No matching underlying instruments found.")
+            return
+
+        # ========= BULK DATABASE UPDATE =========
+        existing_objs = {
+            obj.symbol: obj
+            for obj in InstrumentStore.objects.filter(symbol__in=final_df['symbol'])
+        }
+
+        to_create = []
+        to_update = []
+        now = timezone.now()
+
+        for _, row in final_df.iterrows():
+            sym = row['symbol']
+
+            if sym in existing_objs:
+                obj = existing_objs[sym]
+                obj.instrument_key = row['instrument_key']
+                obj.lot_size = int(row['lot_size'])
+                obj.expiry_dates = row['expiry']
+                obj.last_updated = now
+                
+                # अगर आपके मॉडल में 'updated_at' फील्ड है, तभी इसे लिखें
+                # obj.last_updated  = now 
+                
+                to_update.append(obj)
+            else:
+                to_create.append(
+                    InstrumentStore(
+                        symbol=sym,
+                        instrument_key=row['instrument_key'],
+                        lot_size=int(row['lot_size']),
+                        expiry_dates=row['expiry']
+                    )
+                )
+
+        with transaction.atomic():
+            if to_create:
+                InstrumentStore.objects.bulk_create(to_create, batch_size=100)
+
+            if to_update:
+                # 🔥 FIX: अगर मॉडल में updated_at है, तो उसे इस लिस्ट में जोड़ें
+                # update_fields = ['instrument_key', 'lot_size', 'expiry_dates']
+                update_fields = ['instrument_key', 'lot_size', 'expiry_dates', 'last_updated']
+                
+                InstrumentStore.objects.bulk_update(
+                    to_update,
+                    update_fields,
+                    batch_size=100
+                )
+
+        print(f"🏁 Finished! Created: {len(to_create)}, Updated: {len(to_update)}")
+        print("Total symbols matched:", len(final_df))
 
     except Exception as e:
-        print(f"❌ Key Error for {symbol}: {e}")
-
-    # अगर कुछ नहीं मिला
-    return None
-
-def get_Name_Lot_size(symbol):
-    key = get_instrument_key(symbol)
-    if not key:
-        return None, None
-
-    url = "https://api.upstox.com/v2/option/contract"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {access_token}'
-    }
-
-    try:
-        # Using requests.get instead of undefined safe_get
-        res = requests.get(
-            url,
-            headers=headers,
-            params={'instrument_key': key},
-            timeout=10
-        )
-        response = res.json() if res.status_code == 200 else None
-
-        # Agar response None hai ya data nahi mila
-        if not response or "data" not in response or not response["data"]:
-            print(f"⚠ No contract data found for {symbol}")
-            return None, None
-
-        # Pehla instrument lein (usually index ya stock contract)
-        contract_data = response["data"][0]
-        
-        underlying = contract_data.get("underlying_symbol")
-        lot_size = contract_data.get("lot_size")
-
-        return underlying, lot_size
-
-    except Exception as e:
-        print(f"⚠ Lot size fetch failed for {symbol}: {str(e)}")
-        return None, None
-
-
-# ग्लोबल वेरिएबल ताकि फाइल एक ही बार लोड हो
-instrument_df = None
-
-def get_Name_Lot_size_Fast(symbol):
-    """F&O लॉट साइज को प्राथमिकता देने वाला फ़ंक्शन"""
-    global instrument_df
-    if instrument_df is None:
-        load_master_contract()
-
-    try:
-        # 1. सबसे पहले डेरिवेटिव्स (Options/Futures) में ढूंढें 
-        # ताकि सही लॉट साइज (जैसे 3750, 71475) मिले
-        derivatives = instrument_df[
-            (instrument_df['tradingsymbol'].str.startswith(symbol, na=False)) & 
-            (instrument_df['instrument_type'].isin(['OPTSTK', 'FUTSTK', 'OPTIDX', 'FUTIDX']))
-        ]
-
-        if not derivatives.empty:
-            # पहली वैलिड रो चुनें जहाँ लॉट साइज हो
-            row = derivatives.dropna(subset=['lot_size']).iloc[0]
-            name = row['name']
-            lot_size = int(row['lot_size'])
-            return name, lot_size
-
-        # 2. अगर डेरिवेटिव नहीं मिला, तो कैश (EQUITY) में ढूंढें
-        exact_match = instrument_df[instrument_df['tradingsymbol'] == symbol]
-        if not exact_match.empty:
-            row = exact_match.iloc[0]
-            name = row.get('name', symbol)
-            lot_size = int(row.get('lot_size', 1)) if pd.notna(row.get('lot_size')) else 1
-            return name, lot_size
-
-    except Exception as e:
-        # अगर कुछ गड़बड़ हो तो डिफ़ॉल्ट वैल्यू भेजें
-        pass
-
-    return symbol, 1
-
-import os
-
-def load_master_contract():
-    global instrument_df
-    if instrument_df is not None:
-        return
-
-    file_path = 'complete.csv'
-    
-    # अगर फाइल पुरानी है या नहीं है, तो डाउनलोड करें
-    # (आप चाहें तो इसे रोज़ एक बार डाउनलोड करने का लॉजिक लगा सकते हैं)
-    if not os.path.exists(file_path):
-        print("📥 Downloading latest master contract...")
-        url = "https://assets.upstox.com/feed/instruments/nse-eq.csv.gz" 
-        # नोट: हम सीधे NSE Equity ले रहे हैं ताकि फाइल छोटी रहे और तेज़ चले
-        # अगर आपको पूरा चाहिए तो: https://assets.upstox.com/feed/instruments/complete.csv.gz
-        
-        # यहाँ हम complete.csv ही यूज़ करेंगे जैसा आपका कोड है
-        url = "https://assets.upstox.com/feed/instruments/complete.csv.gz"
-        
-        response = requests.get(url)
-        with open(file_path, 'wb') as f:
-            f.write(response.content)
-        print("✅ Download Complete!")
-
-    try:
-        # फाइल लोड करें (Pandas gzip को खुद संभाल लेता है अगर एक्सटेंशन .gz हो, 
-        # लेकिन अगर आपने unzip करके .csv सेव की है तो ये कोड है)
-        instrument_df = pd.read_csv(file_path)
-        
-        # कॉलम के नाम साफ़ करें और स्ट्रिंग बनाएं
-        instrument_df['tradingsymbol'] = instrument_df['tradingsymbol'].astype(str).str.strip()
-        instrument_df['exchange'] = instrument_df['exchange'].astype(str).str.strip()
-        
-        print(f"✅ Master File Loaded! Total Instruments: {len(instrument_df)}")
-    except Exception as e:
-        print(f"❌ File Load Error: {e}")
-
-# ---------------------------------------------------------
-# NEW SMART EXPIRY LOGIC START
-# ---------------------------------------------------------
-
-def get_all_expiries_from_api(symbol):
-    """API से सभी Expiry Dates निकालकर सॉर्टेड लिस्ट देता है"""
-    try:
-        key = get_instrument_key(symbol)
-        if not key: return []
-
-        url = "https://api.upstox.com/v2/option/contract"
-        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
-        
-        # API Call
-        res = requests.get(url, headers=headers, params={"instrument_key": key}, timeout=10).json()
-        
-        if "data" in res and res["data"]:
-            # सारी डेट्स निकालें
-            all_dates = [item["expiry"] for item in res["data"]]
-            # डुप्लिकेट हटाकर सॉर्ट करें
-            sorted_expiries = sorted(list(set(all_dates)))
-            return sorted_expiries
-            
-    except Exception as e:
-        logger.error(f"Expiry API fetch fail for {symbol}: {e}")
-    
-    return []
-
-def get_storage_key(symbol):
-    """तय करता है कि DB में किस नाम से सेव करना है"""
-    indices = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
-    if symbol in indices:
-        return symbol
-    else:
-        return "STOCK_MONTHLY" # सभी स्टॉक्स के लिए एक ही की (Key)
-
-def get_smart_expiry(symbol):
-    """
-    1. DB चेक करता है (Smart Key के साथ)
-    2. अगर नहीं मिलता तो API कॉल करता है
-    3. लिस्ट रिटर्न करता है (e.g., ['2026-02-05', '2026-02-12'])
-    """
-    db_key = get_storage_key(symbol)
-    today_str = str(timezone.now().date())
-
-    # 1. DB Check
-    try:
-        cache_entry = ExpiryCache.objects.get(symbol=db_key)
-        
-        # अगर डेटा आज का है और लिस्ट खाली नहीं है
-        if cache_entry.is_data_fresh() and cache_entry.expiries:
-            # चेक करें कि पहली एक्सपायरी बीत तो नहीं गई
-            if cache_entry.expiries[0] >= today_str:
-                # logger.info(f"✅ Found in DB: {db_key} (for {symbol})")
-                return cache_entry.expiries
-    except ExpiryCache.DoesNotExist:
-        pass
-
-    # 2. API Fetch (अगर DB में नहीं मिला)
-    logger.info(f"🔄 Fetching fresh Expiry from API for {symbol} ({db_key})...")
-    
-    # अगर हमें STOCK_MONTHLY चाहिए, तो हम API को किसी एक स्टॉक का नाम देंगे (जैसे RELIANCE)
-    # ताकि हमें सही मंथली डेट्स मिलें।
-    api_symbol = symbol
-    if db_key == "STOCK_MONTHLY" and symbol == "STOCK_MONTHLY":
-        api_symbol = "RELIANCE" 
-    
-    fresh_list = get_all_expiries_from_api(api_symbol)
-
-    if fresh_list:
-        # 3. Save to DB (update_or_create सबसे बेस्ट है)
-        ExpiryCache.objects.update_or_create(
-            symbol=db_key,
-            defaults={'expiries': fresh_list} # last_updated ऑटो उपडेट हो जायेगा
-        )
-        return fresh_list
-    
-    return []
-
+        print(f"🔥 Error: {e}")
 
 import json  # Ensure json is imported at the top✅ फाइल सफलतापूर्वक लोड हो गई! कुल स्टॉक्स: 205312
 
@@ -272,8 +221,9 @@ async def get_option_chain_async(session, symbol, expiry_Date, retries=2):
     - 500-503: Server Issue (Retry)
     """
 
-    # 1. Basic Checks
-    key = get_instrument_key(symbol)
+    # 1. Basic Checksawait get_instrument_from_db(other_symbols[0])
+    s_key, lot_size, s_expiries = await get_instrument_from_db(symbol)
+    key = s_key
     if not key:
         logger.error(f"❌ Key Missing for {symbol}")
         return None
@@ -353,8 +303,9 @@ async def calculate_data_async_optimized(session, symbol, expiry_Date):
     try:
         data_list = response_data['data']
         spot_price = response_data.get('underlying_spot_price') or data_list[0].get('underlying_spot_price', 0)
-        
-        _, lot_size = get_Name_Lot_size_Fast(symbol)
+        # s_key, lot_size, s_expiries = get_instrument_from_db(symbol)
+        s_key, lot_size, s_expiries = await get_instrument_from_db(symbol)
+        # _, lot_size = get_Name_Lot_size_Fast(symbol)
 
         lot_size = lot_size  if lot_size and lot_size > 0 else 1
   
@@ -496,7 +447,6 @@ def build_pe_ce_logic(df):
             
     return result
 
-
 def save_top2_support_resistance(df, symbol):
     
     try:
@@ -617,8 +567,7 @@ def save_top2_support_resistance(df, symbol):
         print(f"Error saving DB for {symbol}: {e}")
         return False
 
-from mystock.models import SupportResistance, ExpiryCache, TempOptionChain  # TempOptionChain add kiya
-
+  # TempOptionChain add kiya
 
 def save_full_temp_chain(df, symbol):
     """
