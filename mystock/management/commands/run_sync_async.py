@@ -293,7 +293,7 @@ class Command(BaseCommand):
                 except Exception as e:
                     print(f"Others Loop Error: {e}") 
                 # Full cycle sleep (can adjust this if needed)
-                await asyncio.sleep(60)
+                await asyncio.sleep(180)
             else:
                 print("⏸️  Others Loop Outside Trading Hours.")
                 await asyncio.sleep(180) 
