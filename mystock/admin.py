@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain
+from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, InstrumentStore
 
 # 1. OptionChain Model
 @admin.register(OptionChain)
@@ -28,3 +28,8 @@ class SyncControlAdmin(admin.ModelAdmin):
 @admin.register(TempOptionChain)
 class TempOptionChainAdmin(admin.ModelAdmin):
     list_display = ('Symbol', 'Strike_Price', 'Time')
+
+# 5. Instrument Store (Optional)
+@admin.register(InstrumentStore)
+class InstrumentStoreAdmin(admin.ModelAdmin):
+    list_display = ('Symbol', 'Instrument_Type', 'Expiry_Date')
