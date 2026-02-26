@@ -13,7 +13,7 @@ from .async_live import (
     save_sr_async_wrapper,
     # get_smart_expiry,
     calculate_data_async_optimized,
-    # load_master_contract,
+    save_live_sr_data_async_wrapper,
     save_temp_async_wrapper,
     update_instrument_store_bulk,
     get_instrument_from_db
@@ -159,7 +159,7 @@ class Command(BaseCommand):
                     #         # SQLite के लिए:
                     #         cursor.execute("PRAGMA optimize;")
                     #         cursor.execute("VACUUM;") 
-                            # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
+                    #         # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
                     
                     await sync_to_async(optimize_db)()
                     
@@ -214,6 +214,8 @@ class Command(BaseCommand):
                         ) for _, row in df.iterrows()]
                         await bulk_create_async(entries)
                         print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
+                        # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
+                        await save_live_sr_data_async_wrapper(df, fixes_sym)
                 except Exception as e:
                     logger.error(f"NIFTY Loop Error: {e}")
             else:
@@ -296,5 +298,5 @@ class Command(BaseCommand):
                 await asyncio.sleep(180)
             else:
                 print("⏸️  Others Loop Outside Trading Hours.")
-                await asyncio.sleep(180) 
+                await asyncio.sleep(60) 
             
