@@ -305,7 +305,8 @@ async def calculate_data_async_optimized(session, symbol, expiry_Date):
         spot_price = response_data.get('underlying_spot_price') or data_list[0].get('underlying_spot_price', 0)
         # s_key, lot_size, s_expiries = get_instrument_from_db(symbol)
         s_key, lot_size, s_expiries = await get_instrument_from_db(symbol)
-        # _, lot_size = get_Name_Lot_size_Fast(symbol)
+        
+        # print(f"📊 {symbol} - Spot: {spot_price}, Lot: {lot_size}, Expiry: {expiry_Date}, Data Points: {len(data_list)}")
 
         lot_size = lot_size  if lot_size and lot_size > 0 else 1
   
@@ -636,7 +637,7 @@ def save_temp_async_wrapper(df, symbol):
 
 from mystock.models import LiveSRData  # फाइल के टॉप पर होना चाहिए
 
-def calculate_final_sr(oi_strike, oi_status, vol_strike, vol_status, option_type):
+def calculate_final_sr1(oi_strike, oi_status, vol_strike, vol_status, option_type):
     """
     यह फंक्शन आपके नियमों के अनुसार फाइनल Support या Resistance और उसका Status निकाल कर देगा।
     """
@@ -680,19 +681,98 @@ def calculate_final_sr(oi_strike, oi_status, vol_strike, vol_status, option_type
             # Resistance (CE): दोनों में जो छोटी स्ट्राइक है, उसका माना जाएगा
             if oi_strike < vol_strike:
                 final_strike = oi_strike
-                final_status = "OI" + oi_status
+                final_status = "OI " + oi_status
             else:
                 final_strike = vol_strike
-                final_status = "Vol" + vol_status
+                final_status = "Vol " + vol_status
                 
         elif option_type == "PE":
             # Support (PE): दोनों में जो बड़ी स्ट्राइक (स्पॉट के ज्यादा पास) है, उसका माना जाएगा
             if oi_strike > vol_strike:
                 final_strike = oi_strike
-                final_status = "OI" + oi_status
+                final_status = "OI " + oi_status
             else:
                 final_strike = vol_strike
-                final_status = "Vol" + vol_status
+                final_status = "Vol " + vol_status
+
+    return final_strike, final_status
+
+def calculate_final_sr(oi_strike, oi_status, vol_strike, vol_status, option_type, prev_strike=None, prev_status=None):
+    """
+    यह फंक्शन आपके नियमों के अनुसार फाइनल Support/Resistance और उसका Status निकालता है।
+    अब यह Shifted WTT/WTB और STRONG के बाद वाले लॉजिक को भी हैंडल करेगा।
+    """
+    
+    if not oi_strike or not vol_strike:
+        return None, None
+
+    # ==========================================
+    # नियम 1: अगर OI और Volume दोनों एक ही स्ट्राइक पर हैं
+    # ==========================================
+    if oi_strike == vol_strike:
+        final_strike = oi_strike
+        
+        if option_type == "CE":
+            # --- RESISTANCE (CE) ---
+            if oi_status == "WTB" or vol_status == "WTB":
+                final_status = "BOTH WTB"
+            elif oi_status == "WTT" and vol_status == "WTT":
+                final_status = "BOTH WTT"
+            else:
+                final_status = "BOTH STRONG"
+                
+        elif option_type == "PE":
+            # --- SUPPORT (PE) ---
+            if oi_status == "WTT" or vol_status == "WTT":
+                final_status = "BOTH WTT"
+            elif oi_status == "WTB" and vol_status == "WTB":
+                final_status = "BOTH WTB"
+            else:
+                final_status = "BOTH STRONG"
+
+    # ==========================================
+    # नियम 2: अगर OI और Volume अलग-अलग स्ट्राइक पर हैं
+    # ==========================================
+    else:
+        if option_type == "CE":
+            if oi_strike < vol_strike:
+                final_strike = oi_strike
+                final_status = "OI " + oi_status
+            else:
+                final_strike = vol_strike
+                final_status = "Vol " + vol_status
+                
+        elif option_type == "PE":
+            if oi_strike > vol_strike:
+                final_strike = oi_strike
+                final_status = "OI " + oi_status
+            else:
+                final_strike = vol_strike
+                final_status = "Vol " + vol_status
+
+    # ==========================================
+    # नियम 3: SHIFTING (शिफ्टेड WTT/WTB लॉजिक)
+    # ==========================================
+    if prev_strike is not None and prev_status is not None:
+        
+        # कंडीशन A: अगर स्ट्राइक बदल गई है (Shift हुआ है)
+        if final_strike != prev_strike:
+            if "WTT" in final_status:
+                final_status = final_status.replace("WTT", "Shifted WTT")
+            elif "WTB" in final_status:
+                final_status = final_status.replace("WTB", "Shifted WTB")
+            elif "STRONG" in final_status:
+                final_status = final_status.replace("STRONG", "Shifted STRONG")
+                
+        # कंडीशन B: स्ट्राइक सेम है (अभी उसी स्ट्राइक पर है)
+        else:
+            # अगर यह पहले Shifted था और अभी तक STRONG नहीं हुआ है, तो इसे Shifted ही रहने दें।
+            # (एक बार STRONG होने के बाद "Shifted" का टैग अपने आप हट जाएगा और नॉर्मल WTT/WTB बन जाएगा)
+            if "Shifted" in prev_status and "STRONG" not in final_status:
+                if "WTT" in final_status and "Shifted" not in final_status:
+                    final_status = final_status.replace("WTT", "Shifted WTT")
+                elif "WTB" in final_status and "Shifted" not in final_status:
+                    final_status = final_status.replace("WTB", "Shifted WTB")
 
     return final_strike, final_status
 
@@ -779,20 +859,35 @@ def save_live_sr_data_new_table(df, symbol):
             # अगर सब कुछ सेम है तो सेव ना करें और वापस लौट जाएँ
             if is_same:
                 return False
-            # अगर डेटा अलग है, तो फाइनल स्ट्राइक और स्टेटस निकालें
+            
+        # पुराना डेटा निकालें (अगर है तो), नहीं तो None
+        prev_ce_strike = last_record.resistance_strike if last_record else None
+        prev_ce_status = last_record.resistance_status if last_record else None
+        
+        prev_pe_strike = last_record.supprt_strike if last_record else None
+        prev_pe_status = last_record.supprt_status if last_record else None
+
+        # CE के लिए
         ce_final_strike, ce_final_status = calculate_final_sr(
             data_dict.get("ce_high_oi_strike"),
             data_dict.get("ce_oi_status"),
             data_dict.get("ce_high_vol_strike"),
             data_dict.get("ce_vol_status"),
-            "CE",)
+            "CE",
+            prev_ce_strike,   # <-- नया पैरामीटर
+            prev_ce_status    # <-- नया पैरामीटर
+        )
         
+        # PE के लिए
         pe_final_strike, pe_final_status = calculate_final_sr(
             data_dict.get("pe_high_oi_strike"),
             data_dict.get("pe_oi_status"),
             data_dict.get("pe_high_vol_strike"),
             data_dict.get("pe_vol_status"),
-            "PE",)
+            "PE",
+            prev_pe_strike,   # <-- नया पैरामीटर
+            prev_pe_status    # <-- नया पैरामीटर
+        )
         # ==========================================
         # 💾 अगर डेटा अलग है (या पहला रिकॉर्ड है), तो सेव करें
         # ==========================================
