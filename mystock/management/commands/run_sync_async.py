@@ -181,6 +181,7 @@ class Command(BaseCommand):
                         entries = [OptionChain(
                             Time=row.get('Time'),
                             Symbol=row.get('Symbol'),
+                            Lot_size=row.get('Lot_size'),
                             Expiry_Date=expiry,
                             Strike_Price=row.get('Strike_Price'),
                             Spot_Price=row.get('Spot_Price'),
@@ -214,6 +215,7 @@ class Command(BaseCommand):
                         ) for _, row in df.iterrows()]
                         await bulk_create_async(entries)
                         print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
+                        
                         # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
                         await save_live_sr_data_async_wrapper(df, fixes_sym)
                 except Exception as e:
