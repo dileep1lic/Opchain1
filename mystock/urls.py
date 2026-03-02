@@ -15,4 +15,6 @@ urlpatterns = [
     # COI
     path('chart/view/coi/', views.render_chart_page_coi, name='chart_page_coi'), # HTML पेज
     path('api/coi-data/', views.specific_strike_coi_data, name='coi_data_api'), # JSON डेटा
+
+    path('test-sr/', views.test_sr_logic_view, name='test_sr_logic'),
 ]
