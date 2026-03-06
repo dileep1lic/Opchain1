@@ -92,7 +92,9 @@
                     {% if row.is_spot_divider and sr_data %}
                         <span class="res-label">Res: {{ sr_data.resistance_strike|floatformat:0 }} [{{ sr_data.resistance_status }}]</span>
                     {% endif %}
-                    <strong>{{ row.CE_LTP }}</strong>
+                    <a href="javascript:void(0)" onclick="openLtpCalculator('CE', '{{ row.CE_LTP|default:0 }}', '{{ row.CE_Delta|default:0 }}', '{{ spot|default:0 }}')" style="color: inherit; text-decoration: underline; text-decoration-style: dotted;">
+                        <strong>{{ row.CE_LTP }}</strong>
+                    </a>
                     <span class="pct-text {% if row.CE_CLTP >= 0 %}pos-val{% else %}neg-val{% endif %}">
                         ({{ row.CE_CLTP|floatformat:1 }})
                     </span>
@@ -117,7 +119,9 @@
                     {% if row.is_spot_divider and sr_data %}
                         <span class="sup-label">Sup: {{ sr_data.supprt_strike|floatformat:0 }} [{{ sr_data.supprt_status }}]</span>
                     {% endif %}
-                    <strong>{{ row.PE_LTP }}</strong>
+                    <a href="javascript:void(0)" onclick="openLtpCalculator('PE', '{{ row.PE_LTP|default:0 }}', '{{ row.PE_Delta|default:0 }}', '{{ spot|default:0 }}')" style="color: inherit; text-decoration: underline; text-decoration-style: dotted;">
+                        <strong>{{ row.PE_LTP }}</strong>
+                    </a>
                     <span class="pct-text {% if row.PE_CLTP >= 0 %}pos-val{% else %}neg-val{% endif %}">
                         ({{ row.PE_CLTP|floatformat:1 }})
                     </span>
