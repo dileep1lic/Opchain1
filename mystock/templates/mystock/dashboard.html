@@ -284,7 +284,7 @@
                     class="action-btn {% if others_active %}btn-red{% else %}btn-green{% endif %}">
                 {% if others_active %}STOP{% else %}START{% endif %}
             </button>
-        </div> -->
+        </div>  -->
 
 
 
@@ -305,6 +305,44 @@
     </div>
 </div>
 
+<div id="ltpCalcModal" class="modal-overlay" style="display:none; z-index: 2000;">
+    <div id="ltpMovableContent" class="modal-content" style="width: 320px; height: auto; min-width: unset; min-height: unset; resize: none; top: 150px; left: 40%; padding: 0;">
+        
+        <div class="modal-header" id="ltpDragHandle" style="border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; background: #222; padding: 10px; cursor: move;">
+            <span style="font-size: 14px; font-weight: bold; color: var(--accent-yellow);">
+                LTP Calculator (<span id="calcOptType"></span>)
+            </span>
+            <button class="close-btn" onclick="closeLtpModal()" style="position: static; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;">X</button>
+        </div>
+
+        <div style="padding: 15px; color: white;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px;">
+                <span style="color: var(--text-secondary);">Current Spot:</span>
+                <strong id="calcCurrentSpot">0.00</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px;">
+                <span style="color: var(--text-secondary);">Current LTP:</span>
+                <strong id="calcCurrentLtp">0.00</strong>
+            </div>
+            <!-- <div style="display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 13px;">
+                <span style="color: var(--text-secondary);">Delta:</span>
+                <strong id="calcDelta" style="color: #64b5f6;">0.00</strong>
+            </div> -->
+            
+            <div style="margin-bottom: 15px;">
+                <label style="font-size: 12px; color: var(--accent-green); font-weight: bold;">Target Spot Price (Get Value):</label>
+                <input type="number" id="calcTargetSpot" style="width: 100%; padding: 10px; background: #111; border: 1px solid #555; color: white; border-radius: 4px; box-sizing: border-box; margin-top: 5px; font-size: 16px; font-weight: bold; text-align: center;">
+            </div>
+            
+            <button onclick="calculateNewLtp()" style="width: 100%; padding: 12px; background: var(--accent-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 15px; font-size: 14px; transition: 0.2s;">Calculate Estimated LTP</button>
+            
+            <div style="text-align: center; background: #000; padding: 15px; border-radius: 4px; border: 1px solid #444;">
+                <span style="font-size: 12px; color: var(--text-secondary);">Expected New LTP:</span><br>
+                <strong id="calcResultLtp" style="font-size: 24px; color: #fff;">-</strong>
+            </div>
+        </div>
+    </div>
+</div>
 <script>
 // --- Cookie Helper ---
 function getCookie(name) {
@@ -430,7 +468,83 @@ function closeModal(event) {
     }
 }
 
+// === LTP CALCULATOR LOGIC ===
+let activeLtpData = { ltp: 0, delta: 0, spot: 0 };
 
+function openLtpCalculator(optType, currentLtp, delta, currentSpot) {
+    activeLtpData = {
+        ltp: parseFloat(currentLtp) || 0,
+        delta: parseFloat(delta) || 0,
+        spot: parseFloat(currentSpot) || 0
+    };
+    
+    document.getElementById('calcOptType').innerText = optType;
+    document.getElementById('calcCurrentSpot').innerText = activeLtpData.spot.toFixed(2);
+    document.getElementById('calcCurrentLtp').innerText = activeLtpData.ltp.toFixed(2);
+    // document.getElementById('calcDelta').innerText = activeLtpData.delta.toFixed(4);
+    
+    document.getElementById('calcTargetSpot').value = activeLtpData.spot.toFixed(2);
+    document.getElementById('calcResultLtp').innerText = "-";
+    document.getElementById('calcResultLtp').style.color = "#fff";
+    
+    // Modal को दिखाएं (block का उपयोग ताकि absolute position काम करे)
+    document.getElementById('ltpCalcModal').style.display = 'block';
+}
+
+function closeLtpModal() {
+    document.getElementById('ltpCalcModal').style.display = 'none';
+}
+
+function calculateNewLtp() {
+    const targetPrice = parseFloat(document.getElementById('calcTargetSpot').value);
+    if (isNaN(targetPrice)) {
+        alert("Please enter a valid Target Spot Price.");
+        return;
+    }
+    
+    const spotDifference = targetPrice - activeLtpData.spot;
+    const estimatedLtp = activeLtpData.ltp + (spotDifference * activeLtpData.delta);
+    
+    const resultElement = document.getElementById('calcResultLtp');
+    const finalLtp = estimatedLtp > 0 ? estimatedLtp.toFixed(2) : "0.05";
+    resultElement.innerText = finalLtp;
+    
+    if (estimatedLtp > activeLtpData.ltp) {
+        resultElement.style.color = "var(--accent-green)"; 
+    } else if (estimatedLtp < activeLtpData.ltp) {
+        resultElement.style.color = "var(--accent-red)";   
+    } else {
+        resultElement.style.color = "#fff";
+    }
+}
+
+// === DRAG & DROP LOGIC FOR LTP MODAL ===
+const ltpModalContent = document.getElementById("ltpMovableContent");
+const ltpDragHandle = document.getElementById("ltpDragHandle");
+
+let isLtpDragging = false;
+let ltpOffset = [0, 0];
+
+ltpDragHandle.addEventListener('mousedown', function(e) {
+    isLtpDragging = true;
+    // माउस की पोजीशन और बॉक्स की पोजीशन का अंतर सेव करें
+    ltpOffset = [
+        ltpModalContent.offsetLeft - e.clientX,
+        ltpModalContent.offsetTop - e.clientY
+    ];
+}, true);
+
+document.addEventListener('mouseup', function() {
+    isLtpDragging = false;
+}, true);
+
+document.addEventListener('mousemove', function(e) {
+    if (isLtpDragging) {
+        // बॉक्स को नई पोजीशन पर सेट करें
+        ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px';
+        ltpModalContent.style.top  = (e.clientY + ltpOffset[1]) + 'px';
+    }
+}, true);
 
 setInterval(refreshData, 5000);
 window.onload = scrollToSpot;
