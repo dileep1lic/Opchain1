@@ -51,7 +51,7 @@
             min-height: 60px;
         }
 
-        .stats-group { display: flex; gap: 25px; align-items: center; }
+        .stats-group { display: flex; gap: 20px; align-items: center; flex-wrap: wrap;}
         .stat-item { display: flex; flex-direction: column; justify-content: center; }
         .label { font-size: 10px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin-bottom: 2px; }
         .value { font-size: 15px; font-weight: 700; color: var(--text-primary); font-family: 'Roboto Mono', monospace; }
@@ -60,6 +60,20 @@
         .expiry-val { color: var(--accent-yellow); }
         .spot-val   { color: var(--accent-green); }
         .sync-val   { color: #e0e0e0; }
+
+        /* SR BADGES IN HEADER */
+        .sr-badge {
+            padding: 6px 12px;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            min-width: 140px;
+        }
+        .sr-res { background: rgba(0, 200, 83, 0.08); border: 1px solid rgba(0, 200, 83, 0.3); }
+        .sr-sup { background: rgba(255, 23, 68, 0.08); border: 1px solid rgba(255, 23, 68, 0.3); }
+        
+        .sr-label-res { color: var(--accent-green); }
+        .sr-label-sup { color: var(--accent-red); }
 
         .controls-group { display: flex; gap: 12px; align-items: center; }
         .control-card {
@@ -83,18 +97,6 @@
         }
         .action-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
         .btn-blue { background: rgba(41, 98, 255, 0.15); color: #64b5f6; border: 1px solid rgba(41, 98, 255, 0.3); }
-        .btn-green { background: rgba(0, 200, 83, 0.15); color: var(--accent-green); border: 1px solid rgba(0, 200, 83, 0.3); }
-        .btn-red { background: rgba(255, 23, 68, 0.15); color: var(--accent-red); border: 1px solid rgba(255, 23, 68, 0.3); }
-
-        .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
-        .status-running { background-color: var(--accent-green); box-shadow: 0 0 0 0 rgba(0, 200, 83, 0.7); animation: pulse-green 2s infinite; }
-        .status-stopped { background-color: var(--accent-red); }
-        
-        @keyframes pulse-green {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 200, 83, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(0, 200, 83, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 200, 83, 0); }
-        }
 
         /* --- 3. RESTORED TABLE COLOR STYLES --- */
         table { width: 100%; border-collapse: collapse; background: var(--card-bg); table-layout: fixed; margin-top: 0; }
@@ -124,10 +126,7 @@
             font-size: 13px;
         }
 
-        /* --- यहाँ मैंने वापस लाल लाइन कर दी है --- */
-        .spot-line-row td { 
-            border-top: 3px solid #ff1744 !important; 
-        }
+        .spot-line-row td { border-top: 3px solid #ff1744 !important; }
         
         .spot-label {
             position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
@@ -136,9 +135,7 @@
             box-shadow: 0 2px 5px rgba(0,0,0,0.5);
         }
 
-        .pct-text { 
-            font-size: 10px; font-weight: normal; opacity: 0.7; display: block; line-height: 1.1; margin-top: 2px;
-        }
+        .pct-text { font-size: 10px; font-weight: normal; opacity: 0.7; display: block; line-height: 1.1; margin-top: 2px;}
 
         @media (max-width: 900px) {
             .trading-header { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
@@ -147,84 +144,23 @@
             th { top: 130px; }
         }
 
-       /* Modal Background (पारदर्शी ताकि टेबल दिखे) */
+       /* Modal Overlay */
         .modal-overlay {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: transparent; /* काला रंग हटा दिया */
-            pointer-events: none; /* नीचे क्लिक करने की अनुमति देता है */
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0;
+            width: 100%; height: 100%; background-color: transparent; pointer-events: none;
         }
-       /* Modal Box - Drag और Resize दोनों के लिए */
+       /* Modal Box */
         .modal-content {
-            background-color: #181b21;
-            position: absolute; 
-            top: 50px;
-            left: 50px;
-            width: 500px;   /* शुरुआती चौड़ाई */
-            height: 400px;  /* शुरुआती ऊँचाई */
-            
-            /* रिसाइज फीचर */
-            resize: both;      /* दोनों तरफ से छोटा-बड़ा करने के लिए */
-            overflow: hidden;  /* रिसाइज हैंडल दिखने के लिए जरूरी */
-            min-width: 350px;  /* इससे छोटा नहीं होगा */
-            min-height: 300px;
-            
-            border-radius: 8px;
-            border: 1px solid #444;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-            display: flex;
-            flex-direction: column;
-            pointer-events: auto;
-            z-index: 1001;
+            background-color: #181b21; position: absolute; top: 50px; left: 50px;
+            width: 500px; height: 400px; resize: both; overflow: hidden;
+            min-width: 350px; min-height: 300px; border-radius: 8px;
+            border: 1px solid #444; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            display: flex; flex-direction: column; pointer-events: auto; z-index: 1001;
         }
-
-        /* रिसाइज हैंडल को थोड़ा बड़ा और स्पष्ट बनाने के लिए (Optional) */
-        .modal-content::-webkit-resizer {
-            background-color: #444;
-            border: 3px solid #181b21;
-            outline: 1px solid #777;
-        }
-
-        /* Close Button (X) */
-        .close-btn {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-
-            background: #c62828;
-            color: white;
-            border: none;
-            border-radius: 6px;
-
-            width: 28px;
-            height: 28px;
-
-            cursor: pointer;
-            z-index: 10;
-        }
-
-        .chart-frame {
-            width: 100%;
-            flex-grow: 1; /* यह चार्ट को पूरे उपलब्ध स्पेस में फैला देगा */
-            border: none;
-            background-color: #0f1115;
-        }
-        /* ड्रैगिंग हैंडल के लिए ऊपर की पट्टी */
-        .modal-header {
-            padding: 10px;
-            background: #222;
-            cursor: move; /* हाथ का निशान ताकि पता चले कि यह हिल सकता है */
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #333;
-        }
-
+        .modal-content::-webkit-resizer { background-color: #444; border: 3px solid #181b21; outline: 1px solid #777; }
+        .close-btn { position: absolute; top: 8px; right: 8px; background: #c62828; color: white; border: none; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; z-index: 10; }
+        .chart-frame { width: 100%; flex-grow: 1; border: none; background-color: #0f1115; }
+        .modal-header { padding: 10px; background: #222; cursor: move; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
     </style>
 </head>
 <body>
@@ -236,10 +172,6 @@
             <span class="value symbol-val">{{ data.0.Symbol|default:"NIFTY" }}</span>
         </div>
         <div class="stat-item">
-            <span class="label">Expiry</span>
-            <span class="value expiry-val">{{ expiry_date|date:"d-M" }}</span>
-        </div>
-        <div class="stat-item">
             <span class="label">Spot Price</span>
             <span id="header-spot" class="value spot-val">{{ spot|floatformat:2 }}</span>
         </div>
@@ -247,6 +179,27 @@
             <span class="label">Last Sync</span>
             <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
         </div>
+        
+        <div class="stat-item sr-badge sr-res">
+            <span class="label sr-label-res">Resistance (CE)</span>
+            <span id="header-res" class="value" style="color: var(--accent-green); font-size: 14px;">
+                {{ sr_data.resistance_strike|floatformat:0|default:"-" }} 
+                <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.resistance_status|default:"Waiting..." }}]</span>
+            </span>
+        </div>
+
+        <div class="stat-item sr-badge sr-sup">
+            <span class="label sr-label-sup">Support (PE)</span>
+            <span id="header-sup" class="value" style="color: var(--accent-red); font-size: 14px;">
+                {{ sr_data.supprt_strike|floatformat:0|default:"-" }} 
+                <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.supprt_status|default:"Waiting..." }}]</span>
+            </span>
+        </div>
+<!-- 
+        <div class="stat-item">
+            <span class="label">Last Sync</span>
+            <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
+        </div> -->
     </div>
 
     <div class="controls-group">
@@ -262,32 +215,12 @@
                 <button class="action-btn btn-blue">ALL ↗</button>
             </a>
         </div>
-
-
-
-        <!-- <div class="control-card">
-            <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
-                <div id="nifty-dot" class="status-dot {% if nifty_active %}status-running{% else %}status-stopped{% endif %}"></div>
-                <span class="card-title" style="margin:0;">NIFTY (5s)</span>
-            </div>
-            <button id="nifty-btn" onclick="toggleSync('nifty_loop')" 
-                    class="action-btn {% if nifty_active %}btn-red{% else %}btn-green{% endif %}">
-                {% if nifty_active %}STOP{% else %}START{% endif %}
-            </button>
-        </div>
         <div class="control-card">
-            <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
-                <div id="others-dot" class="status-dot {% if others_active %}status-running{% else %}status-stopped{% endif %}"></div>
-                <span class="card-title" style="margin:0;">OTHERS</span>
-            </div>
-            <button id="others-btn" onclick="toggleSync('others_loop')" 
-                    class="action-btn {% if others_active %}btn-red{% else %}btn-green{% endif %}">
-                {% if others_active %}STOP{% else %}START{% endif %}
-            </button>
-        </div>  -->
-
-
-
+            <span class="card-title">S&R History</span>
+            <a href="{% url 'live_resistance' %}" target="_blank">
+                <button class="action-btn btn-blue">NIFTY ↗</button>
+            </a>
+        </div>
     </div>
 </div>
 
@@ -317,20 +250,14 @@
 
         <div style="padding: 15px; color: white;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px;">
-                <span style="color: var(--text-secondary);">Current Spot:</span>
-                <strong id="calcCurrentSpot">0.00</strong>
+                <span style="color: var(--text-secondary);">Current Spot:</span><strong id="calcCurrentSpot">0.00</strong>
             </div>
             <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px;">
-                <span style="color: var(--text-secondary);">Current LTP:</span>
-                <strong id="calcCurrentLtp">0.00</strong>
+                <span style="color: var(--text-secondary);">Current LTP:</span><strong id="calcCurrentLtp">0.00</strong>
             </div>
-            <!-- <div style="display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 13px;">
-                <span style="color: var(--text-secondary);">Delta:</span>
-                <strong id="calcDelta" style="color: #64b5f6;">0.00</strong>
-            </div> -->
             
             <div style="margin-bottom: 15px;">
-                <label style="font-size: 12px; color: var(--accent-green); font-weight: bold;">Target Spot Price (Get Value):</label>
+                <label style="font-size: 12px; color: var(--accent-green); font-weight: bold;">Target Spot Price:</label>
                 <input type="number" id="calcTargetSpot" style="width: 100%; padding: 10px; background: #111; border: 1px solid #555; color: white; border-radius: 4px; box-sizing: border-box; margin-top: 5px; font-size: 16px; font-weight: bold; text-align: center;">
             </div>
             
@@ -343,6 +270,7 @@
         </div>
     </div>
 </div>
+
 <script>
 // --- Cookie Helper ---
 function getCookie(name) {
@@ -360,35 +288,7 @@ function getCookie(name) {
     return cookieValue;
 }
 
-// --- Sync Toggle ---
-function toggleSync(loopName) {
-    fetch(`/toggle/${loopName}/`, {
-        method: "POST",
-        headers: { 
-            "X-CSRFToken": getCookie("csrftoken"), 
-            "Content-Type": "application/json" 
-        }
-    })
-    .then(res => res.json())
-    .then(data => {
-        const prefix = loopName.split('_')[0]; 
-        const btn = document.getElementById(`${prefix}-btn`);
-        const dot = document.getElementById(`${prefix}-dot`);
-
-        if (data.is_active) {
-            btn.innerText = "STOP";
-            btn.className = "action-btn btn-red"; 
-            dot.className = "status-dot status-running";
-        } else {
-            btn.innerText = "START";
-            btn.className = "action-btn btn-green"; 
-            dot.className = "status-dot status-stopped";
-        }
-    })
-    .catch(err => console.error("Error:", err));
-}
-
-// --- Refresh Data ---
+// --- Refresh Data (UPDATED for SR Header) ---
 function refreshData() {
     fetch('/table-update-url/') 
     .then(response => response.text())
@@ -398,9 +298,22 @@ function refreshData() {
 
             const newTime = document.getElementById('hidden-latest-time')?.value;
             const newSpot = document.getElementById('hidden-spot-price')?.value;
+            
+            // Fetch updated SR Data from hidden inputs in table_partial
+            const resStrike = document.getElementById('hidden-res-strike')?.value;
+            const resStatus = document.getElementById('hidden-res-status')?.value;
+            const supStrike = document.getElementById('hidden-sup-strike')?.value;
+            const supStatus = document.getElementById('hidden-sup-status')?.value;
 
             if(newSpot) document.getElementById('header-spot').innerText = newSpot;
             if(newTime) document.getElementById('header-time').innerText = newTime;
+            
+            if(resStrike) {
+                document.getElementById('header-res').innerHTML = `${resStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${resStatus}]</span>`;
+            }
+            if(supStrike) {
+                document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
+            }
         }
     })
     .catch(err => console.warn("Update Error:", err));
@@ -411,140 +324,51 @@ function scrollToSpot() {
     if (spotRow) { spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 }
 
-// --- CHART MODAL FUNCTIONS (Moved here for better performance) ---
+// --- CHART MODAL FUNCTIONS ---
 function openChart(symbol, strike, type) {
     const modal = document.getElementById('chartModal');
     const iframe = document.getElementById('chartFrame');
-    
-    let url = "";
-    
-    // Logic: अगर type 'oi' है तो OI चार्ट, नहीं तो COI चार्ट
-    if (type === 'oi') {
-        url = `/chart/view/oi/?symbol=${symbol}&strike=${strike}`;
-    } else {
-        url = `/chart/view/coi/?symbol=${symbol}&strike=${strike}`;
-    }
-
+    let url = (type === 'oi') ? `/chart/view/oi/?symbol=${symbol}&strike=${strike}` : `/chart/view/coi/?symbol=${symbol}&strike=${strike}`;
     iframe.src = url;
     modal.style.display = 'flex';
 }
 
-// --- Modal Moving Logic ---
 const modalContent = document.getElementById("movableContent");
 const dragHandle = document.getElementById("dragHandle");
-
-let isDragging = false;
-let offset = [0, 0];
-
-dragHandle.addEventListener('mousedown', function(e) {
-    isDragging = true;
-    offset = [
-        modalContent.offsetLeft - e.clientX,
-        modalContent.offsetTop - e.clientY
-    ];
-}, true);
-
-document.addEventListener('mouseup', function() {
-    isDragging = false;
-}, true);
-
-document.addEventListener('mousemove', function(e) {
-    if (isDragging) {
-        modalContent.style.left = (e.clientX + offset[0]) + 'px';
-        modalContent.style.top  = (e.clientY + offset[1]) + 'px';
-    }
-}, true);
-
-// क्लोज बटन के लिए फंक्शन
-function closeModalDirect() {
-    document.getElementById('chartModal').style.display = 'none';
-    document.getElementById('chartFrame').src = '';
-}
-
-// पुरानी closeModal को अपडेट करें (ताकि वह बैकग्राउंड क्लिक पर बंद न हो, क्योंकि अब बैकग्राउंड पारदर्शी है)
-function closeModal(event) {
-    if (event.target.className === 'close-btn') {
-        closeModalDirect();
-    }
-}
+let isDragging = false, offset = [0, 0];
+dragHandle.addEventListener('mousedown', function(e) { isDragging = true; offset = [modalContent.offsetLeft - e.clientX, modalContent.offsetTop - e.clientY]; }, true);
+document.addEventListener('mouseup', function() { isDragging = false; }, true);
+document.addEventListener('mousemove', function(e) { if (isDragging) { modalContent.style.left = (e.clientX + offset[0]) + 'px'; modalContent.style.top = (e.clientY + offset[1]) + 'px'; } }, true);
+function closeModalDirect() { document.getElementById('chartModal').style.display = 'none'; document.getElementById('chartFrame').src = ''; }
 
 // === LTP CALCULATOR LOGIC ===
 let activeLtpData = { ltp: 0, delta: 0, spot: 0 };
-
 function openLtpCalculator(optType, currentLtp, delta, currentSpot) {
-    activeLtpData = {
-        ltp: parseFloat(currentLtp) || 0,
-        delta: parseFloat(delta) || 0,
-        spot: parseFloat(currentSpot) || 0
-    };
-    
+    activeLtpData = { ltp: parseFloat(currentLtp) || 0, delta: parseFloat(delta) || 0, spot: parseFloat(currentSpot) || 0 };
     document.getElementById('calcOptType').innerText = optType;
     document.getElementById('calcCurrentSpot').innerText = activeLtpData.spot.toFixed(2);
     document.getElementById('calcCurrentLtp').innerText = activeLtpData.ltp.toFixed(2);
-    // document.getElementById('calcDelta').innerText = activeLtpData.delta.toFixed(4);
-    
     document.getElementById('calcTargetSpot').value = activeLtpData.spot.toFixed(2);
     document.getElementById('calcResultLtp').innerText = "-";
     document.getElementById('calcResultLtp').style.color = "#fff";
-    
-    // Modal को दिखाएं (block का उपयोग ताकि absolute position काम करे)
     document.getElementById('ltpCalcModal').style.display = 'block';
 }
-
-function closeLtpModal() {
-    document.getElementById('ltpCalcModal').style.display = 'none';
-}
-
+function closeLtpModal() { document.getElementById('ltpCalcModal').style.display = 'none'; }
 function calculateNewLtp() {
     const targetPrice = parseFloat(document.getElementById('calcTargetSpot').value);
-    if (isNaN(targetPrice)) {
-        alert("Please enter a valid Target Spot Price.");
-        return;
-    }
-    
-    const spotDifference = targetPrice - activeLtpData.spot;
-    const estimatedLtp = activeLtpData.ltp + (spotDifference * activeLtpData.delta);
-    
+    if (isNaN(targetPrice)) { alert("Please enter a valid Target Spot Price."); return; }
+    const estimatedLtp = activeLtpData.ltp + ((targetPrice - activeLtpData.spot) * activeLtpData.delta);
     const resultElement = document.getElementById('calcResultLtp');
-    const finalLtp = estimatedLtp > 0 ? estimatedLtp.toFixed(2) : "0.05";
-    resultElement.innerText = finalLtp;
-    
-    if (estimatedLtp > activeLtpData.ltp) {
-        resultElement.style.color = "var(--accent-green)"; 
-    } else if (estimatedLtp < activeLtpData.ltp) {
-        resultElement.style.color = "var(--accent-red)";   
-    } else {
-        resultElement.style.color = "#fff";
-    }
+    resultElement.innerText = estimatedLtp > 0 ? estimatedLtp.toFixed(2) : "0.05";
+    resultElement.style.color = estimatedLtp > activeLtpData.ltp ? "var(--accent-green)" : (estimatedLtp < activeLtpData.ltp ? "var(--accent-red)" : "#fff");
 }
 
-// === DRAG & DROP LOGIC FOR LTP MODAL ===
 const ltpModalContent = document.getElementById("ltpMovableContent");
 const ltpDragHandle = document.getElementById("ltpDragHandle");
-
-let isLtpDragging = false;
-let ltpOffset = [0, 0];
-
-ltpDragHandle.addEventListener('mousedown', function(e) {
-    isLtpDragging = true;
-    // माउस की पोजीशन और बॉक्स की पोजीशन का अंतर सेव करें
-    ltpOffset = [
-        ltpModalContent.offsetLeft - e.clientX,
-        ltpModalContent.offsetTop - e.clientY
-    ];
-}, true);
-
-document.addEventListener('mouseup', function() {
-    isLtpDragging = false;
-}, true);
-
-document.addEventListener('mousemove', function(e) {
-    if (isLtpDragging) {
-        // बॉक्स को नई पोजीशन पर सेट करें
-        ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px';
-        ltpModalContent.style.top  = (e.clientY + ltpOffset[1]) + 'px';
-    }
-}, true);
+let isLtpDragging = false, ltpOffset = [0, 0];
+ltpDragHandle.addEventListener('mousedown', function(e) { isLtpDragging = true; ltpOffset = [ltpModalContent.offsetLeft - e.clientX, ltpModalContent.offsetTop - e.clientY]; }, true);
+document.addEventListener('mouseup', function() { isLtpDragging = false; }, true);
+document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
 setInterval(refreshData, 5000);
 window.onload = scrollToSpot;
