@@ -17,4 +17,9 @@ urlpatterns = [
     path('api/coi-data/', views.specific_strike_coi_data, name='coi_data_api'), # JSON डेटा
 
     path('test-sr/', views.test_sr_logic_view, name='test_sr_logic'),
+    path('live-resistance/', views.live_data_view, name='live_resistance'),
+
+
+    path('option-chart/', views.option_chart_view, name='option_chart'),
+    path("option-chart-api/", views.option_chart_api, name="option_chart_api")
 ]
