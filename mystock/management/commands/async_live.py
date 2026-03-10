@@ -637,67 +637,8 @@ def save_temp_async_wrapper(df, symbol):
 
 from mystock.models import LiveSRData  # फाइल के टॉप पर होना चाहिए
 
-def calculate_final_sr1(oi_strike, oi_status, vol_strike, vol_status, option_type):
-    """
-    यह फंक्शन आपके नियमों के अनुसार फाइनल Support या Resistance और उसका Status निकाल कर देगा।
-    """
-    
-    if not oi_strike or not vol_strike:
-        return None, None
 
-    # ==========================================
-    # नियम 1: अगर OI और Volume दोनों एक ही स्ट्राइक पर हैं
-    # ==========================================
-    if oi_strike == vol_strike:
-        final_strike = oi_strike
-        
-        if option_type == "CE":
-            # --- RESISTANCE (CE) का नियम ---
-            # अगर एक भी WTB है, तो ओवरऑल WTB
-            if oi_status == "WTB" or vol_status == "WTB":
-                final_status = "BOTH WTB"
-            # अगर दोनों WTT हैं, तभी ओवरऑल WTT
-            elif oi_status == "WTT" and vol_status == "WTT":
-                final_status = "BOTH WTT"
-            else:
-                final_status = "BOTH STRONG"
-                
-        elif option_type == "PE":
-            # --- SUPPORT (PE) का नियम ---
-            # अगर एक भी WTT है, तो ओवरऑल WTT
-            if oi_status == "WTT" or vol_status == "WTT":
-                final_status = "BOTH WTT"
-            # अगर दोनों WTB हैं, तभी ओवरऑल WTB
-            elif oi_status == "WTB" and vol_status == "WTB":
-                final_status = "BOTH WTB"
-            else:
-                final_status = "BOTH STRONG"
-
-    # ==========================================
-    # नियम 2: अगर OI और Volume अलग-अलग स्ट्राइक पर हैं
-    # ==========================================
-    else:
-        if option_type == "CE":
-            # Resistance (CE): दोनों में जो छोटी स्ट्राइक है, उसका माना जाएगा
-            if oi_strike < vol_strike:
-                final_strike = oi_strike
-                final_status = "OI " + oi_status
-            else:
-                final_strike = vol_strike
-                final_status = "Vol " + vol_status
-                
-        elif option_type == "PE":
-            # Support (PE): दोनों में जो बड़ी स्ट्राइक (स्पॉट के ज्यादा पास) है, उसका माना जाएगा
-            if oi_strike > vol_strike:
-                final_strike = oi_strike
-                final_status = "OI " + oi_status
-            else:
-                final_strike = vol_strike
-                final_status = "Vol " + vol_status
-
-    return final_strike, final_status
-
-def calculate_final_sr(oi_strike, oi_status, vol_strike, vol_status, option_type, prev_strike=None, prev_status=None):
+def calculate_final_sr1(oi_strike, oi_status, vol_strike, vol_status, option_type, prev_strike=None, prev_status=None):
     """
     यह फंक्शन आपके नियमों के अनुसार फाइनल Support/Resistance और उसका Status निकालता है।
     अब यह Shifted WTT/WTB और STRONG के बाद वाले लॉजिक को भी हैंडल करेगा।
@@ -784,7 +725,7 @@ def determine_status(strike1, strike2, pct2):
     else:
         return "WTB"
 
-def save_live_sr_data_new_table(df, symbol):
+def save_live_sr_data_new_table1(df, symbol):
     """नया प्रोग्राम जो डुप्लीकेट डेटा को रोककर नई टेबल में सेव करेगा"""
     
     # 🛑 सेफ्टी लॉक: सिर्फ NIFTY
@@ -926,6 +867,255 @@ def save_live_sr_data_new_table(df, symbol):
         print(f"Error saving to new LiveSRData table for {symbol}: {e}")
         return False
 
+
+
+
+def calculate_final_sr(oi_strike, oi_status, oi_2nd_strike, 
+                       vol_strike, vol_status, vol_2nd_strike, 
+                       option_type, prev_base=None, prev_status=None):
+    """
+    यह फंक्शन एडवांस नियमों (LTP Calculator) के अनुसार फाइनल Support/Resistance निकालता है।
+    - Base Type (Both/OI/Vol)
+    - Shifting Logic & Shifted Strong
+    - Target Change / State Change (Shifted टैग हटाना)
+    """
+    if not oi_strike or not vol_strike:
+        return None, "N/A"
+
+    oi_status_lower = str(oi_status).lower() if oi_status else ""
+    vol_status_lower = str(vol_status).lower() if vol_status else ""
+
+    # ==========================================
+    # 1. Base, Target, Status और Base Type तय करें
+    # ==========================================
+    if option_type == "CE":
+        # --- RESISTANCE (CE) LOGIC ---
+        if vol_strike == oi_strike:
+            base = vol_strike
+            base_type = "Both"
+            # CE में WTB हावी होता है
+            if "wtt" in vol_status_lower and "wtt" in oi_status_lower:
+                status, target = "WTT", oi_2nd_strike
+            elif "wtb" in vol_status_lower or "wtb" in oi_status_lower:
+                status, target = "WTB", (vol_2nd_strike if "wtb" in vol_status_lower else oi_2nd_strike)
+            else:
+                status, target = "Strong", None
+        else:
+            # CE में छोटी स्ट्राइक को बेस मानते हैं
+            if vol_strike < oi_strike:
+                base, base_type, status_lower, target = vol_strike, "Vol", vol_status_lower, vol_2nd_strike
+            else:
+                base, base_type, status_lower, target = oi_strike, "OI", oi_status_lower, oi_2nd_strike
+                
+            if "wtt" in status_lower: status = "WTT"
+            elif "wtb" in status_lower: status = "WTB"
+            else: status, target = "Strong", None
+
+    elif option_type == "PE":
+        # --- SUPPORT (PE) LOGIC ---
+        if vol_strike == oi_strike:
+            base = vol_strike
+            base_type = "Both"
+            # PE में WTT हावी होता है
+            if "wtb" in vol_status_lower and "wtb" in oi_status_lower:
+                status, target = "WTB", oi_2nd_strike
+            elif "wtt" in vol_status_lower or "wtt" in oi_status_lower:
+                status, target = "WTT", (vol_2nd_strike if "wtt" in vol_status_lower else oi_2nd_strike)
+            else:
+                status, target = "Strong", None
+        else:
+            # PE में बड़ी स्ट्राइक को बेस मानते हैं
+            if vol_strike > oi_strike:
+                base, base_type, status_lower, target = vol_strike, "Vol", vol_status_lower, vol_2nd_strike
+            else:
+                base, base_type, status_lower, target = oi_strike, "OI", oi_status_lower, oi_2nd_strike
+                
+            if "wtt" in status_lower: status = "WTT"
+            elif "wtb" in status_lower: status = "WTB"
+            else: status, target = "Strong", None
+
+    # ==========================================
+    # 2. SHIFTING (शिफ्टेड WTT/WTB और State Change लॉजिक)
+    # ==========================================
+    basic_text = f"({base_type}) {status} {target if target else base}"
+    
+    if prev_base is None or prev_status is None:
+        return base, basic_text
+
+    # पिछले स्टेटस से टारगेट निकालने की कोशिश (जैसे "Shifted WTT 25000.0" में से 25000.0)
+    try:
+        prev_target_val = float(str(prev_status).split()[-1])
+    except:
+        prev_target_val = None
+
+    # कंडीशन A: अगर बेस स्ट्राइक बदल गई है (नया Shift हुआ है)
+    if base != prev_base:
+        if status == "Strong":
+            return base, f"({base_type}) Shifted Strong {base}"
+        else:
+            return base, f"({base_type}) Shifted {status} {target}"
+
+    # कंडीशन B: बेस स्ट्राइक वही है जो पहले थी
+    else:
+        if "Shifted" in str(prev_status):
+            if "Shifted Strong" in str(prev_status):
+                if status == "Strong":
+                    return base, f"({base_type}) Shifted Strong {base}"
+                else:
+                    return base, basic_text # State Reset (Shifted Strong से वापस WTT/WTB हो गया)
+            else:
+                # पहले Shifted WTT/WTB था
+                if status == "Strong":
+                    return base, f"({base_type}) Shifted Strong {base}"
+                else:
+                    # यदि Strong होने से पहले Target बदल गया (State Change / Shifting Failed)
+                    if prev_target_val is not None and target != prev_target_val:
+                        return base, basic_text # "Shifted" का लेबल हटा दिया
+                    else:
+                        return base, f"({base_type}) Shifted {status} {target}" # Shifted लेबल बरकरार रहेगा
+        else:
+            # पहले कोई शिफ्टिंग नहीं थी
+            return base, basic_text
+
+
+def save_live_sr_data_new_table(df, symbol):
+    """नया प्रोग्राम जो डुप्लीकेट डेटा को रोककर नई टेबल में सेव करेगा"""
+    
+    # 🛑 सेफ्टी लॉक: सिर्फ NIFTY
+    if symbol != "NIFTY":
+        return False
+
+    try:
+        if df is None or df.empty:
+            return False
+
+        time_val = df["Time"].iloc[0]
+        spot_val = float(df["Spot_Price"].iloc[0])
+        expiry_val = df["expiry"].iloc[0]
+
+        data_dict = {}
+
+        # CE और PE दोनों के लिए लूप
+        for side in ["CE", "PE"]:
+            side_lower = side.lower()
+
+            # --- 1. OI LOGIC ---
+            oi_col = f"{side}_OI_percent"
+            sorted_oi = df.sort_values(oi_col, ascending=False).reset_index(drop=True)
+            
+            if len(sorted_oi) >= 2:
+                s1_strike = float(sorted_oi.iloc[0]["Strike_Price"])
+                s2_strike = float(sorted_oi.iloc[1]["Strike_Price"])
+                s2_pct = sorted_oi.iloc[1][oi_col]
+
+                data_dict[f"{side_lower}_high_oi_strike"] = s1_strike
+                data_dict[f"{side_lower}_2nd_high_oi_strike"] = s2_strike
+                data_dict[f"{side_lower}_oi_status"] = determine_status(s1_strike, s2_strike, s2_pct)
+
+            # --- 2. VOLUME LOGIC ---
+            vol_col = f"{side}_Volume_percent"
+            sorted_vol = df.sort_values(vol_col, ascending=False).reset_index(drop=True)
+            
+            if len(sorted_vol) >= 2:
+                v1_strike = float(sorted_vol.iloc[0]["Strike_Price"])
+                v2_strike = float(sorted_vol.iloc[1]["Strike_Price"])
+                v2_pct = sorted_vol.iloc[1][vol_col]
+
+                data_dict[f"{side_lower}_high_vol_strike"] = v1_strike
+                data_dict[f"{side_lower}_2nd_high_vol_strike"] = v2_strike
+                data_dict[f"{side_lower}_vol_status"] = determine_status(v1_strike, v2_strike, v2_pct)
+
+        # ==========================================
+        # 🛡️ डुप्लीकेट चेक लॉजिक (पिछला रिकॉर्ड चेक करें)
+        # ==========================================
+        last_record = LiveSRData.objects.filter(Symbol=symbol).order_by('-Time').first()
+
+        if last_record:
+            is_same = (
+                last_record.ce_high_oi_strike == data_dict.get("ce_high_oi_strike") and
+                last_record.ce_oi_status == data_dict.get("ce_oi_status") and
+                last_record.ce_2nd_high_oi_strike == data_dict.get("ce_2nd_high_oi_strike") and
+                
+                last_record.ce_high_vol_strike == data_dict.get("ce_high_vol_strike") and
+                last_record.ce_vol_status == data_dict.get("ce_vol_status") and
+                last_record.ce_2nd_high_vol_strike == data_dict.get("ce_2nd_high_vol_strike") and
+
+                last_record.pe_high_oi_strike == data_dict.get("pe_high_oi_strike") and
+                last_record.pe_oi_status == data_dict.get("pe_oi_status") and
+                last_record.pe_2nd_high_oi_strike == data_dict.get("pe_2nd_high_oi_strike") and
+                
+                last_record.pe_high_vol_strike == data_dict.get("pe_high_vol_strike") and
+                last_record.pe_vol_status == data_dict.get("pe_vol_status") and
+                last_record.pe_2nd_high_vol_strike == data_dict.get("pe_2nd_high_vol_strike")
+            )
+
+            # अगर सब कुछ सेम है तो सेव ना करें और वापस लौट जाएँ
+            if is_same:
+                return False
+            
+        # पुराना डेटा निकालें
+        prev_ce_strike = last_record.resistance_strike if last_record else None
+        prev_ce_status = last_record.resistance_status if last_record else None
+        
+        prev_pe_strike = last_record.supprt_strike if last_record else None
+        prev_pe_status = last_record.supprt_status if last_record else None
+
+        # CE के लिए फाइनल कैलकुलेशन
+        ce_final_strike, ce_final_status = calculate_final_sr(
+            data_dict.get("ce_high_oi_strike"), data_dict.get("ce_oi_status"), data_dict.get("ce_2nd_high_oi_strike"),
+            data_dict.get("ce_high_vol_strike"), data_dict.get("ce_vol_status"), data_dict.get("ce_2nd_high_vol_strike"),
+            "CE",
+            prev_ce_strike, prev_ce_status
+        )
+        
+        # PE के लिए फाइनल कैलकुलेशन
+        pe_final_strike, pe_final_status = calculate_final_sr(
+            data_dict.get("pe_high_oi_strike"), data_dict.get("pe_oi_status"), data_dict.get("pe_2nd_high_oi_strike"),
+            data_dict.get("pe_high_vol_strike"), data_dict.get("pe_vol_status"), data_dict.get("pe_2nd_high_vol_strike"),
+            "PE",
+            prev_pe_strike, prev_pe_status
+        )
+
+        # ==========================================
+        # 💾 अगर डेटा अलग है, तो सेव करें
+        # ==========================================
+        LiveSRData.objects.create(
+            Time=time_val,
+            Symbol=symbol,
+            Spot_Price=spot_val,
+            Expiry_Date=str(expiry_val) if expiry_val else None,
+            
+            # CE Data
+            ce_high_oi_strike=data_dict.get("ce_high_oi_strike"),
+            ce_oi_status=data_dict.get("ce_oi_status"),
+            ce_2nd_high_oi_strike=data_dict.get("ce_2nd_high_oi_strike"),
+            
+            ce_high_vol_strike=data_dict.get("ce_high_vol_strike"),
+            ce_vol_status=data_dict.get("ce_vol_status"),
+            ce_2nd_high_vol_strike=data_dict.get("ce_2nd_high_vol_strike"),
+            
+            resistance_strike=ce_final_strike,
+            resistance_status=ce_final_status,
+
+            # PE Data
+            pe_high_oi_strike=data_dict.get("pe_high_oi_strike"),
+            pe_oi_status=data_dict.get("pe_oi_status"),
+            pe_2nd_high_oi_strike=data_dict.get("pe_2nd_high_oi_strike"),
+            
+            pe_high_vol_strike=data_dict.get("pe_high_vol_strike"),
+            pe_vol_status=data_dict.get("pe_vol_status"),
+            pe_2nd_high_vol_strike=data_dict.get("pe_2nd_high_vol_strike"),
+            
+            supprt_strike=pe_final_strike,
+            supprt_status=pe_final_status,
+        )
+        return True
+
+    except Exception as e:
+        print(f"Error saving to new LiveSRData table for {symbol}: {e}")
+        return False
+
+        
 # Wrapper
 @sync_to_async
 def save_live_sr_data_async_wrapper(df, symbol):
