@@ -178,7 +178,6 @@ class InstrumentStore(models.Model):
         return f"{self.symbol} ({self.last_updated.date()})"
 
 
-# mystock/models.py में सबसे नीचे जोड़ें:
 
 class LiveSRData(models.Model):
     Time = models.DateTimeField()
@@ -199,7 +198,7 @@ class LiveSRData(models.Model):
     ce_vol_status = models.CharField(max_length=20, null=True, blank=True) # WTT/WTB/STRONG
     ce_2nd_high_vol_strike = models.FloatField(null=True, blank=True)
     resistance_strike = models.FloatField(null=True, blank=True)
-    resistance_status = models.CharField(max_length=20, null=True, blank=True)
+    resistance_status = models.CharField(max_length=100, null=True, blank=True)
 
     # =======================================
     # PE (PUT) - SUPPORT DATA
@@ -214,7 +213,7 @@ class LiveSRData(models.Model):
     pe_vol_status = models.CharField(max_length=20, null=True, blank=True) # WTT/WTB/STRONG
     pe_2nd_high_vol_strike = models.FloatField(null=True, blank=True)
     supprt_strike = models.FloatField(null=True, blank=True)
-    supprt_status = models.CharField(max_length=20, null=True, blank=True)
+    supprt_status = models.CharField(max_length=100, null=True, blank=True)
 
     def __str__(self):
         return f"{self.Symbol} - {self.Time.strftime('%H:%M:%S')}"
