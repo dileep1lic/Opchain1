@@ -4,38 +4,17 @@
     .footer-cell { padding: 10px; }
     .total-pos { color: #00e676; }
     .total-neg { color: #ff4d4d; }
-
-    /* ===== NEW: Resistance & Support Labels ===== */
-    .res-label, .sup-label {
-        position: absolute;
-        top: -22px; /* इसे थोड़ा और ऊपर कर दिया ताकि LTP न ढके */
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 2px 8px;
-        font-size: 10px; /* फॉन्ट थोड़ा स्लीक किया */
-        font-weight: bold;
-        border-radius: 4px;
-        z-index: 50; /* Z-index बढ़ा दिया ताकि यह सबके ऊपर रहे */
-        white-space: nowrap;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-    }
-    /* .res-label { */
-    .sup-label {
-        background: #b71c1c; 
-        color: #fff; 
-        border: 1px solid #ff5252; 
-    }
-    
-    .res-label {  
-        background: #1b5e20; 
-        color: #fff; 
-        border: 1px solid #00e676; 
-    }
+    /* SR लेबल्स का CSS हटा दिया गया है क्योंकि वह अब हेडर में है */
 </style>
 
 <input type="hidden" id="hidden-latest-time" value="{{ latest_time|date:'H:i:s' }}">
 <input type="hidden" id="hidden-spot-price" value="{{ spot|floatformat:2 }}">
 <input type="hidden" id="hidden-lot-size" value="{{ Lot_size }}">
+
+<input type="hidden" id="hidden-res-strike" value="{{ sr_data.resistance_strike|floatformat:0 }}">
+<input type="hidden" id="hidden-res-status" value="{{ sr_data.resistance_status }}">
+<input type="hidden" id="hidden-sup-strike" value="{{ sr_data.supprt_strike|floatformat:0 }}">
+<input type="hidden" id="hidden-sup-status" value="{{ sr_data.supprt_status }}">
 
 <table>
     <thead>
@@ -89,9 +68,6 @@
 
             <td class="{% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 <div style="position: relative; width: 100%; display: inline-block;">
-                    {% if row.is_spot_divider and sr_data %}
-                        <span class="res-label">Res: {{ sr_data.resistance_strike|floatformat:0 }} [{{ sr_data.resistance_status }}]</span>
-                    {% endif %}
                     <a href="javascript:void(0)" onclick="openLtpCalculator('CE', '{{ row.CE_LTP|default:0 }}', '{{ row.CE_Delta|default:0 }}', '{{ spot|default:0 }}')" style="color: inherit; text-decoration: underline; text-decoration-style: dotted;">
                         <strong>{{ row.CE_LTP }}</strong>
                     </a>
@@ -116,9 +92,6 @@
 
             <td class="{% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 <div style="position: relative; width: 100%; display: inline-block;">
-                    {% if row.is_spot_divider and sr_data %}
-                        <span class="sup-label">Sup: {{ sr_data.supprt_strike|floatformat:0 }} [{{ sr_data.supprt_status }}]</span>
-                    {% endif %}
                     <a href="javascript:void(0)" onclick="openLtpCalculator('PE', '{{ row.PE_LTP|default:0 }}', '{{ row.PE_Delta|default:0 }}', '{{ spot|default:0 }}')" style="color: inherit; text-decoration: underline; text-decoration-style: dotted;">
                         <strong>{{ row.PE_LTP }}</strong>
                     </a>
