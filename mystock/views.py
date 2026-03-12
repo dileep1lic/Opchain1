@@ -1137,20 +1137,187 @@ def live_data_view(request):
             "time": localtime(row.Time).strftime("%H:%M:%S"),
             'symbol': row.Symbol,
             'spot_price': row.Spot_Price,
+            
             'ce_high_vol': row.ce_high_vol_strike,
             'ce_vol': row.ce_vol_status,
+            'ce_2nd_high_vol': row.ce_2nd_high_vol_strike, 
+            
             'ce_high_oi': row.ce_high_oi_strike,
             'ce_oi': row.ce_oi_status,
+            'ce_2nd_high_oi': row.ce_2nd_high_oi_strike,   
+            
             'resistance_status': res_text,
+            
             'pe_high_vol': row.pe_high_vol_strike,
             'pe_vol': row.pe_vol_status,
+            'pe_2nd_high_vol': row.pe_2nd_high_vol_strike, 
+            
             'pe_high_oi': row.pe_high_oi_strike,
             'pe_oi': row.pe_oi_status,
+            'pe_2nd_high_oi': row.pe_2nd_high_oi_strike,  
+            
             'support_status': sup_text
         })
 
     return render(request, 'mystock/live_data.html', {'data': context_data})
-       
 
+import pandas as pd
+from django.core.cache import cache
+def reversal_chart_view2(request):
+    if request.method == 'POST':
+        timeframe_val = request.POST.get('timeframe', '5')
+        resample_rule = f"{timeframe_val}min" 
 
+        ce_strikes = [request.POST.get(f'ce_{i}') for i in range(1, 4) if request.POST.get(f'ce_{i}')]
+        pe_strikes = [request.POST.get(f'pe_{i}') for i in range(1, 4) if request.POST.get(f'pe_{i}')]
+        
+        # आज की बजाय कल की तारीख (Yesterday) निकालें
+        target_date = datetime.now().date() - timedelta(days=1)
+        
+        # डेटाबेस से कल का डेटा निकालें
+        spot_data = OptionChain.objects.filter(
+            Time__date=target_date,  # यहाँ target_date का इस्तेमाल किया है
+            Time__hour__gte=9,
+            Time__hour__lte=15
+        ).values('Time', 'Spot_Price')
+
+        df = pd.DataFrame(list(spot_data))
+        candlestick_data = []
+        
+        if not df.empty:
+            df['Time'] = pd.to_datetime(df['Time'])
+            
+            # --- UTC से IST (Indian Standard Time) में कन्वर्ट करने का कोड ---
+            if df['Time'].dt.tz is None:
+                # अगर टाइमज़ोन सेट नहीं है, तो पहले UTC सेट करें, फिर IST में बदलें
+                df['Time'] = df['Time'].dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
+            else:
+                # अगर पहले से टाइमज़ोन है, तो सीधे IST में बदलें
+                df['Time'] = df['Time'].dt.tz_convert('Asia/Kolkata')
+            # -------------------------------------------------------------
+            
+            df.set_index('Time', inplace=True)
+            
+            ohlc_df = df['Spot_Price'].resample(resample_rule).ohlc().dropna()
+            
+            for time, row in ohlc_df.iterrows():
+                candlestick_data.append({
+                    'time': time.strftime('%H:%M'), # अब यह 09:15, 09:20 ऐसे भारतीय समय दिखाएगा
+                    'open': row['open'],
+                    'high': row['high'],
+                    'low': row['low'],
+                    'close': row['close'],
+                })
+
+        # रिवर्सल प्राइस निकालना (कल के डेटा के आधार पर)
+        reversal_lines = []
+        
+        for strike in ce_strikes:
+            # यहाँ भी Time__date=target_date कर दिया है
+            latest_ce = OptionChain.objects.filter(Strike_Price=strike, Time__date=target_date).order_by('-Time').first()
+            if latest_ce and latest_ce.Reversl_Ce:
+                reversal_lines.append({'name': f'CE {strike}', 'price': latest_ce.Reversl_Ce, 'color': 'green'})
+                
+        for strike in pe_strikes:
+            # यहाँ भी Time__date=target_date कर दिया है
+            latest_pe = OptionChain.objects.filter(Strike_Price=strike, Time__date=target_date).order_by('-Time').first()
+            if latest_pe and latest_pe.Reversl_Pe:
+                reversal_lines.append({'name': f'PE {strike}', 'price': latest_pe.Reversl_Pe, 'color': 'red'})
+
+        return JsonResponse({
+            'candles': candlestick_data,
+            'lines': reversal_lines
+        })
+
+    return render(request, 'mystock/reversl_chart.html')
+
+def reversal_chart_view(request):
+    if request.method == 'POST':
+        timeframe_val = request.POST.get('timeframe', '5')
+        resample_rule = f"{timeframe_val}min" 
+
+        ce_strikes = [request.POST.get(f'ce_{i}') for i in range(1, 4) if request.POST.get(f'ce_{i}')]
+        pe_strikes = [request.POST.get(f'pe_{i}') for i in range(1, 4) if request.POST.get(f'pe_{i}')]
+        
+        target_date = datetime.now().date() # - timedelta(days=1) # (या आज की डेट)
+
+        # 1. एक यूनिक Cache Key बनाएँ
+        # ताकि हर अलग-अलग स्ट्राइक प्राइस और टाइमफ्रेम के लिए अलग कैश बने
+        ce_str = "_".join(ce_strikes)
+        pe_str = "_".join(pe_strikes)
+        cache_key = f"chart_data_{target_date}_{timeframe_val}_{ce_str}_{pe_str}"
+
+        # 2. चेक करें कि क्या डेटा पहले से कैश में मौजूद है
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            print("Serving from Cache! 🚀") # टर्मिनल में चेक करने के लिए
+            return JsonResponse(cached_data)
+
+        # ---------------------------------------------------------
+        # 3. अगर कैश में नहीं है, तो डेटाबेस से निकालें (Heavy Processing)
+        # ---------------------------------------------------------
+        print("Fetching from Database and Calculating... ⏳")
+        spot_data = OptionChain.objects.filter(
+            Time__date=target_date,
+            Time__hour__gte=9,
+            Time__hour__lte=15
+        ).values('Time', 'Spot_Price')
+
+        df = pd.DataFrame(list(spot_data))
+        candlestick_data = []
+        
+        if not df.empty:
+            df['Time'] = pd.to_datetime(df['Time'])
+            
+            if df['Time'].dt.tz is None:
+                df['Time'] = df['Time'].dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
+            else:
+                df['Time'] = df['Time'].dt.tz_convert('Asia/Kolkata')
+                
+            df.set_index('Time', inplace=True)
+            
+            ohlc_df = df['Spot_Price'].resample(resample_rule).ohlc().dropna()
+            
+            for time, row in ohlc_df.iterrows():
+                candlestick_data.append({
+                    # यहाँ वापस पूरा डेट-टाइम भेजें, हम HTML में इसे '09:15' दिखाएंगे
+                    'time': time.strftime('%Y-%m-%d %H:%M:%S'), 
+                    'open': row['open'],
+                    'high': row['high'],
+                    'low': row['low'],
+                    'close': row['close'],
+                })
+
+        reversal_lines = []
+        for strike in ce_strikes:
+            latest_ce = OptionChain.objects.filter(Strike_Price=strike, Time__date=target_date).order_by('-Time').first()
+            if latest_ce and latest_ce.Reversl_Ce:
+                reversal_lines.append({'name': f'CE {strike}', 'price': latest_ce.Reversl_Ce, 'color': 'green'})
+                
+        for strike in pe_strikes:
+            latest_pe = OptionChain.objects.filter(Strike_Price=strike, Time__date=target_date).order_by('-Time').first()
+            if latest_pe and latest_pe.Reversl_Pe:
+                reversal_lines.append({'name': f'PE {strike}', 'price': latest_pe.Reversl_Pe, 'color': 'red'})
+
+        # ---------------------------------------------------------
+        # 4. रिस्पॉन्स डेटा तैयार करें और उसे कैश में सेव कर दें
+        # ---------------------------------------------------------
+        # 1. चार्ट के लिए फिक्स स्टार्ट और एंड टाइम बनाना (target_date के हिसाब से)
+        start_time_str = f"{target_date} 09:15:00"
+        end_time_str = f"{target_date} 15:30:00"
+        
+        response_data = {
+            'candles': candlestick_data,
+            'lines': reversal_lines,
+            'start_time': start_time_str,  # <-- नया 
+            'end_time': end_time_str
+        }
+
+        # डेटा को 60 सेकंड (या अपनी ज़रूरत के हिसाब से) कैश में सेव करें
+        # लाइव मार्केट में 30 या 60 सेकंड सही रहता है
+        cache.set(cache_key, response_data, timeout=60) 
+
+        return JsonResponse(response_data)
+
+    return render(request, 'mystock/reversl_chart.html')
 
