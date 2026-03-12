@@ -188,6 +188,11 @@
             </span>
         </div>
 
+        
+
+    </div>
+
+    <div class="controls-group">
         <div class="stat-item sr-badge sr-sup">
             <span class="label sr-label-sup">Support (PE)</span>
             <span id="header-sup" class="value" style="color: var(--accent-red); font-size: 14px;">
@@ -195,14 +200,7 @@
                 <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.supprt_status|default:"Waiting..." }}]</span>
             </span>
         </div>
-<!-- 
-        <div class="stat-item">
-            <span class="label">Last Sync</span>
-            <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
-        </div> -->
-    </div>
-
-    <div class="controls-group">
+        
         <div class="control-card">
             <span class="card-title">Search</span>
             <a href="{% url 'search_dashboard' %}" target="_blank">
