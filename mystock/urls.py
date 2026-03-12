@@ -16,6 +16,8 @@ urlpatterns = [
     path('chart/view/coi/', views.render_chart_page_coi, name='chart_page_coi'), # HTML पेज
     path('api/coi-data/', views.specific_strike_coi_data, name='coi_data_api'), # JSON डेटा
 
+    path('reversal-chart/', views.reversal_chart_view, name='reversal_chart'),
+
     path('test-sr/', views.test_sr_logic_view, name='test_sr_logic'),
     path('live-resistance/', views.live_data_view, name='live_resistance'),
 
