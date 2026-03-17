@@ -23,5 +23,10 @@ urlpatterns = [
 
 
     path('option-chart/', views.option_chart_view, name='option_chart'),
-    path("option-chart-api/", views.option_chart_api, name="option_chart_api")
+    path("option-chart-api/", views.option_chart_api, name="option_chart_api"),
+
+
+
+    path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
+    path('resistance/', views.resistance_dashboard, name='resistance_dashboard'),
 ]
