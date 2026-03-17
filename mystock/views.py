@@ -1321,3 +1321,322 @@ def reversal_chart_view(request):
 
     return render(request, 'mystock/reversl_chart.html')
 
+
+
+
+
+
+
+
+
+"""
+views.py  — Resistance Live Dashboard API
+==========================================
+
+URLs में add करें:
+    path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
+    path('resistance/', views.resistance_dashboard, name='resistance_dashboard'),
+"""
+
+import json
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
+from django.utils import timezone
+from django.shortcuts import render
+from .models import LiveSRData
+
+
+# ─────────────────────────────────────────────────────
+# Resistance Calculator (Python logic — same as before)
+# ─────────────────────────────────────────────────────
+WTT    = "WTT"
+WTB    = "WTB"
+STRONG = "STRONG"
+
+
+class ResistanceCalculator:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._prev_label  = None
+        self._is_strong   = False
+        self._shifted     = False
+        self._shift_strike = None
+
+    def calculate(self, row_dict):
+        result = self._compute(row_dict)
+        self._prev_label = result
+        return result
+
+    def _compute(self, r):
+        vs    = r.get("ce_high_vol_strike")
+        os_   = r.get("ce_high_oi_strike")
+        vStat = (r.get("ce_vol_status") or "").upper()
+        oStat = (r.get("ce_oi_status")  or "").upper()
+
+        # ── CASE 1: Same Strike ──────────────────────────
+        if vs is not None and os_ is not None and vs == os_:
+            second = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
+
+            if vStat == WTT and oStat == WTT:
+                return (self._apply_shift(second, WTT, vs, r)
+                        if second else f"Resistance strong {vs}")
+
+            if vStat == WTB or oStat == WTB:
+                return (self._apply_shift(second, WTB, vs, r)
+                        if second else f"Resistance strong {vs}")
+
+            self._is_strong = False
+            self._shifted   = False
+            return "Resistance Both"
+
+        # ── CASE 2: Different Strikes ────────────────────
+        if vs is not None and os_ is not None:
+            if vs < os_:
+                pS, pStat, p2nd = vs,  vStat, r.get("ce_2nd_high_vol_strike")
+                pType = "Volume"
+            else:
+                pS, pStat, p2nd = os_, oStat, r.get("ce_2nd_high_oi_strike")
+                pType = "OI"
+        elif vs is not None:
+            pS, pStat, p2nd, pType = vs, vStat, r.get("ce_2nd_high_vol_strike"), "Volume"
+        else:
+            pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"), "OI"
+
+        if pStat == WTT:
+            return (self._apply_shift(p2nd, WTT, pS, r)
+                    if p2nd else f"Resistance strong {pS}")
+        if pStat == WTB:
+            return (self._apply_shift(p2nd, WTB, pS, r)
+                    if p2nd else f"Resistance strong {pS}")
+
+        self._is_strong = False
+        self._shifted   = False
+        return f"Resistance strong {pS}"
+
+    def _apply_shift(self, new_strike, wt, high_strike, r):
+        if self._is_strong:
+            s2 = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
+            self._is_strong = False
+            return f"Resistance {wt} {s2}" if s2 else f"Resistance strong {high_strike}"
+
+        if self._shifted and self._shift_strike == new_strike:
+            s2 = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
+            if s2 and s2 != new_strike:
+                return f"Resistance {wt} {s2}"
+            self._is_strong = True
+            return "Resistance Shifted strong"
+
+        prev = self._prev_label or ""
+        if f"Resistance {wt}" in prev and str(new_strike) not in prev:
+            return f"Resistance {wt} {new_strike}"
+
+        self._shift_strike = new_strike
+        self._shifted      = True
+        return f"Resistance {wt} {new_strike}"
+
+
+# ─────────────────────────────────────────────────────
+# Support Calculator (PE — Mirror of CE logic)
+# ─────────────────────────────────────────────────────
+class SupportCalculator:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._prev_label   = None
+        self._is_strong    = False
+        self._shifted      = False
+        self._shift_strike = None
+
+    def calculate(self, row_dict):
+        result = self._compute(row_dict)
+        self._prev_label = result
+        return result
+
+    def _compute(self, r):
+        vs    = r.get("pe_high_vol_strike")
+        os_   = r.get("pe_high_oi_strike")
+        vStat = (r.get("pe_vol_status") or "").upper()
+        oStat = (r.get("pe_oi_status")  or "").upper()
+
+        if vs is not None and os_ is not None and vs == os_:
+            second = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
+
+            if vStat == WTT and oStat == WTT:
+                return (self._apply_shift(second, WTT, vs, r)
+                        if second else f"Support strong {vs}")
+            if vStat == WTB or oStat == WTB:
+                return (self._apply_shift(second, WTB, vs, r)
+                        if second else f"Support strong {vs}")
+
+            self._is_strong = False
+            self._shifted   = False
+            return "Support Both"
+
+        if vs is not None and os_ is not None:
+            # PE में बड़ी (higher) strike primary होती है
+            if vs > os_:
+                pS, pStat, p2nd = vs,  vStat, r.get("pe_2nd_high_vol_strike")
+                pType = "Volume"
+            else:
+                pS, pStat, p2nd = os_, oStat, r.get("pe_2nd_high_oi_strike")
+                pType = "OI"
+        elif vs is not None:
+            pS, pStat, p2nd, pType = vs, vStat, r.get("pe_2nd_high_vol_strike"), "Volume"
+        else:
+            pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"), "OI"
+
+        if pStat == WTT:
+            return (self._apply_shift(p2nd, WTT, pS, r)
+                    if p2nd else f"Support strong {pS}")
+        if pStat == WTB:
+            return (self._apply_shift(p2nd, WTB, pS, r)
+                    if p2nd else f"Support strong {pS}")
+
+        self._is_strong = False
+        self._shifted   = False
+        return f"Support strong {pS}"
+
+    def _apply_shift(self, new_strike, wt, high_strike, r):
+        if self._is_strong:
+            s2 = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
+            self._is_strong = False
+            return f"Support {wt} {s2}" if s2 else f"Support strong {high_strike}"
+
+        if self._shifted and self._shift_strike == new_strike:
+            s2 = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
+            if s2 and s2 != new_strike:
+                return f"Support {wt} {s2}"
+            self._is_strong = True
+            return "Support Shifted strong"
+
+        prev = self._prev_label or ""
+        if f"Support {wt}" in prev and str(new_strike) not in prev:
+            return f"Support {wt} {new_strike}"
+
+        self._shift_strike = new_strike
+        self._shifted      = True
+        return f"Support {wt} {new_strike}"
+
+
+# ─────────────────────────────────────────────────────
+# Per-symbol calculator cache (दिन भर state रहे)
+# ─────────────────────────────────────────────────────
+_CALC_CACHE = {}   # { "NIFTY": (date, ResCalc, SupCalc), ... }
+
+def _get_calculators(symbol: str, today):
+    """Symbol के लिए आज के calculators return करता है।"""
+    if symbol in _CALC_CACHE:
+        cached_date, res_calc, sup_calc = _CALC_CACHE[symbol]
+        if cached_date == today:
+            return res_calc, sup_calc
+
+    res_calc = ResistanceCalculator()
+    sup_calc = SupportCalculator()
+    _CALC_CACHE[symbol] = (today, res_calc, sup_calc)
+    return res_calc, sup_calc
+
+
+def _row_to_dict(obj):
+    return {
+        "ce_high_vol_strike":      obj.ce_high_vol_strike,
+        "ce_vol_status":           obj.ce_vol_status,
+        "ce_2nd_high_vol_strike":  obj.ce_2nd_high_vol_strike,
+        "ce_high_oi_strike":       obj.ce_high_oi_strike,
+        "ce_oi_status":            obj.ce_oi_status,
+        "ce_2nd_high_oi_strike":   obj.ce_2nd_high_oi_strike,
+        "pe_high_vol_strike":      obj.pe_high_vol_strike,
+        "pe_vol_status":           obj.pe_vol_status,
+        "pe_2nd_high_vol_strike":  obj.pe_2nd_high_vol_strike,
+        "pe_high_oi_strike":       obj.pe_high_oi_strike,
+        "pe_oi_status":            obj.pe_oi_status,
+        "pe_2nd_high_oi_strike":   obj.pe_2nd_high_oi_strike,
+    }
+
+
+# ─────────────────────────────────────────────────────
+# API View  →  GET /api/resistance/?symbol=NIFTY
+# ─────────────────────────────────────────────────────
+@require_GET
+def resistance_live_api(request):
+    """
+    आज का सारा LiveSRData लेकर हर row पर
+    Resistance + Support calculate करके JSON return करता है।
+
+    Query params:
+        symbol  — NIFTY / BANKNIFTY (default: NIFTY)
+        limit   — कितने rows (default: 50, max: 200)
+    """
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    limit  = min(int(request.GET.get("limit", 50)), 200)
+
+    today = timezone.now().date()
+
+    qs = (LiveSRData.objects
+          .filter(Time__date=today, Symbol=symbol)
+          .order_by("Time"))
+
+    res_calc, sup_calc = _get_calculators(symbol, today)
+
+    # Calculators को आज के सारे rows पर fresh run करते हैं
+    # (state को replay करना जरूरी है ताकि latest row सही हो)
+    res_calc.reset()
+    sup_calc.reset()
+
+    all_rows = list(qs)
+    processed = []
+
+    for obj in all_rows:
+        rd = _row_to_dict(obj)
+        resistance = res_calc.calculate(rd)
+        support    = sup_calc.calculate(rd)
+
+        processed.append({
+            "time": localtime(obj.Time).strftime("%H:%M:%S"),
+            # "time":        obj.Time.strftime("%H:%M:%S"),
+            "spot":        obj.Spot_Price,
+            "expiry":      obj.Expiry_Date or "",
+
+            # CE
+            "ce_vol_strike":  obj.ce_high_vol_strike,
+            "ce_vol_status":  obj.ce_vol_status or "",
+            "ce_vol_2nd":     obj.ce_2nd_high_vol_strike,
+            "ce_oi_strike":   obj.ce_high_oi_strike,
+            "ce_oi_status":   obj.ce_oi_status or "",
+            "ce_oi_2nd":      obj.ce_2nd_high_oi_strike,
+
+            # PE
+            "pe_vol_strike":  obj.pe_high_vol_strike,
+            "pe_vol_status":  obj.pe_vol_status or "",
+            "pe_vol_2nd":     obj.pe_2nd_high_vol_strike,
+            "pe_oi_strike":   obj.pe_high_oi_strike,
+            "pe_oi_status":   obj.pe_oi_status or "",
+            "pe_oi_2nd":      obj.pe_2nd_high_oi_strike,
+
+            # Calculated
+            "resistance": resistance,
+            "support":    support,
+        })
+
+    # Latest N rows (newest first)
+    result = list(reversed(processed[-limit:]))
+
+    return JsonResponse({
+        "symbol":      symbol,
+        "date":        str(today),
+        "total_rows":  len(all_rows),
+        "rows":        result,
+        "latest":      result[0] if result else None,
+        "server_time": timezone.now().strftime("%H:%M:%S"),
+    })
+
+
+# ─────────────────────────────────────────────────────
+# Dashboard View  →  GET /resistance/
+# ─────────────────────────────────────────────────────
+def resistance_dashboard(request):
+    """HTML dashboard serve करता है।"""
+    return render(request, "mystock/resistance_dashboard.html")
+
