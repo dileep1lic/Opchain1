@@ -176,6 +176,10 @@
             <span id="header-spot" class="value spot-val">{{ spot|floatformat:2 }}</span>
         </div>
         <div class="stat-item">
+            <span class="label">Expiry</span>
+            <span class="value expiry-val">{{ expiry_date|date:"d-M" }}</span>
+        </div>
+        <div class="stat-item">
             <span class="label">Last Sync</span>
             <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
         </div>
@@ -215,8 +219,14 @@
         </div>
         <div class="control-card">
             <span class="card-title">S&R History</span>
-            <a href="{% url 'live_resistance' %}" target="_blank">
+            <a href="{% url 'resistance_dashboard' %}" target="_blank">
                 <button class="action-btn btn-blue">NIFTY ↗</button>
+            </a>
+        </div>
+        <div class="control-card" style="background: rgba(255,193,7,0.06); border-color: rgba(255,193,7,0.25);">
+            <span class="card-title" style="color: #ffc107;">Market Replay</span>
+            <a href="{% url 'market_replay' %}" target="_blank">
+                <button class="action-btn" style="background: rgba(255,193,7,0.15); color: #ffc107; border: 1px solid rgba(255,193,7,0.35);">▶ REPLAY</button>
             </a>
         </div>
     </div>
