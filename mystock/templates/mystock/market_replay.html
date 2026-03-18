@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Market Replay — Tick by Tick</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg-dark:      #0f1115;
+      --header-bg:    #181b21;
+      --card-bg:      #1e2028;
+      --border:       #2a2d35;
+      --border-hi:    #3a3f4e;
+      --text:         #e8eaf0;
+      --text-dim:     #6b7280;
+      --text-muted:   #374151;
+
+      --accent-blue:  #2962ff;
+      --accent-yellow:#ffc107;
+      --accent-green: #00c853;
+      --accent-red:   #ff1744;
+      --accent-cyan:  #00bcd4;
+
+      --itm-bg:       #1a1f2e;
+      --strike-bg:    #000066;
+      --up-green:     #00e676;
+      --down-red:     #ff5252;
+
+      --player-h:     56px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ═══════ TOP HEADER ═══════ */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 18px;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      height: 52px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      font-weight: 900;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+      color: #fff;
+      white-space: nowrap;
+    }
+    .brand span { color: var(--accent-yellow); }
+
+    .sep { width: 1px; height: 28px; background: var(--border); flex-shrink: 0; }
+
+    /* Selectors */
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ctrl-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      white-space: nowrap;
+    }
+    select, input[type=date] {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      padding: 5px 8px;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+    select:focus, input[type=date]:focus { border-color: var(--accent-blue); }
+    select option { background: var(--card-bg); }
+
+    .load-btn {
+      background: var(--accent-blue);
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: 0.15s;
+    }
+    .load-btn:hover { background: #1a4fdb; }
+
+    /* Header stats */
+    .hstat { display: flex; flex-direction: column; align-items: center; padding: 0 10px; }
+    .hstat .hl  { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; }
+    .hstat .hv  { font-size: 14px; font-weight: 700; font-family: 'Roboto Mono', monospace; }
+    .hv.spot    { color: var(--accent-green); }
+    .hv.time    { color: var(--accent-yellow); font-size: 13px; }
+    .hv.tick-no { color: var(--accent-cyan); }
+
+    .back-link {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-decoration: none;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      transition: 0.15s;
+      white-space: nowrap;
+    }
+    .back-link:hover { color: var(--text); border-color: var(--border-hi); }
+
+    /* ═══════ PLAYER BAR ═══════ */
+    .player-bar {
+      background: #12151c;
+      border-bottom: 1px solid var(--border);
+      padding: 0 18px;
+      height: var(--player-h);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+
+    /* Play/Pause/Stop */
+    .pbtn {
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      transition: 0.15s;
+      flex-shrink: 0;
+    }
+    .pbtn-play  { background: var(--accent-green); color: #000; }
+    .pbtn-play:hover { background: #00f56a; }
+    .pbtn-pause { background: var(--accent-yellow); color: #000; }
+    .pbtn-pause:hover { filter: brightness(1.15); }
+    .pbtn-stop  { background: var(--accent-red); color: #fff; }
+    .pbtn-stop:hover  { filter: brightness(1.15); }
+    .pbtn-step  { background: var(--card-bg); color: var(--text); border: 1px solid var(--border); font-size: 12px; font-weight: 700; border-radius: 5px; width: auto; padding: 0 10px; height: 34px; }
+    .pbtn-step:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+
+    /* Speed */
+    .speed-group { display: flex; align-items: center; gap: 5px; }
+    .speed-group .ctrl-label { margin: 0; }
+    .speed-select {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent-cyan);
+      font-family: 'Roboto Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 6px;
+      outline: none;
+      cursor: pointer;
+      width: 68px;
+    }
+
+    /* Timeline scrubber */
+    .timeline-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+    .timeline-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--text-dim);
+      font-family: 'Roboto Mono', monospace;
+    }
+    #scrubber {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--border);
+      outline: none;
+      cursor: pointer;
+    }
+    #scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--accent-blue);
+      cursor: pointer;
+      border: 2px solid #fff;
+      box-shadow: 0 0 6px rgba(41,98,255,0.5);
+    }
+
+    /* Progress fill via JS */
+    .progress-bar-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .tick-counter {
+      font-family: 'Roboto Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .tick-counter span { color: var(--accent-cyan); font-weight: 700; }
+
+    /* Status pill */
+    .status-pill {
+      padding: 3px 10px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .pill-idle    { background: rgba(107,114,128,0.15); color: var(--text-dim); border: 1px solid var(--border); }
+    .pill-loading { background: rgba(255,193,7,0.12);   color: var(--accent-yellow); border: 1px solid rgba(255,193,7,0.3); animation: blink 1s infinite; }
+    .pill-playing { background: rgba(0,200,83,0.12);    color: var(--accent-green);  border: 1px solid rgba(0,200,83,0.3);  animation: blink 1.4s infinite; }
+    .pill-paused  { background: rgba(41,98,255,0.12);   color: #64b5f6;              border: 1px solid rgba(41,98,255,0.3); }
+    .pill-done    { background: rgba(0,188,212,0.12);   color: var(--accent-cyan);   border: 1px solid rgba(0,188,212,0.3); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* ═══════ TABLE ═══════ */
+    .table-wrap {
+      flex: 1;
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card-bg);
+      table-layout: fixed;
+      font-family: 'Roboto Mono', monospace;
+    }
+
+    th, td {
+      border: 1px solid #2a2d35;
+      padding: 2px 4px;
+      text-align: center;
+      font-size: 11.5px;
+      height: 34px;        /* 2-line ke liye thoda zyada */
+      line-height: 1.2;
+    }
+
+    thead {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .th-group-ce     { background: #061933; color: #4fc3f7; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 5px 2px; }
+    .th-group-strike { background: #0a0a3a; color: var(--accent-yellow); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 5px 2px; }
+    .th-group-pe     { background: #1f0514; color: #f48fb1; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 5px 2px; }
+
+    .th-sub-ce     { background: #071c33; color: #5ba8d4; font-size: 10px; height: 28px; }
+    .th-sub-strike { background: #000066; color: var(--accent-yellow); font-size: 10px; height: 28px; }
+    .th-sub-pe     { background: #1a0210; color: #cf6fa8; font-size: 10px; height: 28px; }
+
+    tbody tr { border-bottom: 1px solid #1e2128; }
+    tbody tr:hover td { filter: brightness(1.25); }
+
+    .td-ce     { background: #061526; color: var(--text); }
+    .td-strike { background: var(--strike-bg); color: var(--accent-yellow); font-weight: 700; font-size: 13px; position: relative; }
+    .td-pe     { background: #160510; color: var(--text); }
+    .td-itm-ce { background: #0c2440; }
+    .td-itm-pe { background: #2a0518; }
+
+    /* ── Ranking highlight classes (Dashboard jaisi) ── */
+    .bg-green  { background-color: #1b5e20 !important; color: #fff !important; }
+    .bg-red    { background-color: #b71c1c !important; color: #fff !important; }
+    .bg-yellow { background-color: #f9a825 !important; color: #000 !important; }
+    /* % text bhi readable rahe highlight mein */
+    .bg-green  .cell-pct,
+    .bg-red    .cell-pct  { color: rgba(255,255,255,0.8) !important; opacity: 1; }
+    .bg-yellow .cell-pct  { color: rgba(0,0,0,0.7)       !important; opacity: 1; }
+
+    .pos-val { color: var(--up-green) !important; font-weight: 700; }
+    .neg-val { color: var(--down-red) !important; font-weight: 700; }
+    .dim-val { color: var(--text-muted); }
+
+    .spot-line td { border-top: 3px solid var(--accent-red) !important; }
+
+    .spot-label {
+      position: absolute;
+      top: -14px; left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent-yellow);
+      color: #000; padding: 1px 8px;
+      font-size: 10px; font-weight: 900;
+      border-radius: 8px; z-index: 5;
+      white-space: nowrap;
+    }
+
+    /* Value + % two-line cell */
+    .cell-main { display: block; font-weight: 600; line-height: 1.3; }
+    .cell-pct  {
+      display: block;
+      font-size: 9.5px;
+      font-weight: 400;
+      opacity: 0.72;
+      line-height: 1.2;
+      margin-top: 1px;
+    }
+    .cell-pct.pos-pct { color: var(--up-green);  opacity: 0.9; }
+    .cell-pct.neg-pct { color: var(--down-red);  opacity: 0.9; }
+    .pct-small { font-size: 9px; opacity: 0.65; display: block; margin-top: 1px; }
+
+    /* Flash animation on tick update */
+    @keyframes flash-ce { 0%{background:#0a3a6a} 100%{background:#061526} }
+    @keyframes flash-pe { 0%{background:#4a0a28} 100%{background:#160510} }
+    .flash-ce { animation: flash-ce 0.6s ease; }
+    .flash-pe { animation: flash-pe 0.6s ease; }
+    .flash-strike { animation: flash-ce 0.4s ease; }
+
+    /* Empty/Loading state */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 20px;
+      gap: 12px;
+      color: var(--text-dim);
+    }
+    .empty-icon { font-size: 52px; }
+    .empty-text { font-size: 14px; }
+    .empty-hint { font-size: 12px; color: var(--text-muted); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg-dark); }
+    ::-webkit-scrollbar-thumb { background: #2a2d35; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ TOP HEADER ═══════════════ -->
+<div class="top-bar">
+  <div class="brand">Market <span>Replay</span></div>
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <span class="ctrl-label">Symbol</span>
+    <select id="sel-symbol" onchange="onSymbolChange()">
+      {% for sym in symbols %}
+      <option value="{{ sym }}">{{ sym }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="ctrl-group">
+    <span class="ctrl-label">Expiry</span>
+    <select id="sel-expiry">
+      <option value="">All</option>
+      {% for ed in expiry_dates %}
+      <option value="{{ ed }}">{{ ed }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="ctrl-group">
+    <span class="ctrl-label">Date</span>
+    <input type="date" id="sel-date"/>
+  </div>
+
+  <button class="load-btn" onclick="loadReplay()">⏬ Load</button>
+
+  <div class="sep"></div>
+
+  <div class="hstat">
+    <span class="hl">Spot</span>
+    <span id="hdr-spot" class="hv spot">—</span>
+  </div>
+  <div class="hstat">
+    <span class="hl">Time</span>
+    <span id="hdr-time" class="hv time">—</span>
+  </div>
+  <div class="hstat">
+    <span class="hl">Tick</span>
+    <span id="hdr-tick" class="hv tick-no">0 / 0</span>
+  </div>
+
+  <a href="{% url 'dashboard' %}" class="back-link">← Live Dashboard</a>
+</div>
+
+<!-- ═══════════════ PLAYER BAR ═══════════════ -->
+<div class="player-bar">
+
+  <button class="pbtn pbtn-play"  id="btn-play"  onclick="playReplay()"  title="Play (Space)">▶</button>
+  <button class="pbtn pbtn-pause" id="btn-pause" onclick="pauseReplay()" title="Pause (Space)" style="display:none">⏸</button>
+  <button class="pbtn pbtn-stop"  onclick="stopReplay()" title="Stop">⏹</button>
+  <button class="pbtn pbtn-step"  onclick="stepForward()"  title="Next Tick →">+1 →</button>
+  <button class="pbtn pbtn-step"  onclick="stepBackward()" title="Prev Tick ←">← -1</button>
+
+  <div class="sep" style="height:28px"></div>
+
+  <div class="speed-group">
+    <span class="ctrl-label">Speed</span>
+    <select class="speed-select" id="sel-speed">
+      <option value="3000">0.5×</option>
+      <option value="1500" selected>1×</option>
+      <option value="750">2×</option>
+      <option value="300">5×</option>
+      <option value="100">10×</option>
+      <option value="30">MAX</option>
+    </select>
+  </div>
+
+  <div class="sep" style="height:28px"></div>
+
+  <div class="timeline-wrap">
+    <div class="timeline-labels">
+      <span id="tl-start">—</span>
+      <span id="tl-mid">—</span>
+      <span id="tl-end">—</span>
+    </div>
+    <input type="range" id="scrubber" min="0" value="0" step="1"
+           oninput="scrubTo(this.value)" onchange="scrubTo(this.value)"/>
+  </div>
+
+  <div class="tick-counter">
+    Tick <span id="tc-cur">0</span> / <span id="tc-tot">0</span>
+  </div>
+
+  <div class="status-pill pill-idle" id="status-pill">IDLE</div>
+</div>
+
+<!-- ═══════════════ TABLE ═══════════════ -->
+<div class="table-wrap" id="table-wrap">
+  <div class="empty-state" id="empty-state">
+    <div class="empty-icon">⏳</div>
+    <div class="empty-text">Symbol, Expiry aur Date select karein</div>
+    <div class="empty-hint">Phir "Load" button dabayein</div>
+  </div>
+  <table id="replay-table" style="display:none">
+    <thead id="table-head"></thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════
+let timestamps   = [];   // sabhi ticks ka list (strings)
+let currentTick  = 0;    // 0-indexed current position
+let playTimer    = null; // setInterval handle
+let isPlaying    = false;
+let cachedData   = {};   // timestamp → rows (cache)
+let currentRows  = [];   // current tick ki rows
+
+// ══════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════
+const $  = id => document.getElementById(id);
+const gs = id => document.getElementById(id).value;
+
+function setStatus(type, text) {
+  const el = $('status-pill');
+  el.className = 'status-pill pill-' + type;
+  el.textContent = text;
+}
+
+function setPlayBtn(playing) {
+  $('btn-play').style.display  = playing ? 'none'  : 'flex';
+  $('btn-pause').style.display = playing ? 'flex'  : 'none';
+}
+
+function updateHeaderStats(spot, timestamp) {
+  $('hdr-spot').textContent = spot ? parseFloat(spot).toFixed(2) : '—';
+  if (timestamp) {
+    const t = timestamp.split(' ')[1] || timestamp;
+    $('hdr-time').textContent = t;
+  }
+  $('hdr-tick').textContent  = `${currentTick + 1} / ${timestamps.length}`;
+  $('tc-cur').textContent    = currentTick + 1;
+  $('tc-tot').textContent    = timestamps.length;
+  $('scrubber').value        = currentTick;
+}
+
+function updateTimeline() {
+  if (!timestamps.length) return;
+  const start = timestamps[0].split(' ')[1];
+  const mid   = timestamps[Math.floor(timestamps.length / 2)].split(' ')[1];
+  const end   = timestamps[timestamps.length - 1].split(' ')[1];
+  $('tl-start').textContent = start;
+  $('tl-mid').textContent   = mid;
+  $('tl-end').textContent   = end;
+}
+
+function fmt(val) {
+  if (val === '' || val === null || val === undefined) return '<span style="color:#2a3040">—</span>';
+  return val;
+}
+
+function colorLTP(ltp, cltp) {
+  if (ltp === '' || cltp === '') return fmt(ltp);
+  const diff = parseFloat(ltp) - parseFloat(cltp);
+  const cls  = diff > 0 ? 'pos-val' : diff < 0 ? 'neg-val' : '';
+  return `<span class="${cls}">${ltp}</span>`;
+}
+
+// ══════════════════════════════════════════════
+//  LOAD — timestamps fetch
+// ══════════════════════════════════════════════
+async function loadReplay() {
+  const symbol = gs('sel-symbol');
+  const expiry = gs('sel-expiry');
+  const date   = gs('sel-date');
+
+  if (!symbol || !date) {
+    alert('Symbol aur Date zaroori hain!');
+    return;
+  }
+
+  stopReplay();
+  setStatus('loading', 'LOADING...');
+  $('empty-state').style.display  = 'flex';
+  $('replay-table').style.display = 'none';
+  $('empty-state').querySelector('.empty-text').textContent = 'Data load ho raha hai...';
+  $('empty-state').querySelector('.empty-hint').textContent = 'Database se ticks aa rahe hain';
+
+  const params = new URLSearchParams({ symbol, expiry_date: expiry, replay_date: date });
+  const res = await fetch(`{% url 'api_replay_timestamps' %}?${params}`);
+  const json = await res.json();
+
+  if (!json.timestamps || !json.timestamps.length) {
+    setStatus('idle', 'NO DATA');
+    $('empty-state').querySelector('.empty-text').textContent = 'Is date ka data nahi mila!';
+    $('empty-state').querySelector('.empty-hint').textContent = 'Dusri date try karein';
+    return;
+  }
+
+  timestamps  = json.timestamps;
+  currentTick = 0;
+  cachedData  = {};
+
+  $('scrubber').max   = timestamps.length - 1;
+  $('scrubber').value = 0;
+  $('tc-tot').textContent = timestamps.length;
+  updateTimeline();
+  buildTableHead();
+
+  setStatus('paused', 'READY');
+
+  // First tick load karke show karo
+  await renderTick(0);
+}
+
+// ══════════════════════════════════════════════
+//  FETCH ONE TICK
+// ══════════════════════════════════════════════
+async function fetchTick(index) {
+  const ts = timestamps[index];
+  if (cachedData[ts]) return cachedData[ts];
+
+  const symbol = gs('sel-symbol');
+  const expiry = gs('sel-expiry');
+  const params = new URLSearchParams({ symbol, expiry_date: expiry, timestamp: ts });
+  const res = await fetch(`{% url 'api_replay_tick' %}?${params}`);
+  const json = await res.json();
+  cachedData[ts] = json;
+  return json;
+}
+
+// Pre-fetch next N ticks in background
+function prefetch(fromIndex, count = 5) {
+  for (let i = fromIndex; i < Math.min(fromIndex + count, timestamps.length); i++) {
+    if (!cachedData[timestamps[i]]) {
+      fetchTick(i); // background, no await
+    }
+  }
+}
+
+// ══════════════════════════════════════════════
+//  RENDER TICK
+// ══════════════════════════════════════════════
+async function renderTick(index) {
+  if (index < 0 || index >= timestamps.length) return;
+
+  const data = await fetchTick(index);
+  if (!data || !data.rows || !data.rows.length) {
+    updateHeaderStats(null, timestamps[index]);
+    return;
+  }
+
+  currentRows = data.rows;
+  currentTick = index;
+
+  updateHeaderStats(data.spot_price, data.timestamp);
+  buildTableBody(data.rows, data.spot_price);
+
+  // Pre-fetch agle ticks
+  prefetch(index + 1, 8);
+
+  // Show table
+  $('empty-state').style.display  = 'none';
+  $('replay-table').style.display = 'table';
+}
+
+// ══════════════════════════════════════════════
+//  BUILD TABLE HEAD
+// ══════════════════════════════════════════════
+function buildTableHead() {
+  $('table-head').innerHTML = `
+    <tr>
+      <th colspan="8"  class="th-group-ce">CALL (CE)</th>
+      <th colspan="1"  class="th-group-strike">STRIKE</th>
+      <th colspan="8"  class="th-group-pe">PUT (PE)</th>
+    </tr>
+    <tr>
+      <th class="th-sub-ce">Delta</th>
+      <th class="th-sub-ce">Range</th>
+      <th class="th-sub-ce">IV</th>
+      <th class="th-sub-ce">CHG OI</th>
+      <th class="th-sub-ce">OI</th>
+      <th class="th-sub-ce">Volume</th>
+      <th class="th-sub-ce">LTP</th>
+      <th class="th-sub-ce">Reversal</th>
+      <th class="th-sub-strike">Strike</th>
+      <th class="th-sub-pe">Reversal</th>
+      <th class="th-sub-pe">LTP</th>
+      <th class="th-sub-pe">Volume</th>
+      <th class="th-sub-pe">OI</th>
+      <th class="th-sub-pe">CHG OI</th>
+      <th class="th-sub-pe">IV</th>
+      <th class="th-sub-pe">Range</th>
+      <th class="th-sub-pe">Delta</th>
+    </tr>
+  `;
+}
+
+// ══════════════════════════════════════════════
+//  RANKING LOGIC  (Python dashboard jaisi)
+//  Har metric ke liye rows sort karke top-3 ko
+//  bg-green / bg-red / bg-yellow assign karta hai
+// ══════════════════════════════════════════════
+
+const RANK_METRICS = [
+  'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
+  'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent',
+];
+
+function applyRankingStyles(rows) {
+  // Pehle saari ranking classes reset karo
+  const classKey = m => m.replace('_percent', '_class');
+  rows.forEach(r => RANK_METRICS.forEach(m => delete r[classKey(m)]));
+
+  RANK_METRICS.forEach(metric => {
+    const key = classKey(metric);
+
+    // Sort descending by metric value
+    const ranked = [...rows]
+      .sort((a, b) => (parseFloat(b[metric]) || 0) - (parseFloat(a[metric]) || 0));
+
+    const val0 = parseFloat(ranked[0]?.[metric]) || 0;
+    const val1 = parseFloat(ranked[1]?.[metric]) || 0;
+    const val2 = parseFloat(ranked[2]?.[metric]) || 0;
+
+    // Rank 1 → green (agar positive hai)
+    if (val0 > 0 && ranked[0]) ranked[0][key] = 'bg-green';
+
+    // Rank 2 → red (>=75) ya yellow (65-74)
+    if (ranked[1]) {
+      if      (val1 >= 75) ranked[1][key] = 'bg-red';
+      else if (val1 >= 65) ranked[1][key] = 'bg-yellow';
+    }
+
+    // Rank 3 → yellow sirf tab jab rank-2 >=75 aur ye >=65
+    if (ranked[2] && val1 >= 75 && val2 >= 65) {
+      ranked[2][key] = 'bg-yellow';
+    }
+  });
+
+  return rows;
+}
+
+// ══════════════════════════════════════════════
+//  BUILD TABLE BODY
+// ══════════════════════════════════════════════
+
+/* Value + % neeche — screenshot jaisa format
+   e.g.   2932
+          (100.0 %)                              */
+function withPct(val, pct) {
+  if (val === '' && pct === '') return '<span style="color:#2a3040">—</span>';
+  const mainHtml = `<span class="cell-main">${val !== '' ? val : '—'}</span>`;
+  if (pct === '') return mainHtml;
+  const p    = parseFloat(pct);
+  const cls  = !isNaN(p) ? (p > 0 ? 'pos-pct' : p < 0 ? 'neg-pct' : '') : '';
+  return `${mainHtml}<span class="cell-pct ${cls}">(${pct} %)</span>`;
+}
+
+/* CHG OI: value ke saath % — value color bhi hogi */
+function withPctColored(val, pct) {
+  if (val === '' && pct === '') return '<span style="color:#2a3040">—</span>';
+  const v   = parseFloat(val);
+  const cls = !isNaN(v) ? (v > 0 ? 'pos-val' : v < 0 ? 'neg-val' : '') : '';
+  const mainHtml = `<span class="cell-main ${cls}">${val !== '' ? val : '—'}</span>`;
+  if (pct === '') return mainHtml;
+  const p    = parseFloat(pct);
+  const pcls = !isNaN(p) ? (p > 0 ? 'pos-pct' : p < 0 ? 'neg-pct' : '') : '';
+  return `${mainHtml}<span class="cell-pct ${pcls}">(${pct} %)</span>`;
+}
+
+function buildTableBody(rows, spotPrice) {
+  const spot       = parseFloat(spotPrice) || 0;
+  let   spotMarked = false;
+  const tbody      = $('table-body');
+
+  // ── Ranking styles apply karo (dashboard jaisi) ──
+  applyRankingStyles(rows);
+
+  const html = rows.map((r) => {
+    const strike    = parseFloat(r.Strike_Price) || 0;
+    const isITM_CE  = strike < spot;
+    const isITM_PE  = strike > spot;
+    const isSpotRow = !spotMarked && strike >= spot;
+
+    if (isSpotRow) spotMarked = true;
+    const spotLabel = isSpotRow
+      ? `<span class="spot-label">${spot.toFixed(0)}</span>` : '';
+
+    const ceCls = isITM_CE ? 'td-ce td-itm-ce' : 'td-ce';
+    const peCls = isITM_PE ? 'td-pe td-itm-pe' : 'td-pe';
+
+    // Ranking class helpers
+    const rk = (metric) => r[metric.replace('_percent','_class')] || '';
+
+    /* LTP: value ऊपर, change नीचे */
+    function ltpCell(ltp, cltp) {
+      if (ltp === '') return '<span style="color:#2a3040">—</span>';
+      const diff = (ltp !== '' && cltp !== '')
+                   ? parseFloat(ltp) - parseFloat(cltp) : 0;
+      const cls  = diff > 0 ? 'pos-val' : diff < 0 ? 'neg-val' : '';
+      const chg  = (cltp !== '' && diff !== 0)
+                   ? `<span class="cell-pct ${diff>0?'pos-pct':'neg-pct'}">(${diff>0?'+':''}${diff.toFixed(1)})</span>`
+                   : '';
+      return `<span class="cell-main ${cls}">${ltp}</span>${chg}`;
+    }
+
+    return `<tr class="${isSpotRow ? 'spot-line' : ''}">
+      <td class="${ceCls}">${fmt(r.CE_Delta)}</td>
+      <td class="${ceCls}">${fmt(r.CE_RANGE)}</td>
+      <td class="${ceCls}">${fmt(r.CE_IV)}</td>
+      <td class="${ceCls} ${rk('CE_COI_percent')}">${withPctColored(fmt(r.CE_COI), fmt(r.CE_COI_percent))}</td>
+      <td class="${ceCls} ${rk('CE_OI_percent')}">${withPct(fmt(r.CE_OI), fmt(r.CE_OI_percent))}</td>
+      <td class="${ceCls} ${rk('CE_Volume_percent')}">${withPct(fmt(r.CE_Volume), fmt(r.CE_Volume_percent))}</td>
+      <td class="${ceCls} flash-ce">${ltpCell(fmt(r.CE_LTP), fmt(r.CE_CLTP))}</td>
+      <td class="${ceCls}">${fmt(r.Reversl_Ce)}</td>
+
+      <td class="td-strike">${spotLabel}${fmt(r.Strike_Price)}</td>
+
+      <td class="${peCls}">${fmt(r.Reversl_Pe)}</td>
+      <td class="${peCls} flash-pe">${ltpCell(fmt(r.PE_LTP), fmt(r.PE_CLTP))}</td>
+      <td class="${peCls} ${rk('PE_Volume_percent')}">${withPct(fmt(r.PE_Volume), fmt(r.PE_Volume_percent))}</td>
+      <td class="${peCls} ${rk('PE_OI_percent')}">${withPct(fmt(r.PE_OI), fmt(r.PE_OI_percent))}</td>
+      <td class="${peCls} ${rk('PE_COI_percent')}">${withPctColored(fmt(r.PE_COI), fmt(r.PE_COI_percent))}</td>
+      <td class="${peCls}">${fmt(r.PE_IV)}</td>
+      <td class="${peCls}">${fmt(r.PE_RANGE)}</td>
+      <td class="${peCls}">${fmt(r.PE_Delta)}</td>
+    </tr>`;
+  }).join('');
+
+  tbody.innerHTML = html;
+
+  const spotRow = tbody.querySelector('.spot-line');
+  if (spotRow) {
+    requestAnimationFrame(() => {
+      spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+}
+
+// ══════════════════════════════════════════════
+//  PLAYBACK CONTROLS
+// ══════════════════════════════════════════════
+function playReplay() {
+  if (!timestamps.length) { alert('Pehle data load karein!'); return; }
+  if (currentTick >= timestamps.length - 1) { currentTick = 0; } // restart
+  isPlaying = true;
+  setPlayBtn(true);
+  setStatus('playing', '▶ PLAYING');
+  tick();
+}
+
+function tick() {
+  if (!isPlaying || currentTick >= timestamps.length - 1) {
+    if (currentTick >= timestamps.length - 1) doneReplay();
+    return;
+  }
+  currentTick++;
+  renderTick(currentTick);
+  const delay = parseInt($('sel-speed').value) || 1500;
+  playTimer = setTimeout(tick, delay);
+}
+
+function pauseReplay() {
+  isPlaying = false;
+  clearTimeout(playTimer);
+  setPlayBtn(false);
+  setStatus('paused', '⏸ PAUSED');
+}
+
+function stopReplay() {
+  isPlaying = false;
+  clearTimeout(playTimer);
+  setPlayBtn(false);
+  if (timestamps.length) {
+    setStatus('paused', 'STOPPED');
+    currentTick = 0;
+    renderTick(0);
+  } else {
+    setStatus('idle', 'IDLE');
+  }
+}
+
+function doneReplay() {
+  isPlaying = false;
+  clearTimeout(playTimer);
+  setPlayBtn(false);
+  setStatus('done', '✓ DONE');
+}
+
+function stepForward() {
+  if (currentTick < timestamps.length - 1) {
+    pauseReplay();
+    currentTick++;
+    renderTick(currentTick);
+  }
+}
+
+function stepBackward() {
+  if (currentTick > 0) {
+    pauseReplay();
+    currentTick--;
+    renderTick(currentTick);
+  }
+}
+
+function scrubTo(val) {
+  pauseReplay();
+  const idx = parseInt(val);
+  if (idx >= 0 && idx < timestamps.length) {
+    currentTick = idx;
+    renderTick(idx);
+  }
+}
+
+// ══════════════════════════════════════════════
+//  SYMBOL CHANGE → Dates fetch
+// ══════════════════════════════════════════════
+async function onSymbolChange() {
+  const symbol = gs('sel-symbol');
+  if (!symbol) return;
+  const res  = await fetch(`{% url 'api_replay_dates' %}?symbol=${symbol}`);
+  const json = await res.json();
+  // Last available date set karo
+  if (json.dates && json.dates.length) {
+    $('sel-date').value = json.dates[json.dates.length - 1];
+    $('sel-date').min   = json.dates[0];
+    $('sel-date').max   = json.dates[json.dates.length - 1];
+  }
+}
+
+// ══════════════════════════════════════════════
+//  KEYBOARD SHORTCUTS
+// ══════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (['INPUT','SELECT'].includes(document.activeElement.tagName)) return;
+  if (e.key === ' ')           { e.preventDefault(); isPlaying ? pauseReplay() : playReplay(); }
+  if (e.key === 'ArrowRight')  stepForward();
+  if (e.key === 'ArrowLeft')   stepBackward();
+  if (e.key === 'Escape')      stopReplay();
+});
+
+// ══════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════
+window.onload = () => {
+  onSymbolChange();
+};
+</script>
+</body>
+</html>
