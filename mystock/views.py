@@ -613,162 +613,6 @@ def render_chart_page_coi(request):
         'strike': request.GET.get('strike')
     })
 
-def calculate_final_sr(oi_strike, oi_status, vol_strike, vol_status, option_type, prev_strike=None, prev_status=None):
-    """
-    यह फंक्शन आपके नियमों के अनुसार फाइनल Support/Resistance और उसका Status निकालता है।
-    अब यह Shifted WTT/WTB और STRONG के बाद वाले लॉजिक को भी हैंडल करेगा।
-    """
-    
-    if not oi_strike or not vol_strike:
-        return None, None
-
-    # ==========================================
-    # नियम 1: अगर OI और Volume दोनों एक ही स्ट्राइक पर हैं
-    # ==========================================
-    if oi_strike == vol_strike:
-        final_strike = oi_strike
-        
-        if option_type == "CE":
-            # --- RESISTANCE (CE) ---
-            if oi_status == "WTB" or vol_status == "WTB":
-                final_status = "BOTH WTB"
-            elif oi_status == "WTT" and vol_status == "WTT":
-                final_status = "BOTH WTT"
-            else:
-                final_status = "BOTH STRONG"
-                
-        elif option_type == "PE":
-            # --- SUPPORT (PE) ---
-            if oi_status == "WTT" or vol_status == "WTT":
-                final_status = "BOTH WTT"
-            elif oi_status == "WTB" and vol_status == "WTB":
-                final_status = "BOTH WTB"
-            else:
-                final_status = "BOTH STRONG"
-
-    # ==========================================
-    # नियम 2: अगर OI और Volume अलग-अलग स्ट्राइक पर हैं
-    # ==========================================
-    else:
-        if option_type == "CE":
-            if oi_strike < vol_strike:
-                final_strike = oi_strike
-                final_status = "OI " + oi_status
-            else:
-                final_strike = vol_strike
-                final_status = "Vol " + vol_status
-                
-        elif option_type == "PE":
-            if oi_strike > vol_strike:
-                final_strike = oi_strike
-                final_status = "OI " + oi_status
-            else:
-                final_strike = vol_strike
-                final_status = "Vol " + vol_status
-
-    # ==========================================
-    # नियम 3: SHIFTING (शिफ्टेड WTT/WTB लॉजिक)
-    # ==========================================
-    if prev_strike is not None and prev_status is not None:
-        
-        # कंडीशन A: अगर स्ट्राइक बदल गई है (Shift हुआ है)
-        if final_strike != prev_strike:
-            if "WTT" in final_status:
-                final_status = final_status.replace("WTT", "Shifted WTT")
-            elif "WTB" in final_status:
-                final_status = final_status.replace("WTB", "Shifted WTB")
-            elif "STRONG" in final_status:
-                final_status = final_status.replace("STRONG", "Shifted STRONG")
-                
-        # कंडीशन B: स्ट्राइक सेम है (अभी उसी स्ट्राइक पर है)
-        else:
-            # अगर यह पहले Shifted था और अभी तक STRONG नहीं हुआ है, तो इसे Shifted ही रहने दें।
-            # (एक बार STRONG होने के बाद "Shifted" का टैग अपने आप हट जाएगा और नॉर्मल WTT/WTB बन जाएगा)
-            if "Shifted" in prev_status and "STRONG" not in final_status:
-                if "WTT" in final_status and "Shifted" not in final_status:
-                    final_status = final_status.replace("WTT", "Shifted WTT")
-                elif "WTB" in final_status and "Shifted" not in final_status:
-                    final_status = final_status.replace("WTB", "Shifted WTB")
-        
-        
-    return final_strike, final_status
-
-def test_sr_logic_view(request):
-    today = timezone.localdate()
-
-    # 1. डेटा को 'Time' (पुराने से नया) के क्रम में निकालें 
-    # ताकि हम शिफ्टिंग के लॉजिक को सुबह 9:15 से लेकर अभी तक सही से टेस्ट कर सकें
-    live_data = LiveSRData.objects.filter(
-        Symbol="NIFTY", 
-        Time__date=today
-    ).order_by('Time')
-    
-    test_data = []
-    
-    # 2. शुरुआत में कोई पिछला रिकॉर्ड नहीं है (None)
-    prev_ce_strike, prev_ce_status = None, None
-    prev_pe_strike, prev_pe_status = None, None
-    
-    for data in live_data:
-        # CE (Resistance) के लिए फाइनल कैलकुलेशन
-        ce_final_strike, ce_final_status = calculate_final_sr(
-            oi_strike=data.ce_high_oi_strike,
-            oi_status=data.ce_oi_status,
-            vol_strike=data.ce_high_vol_strike,
-            vol_status=data.ce_vol_status,
-            option_type="CE",
-            prev_strike=prev_ce_strike,   # <-- सही सिंटैक्स
-            prev_status=prev_ce_status    # <-- सही सिंटैक्स
-        )
-        
-        # PE (Support) के लिए फाइनल कैलकुलेशन
-        pe_final_strike, pe_final_status = calculate_final_sr(
-            oi_strike=data.pe_high_oi_strike,
-            oi_status=data.pe_oi_status,
-            vol_strike=data.pe_high_vol_strike,
-            vol_status=data.pe_vol_status,
-            option_type="PE",
-            prev_strike=prev_pe_strike,   # <-- सही सिंटैक्स
-            prev_status=prev_pe_status    # <-- सही सिंटैक्स
-        )
-        
-        # 🕒 टाइम को लोकल (IST) में बदलें
-        local_time = timezone.localtime(data.Time)
-
-        # डेटा को लिस्ट में डालें
-        test_data.append({
-            'time': local_time.strftime('%H:%M:%S'),
-            'spot': data.Spot_Price,
-            
-            'ce_oi_strike': data.ce_high_oi_strike,
-            'ce_oi_status': data.ce_oi_status,
-            'ce_vol_strike': data.ce_high_vol_strike,
-            'ce_vol_status': data.ce_vol_status,
-            'ce_final_strike': ce_final_strike,
-            'ce_final_status': ce_final_status,
-            
-            'pe_oi_strike': data.pe_high_oi_strike,
-            'pe_oi_status': data.pe_oi_status,
-            'pe_vol_strike': data.pe_high_vol_strike,
-            'pe_vol_status': data.pe_vol_status,
-            'pe_final_strike': pe_final_strike,
-            'pe_final_status': pe_final_status,
-        })
-        
-        # 🔄 3. असली मैजिक यहाँ है: 
-        # अगले लूप के लिए मौजूदा डेटा को "पिछला डेटा" मान लें
-        prev_ce_strike, prev_ce_status = ce_final_strike, ce_final_status
-        prev_pe_strike, prev_pe_status = pe_final_strike, pe_final_status
-        
-    # 4. चूँकि हमने पुराने से नया प्रोसेस किया है, 
-    # HTML में लेटेस्ट डेटा सबसे ऊपर दिखाने के लिए लिस्ट को उल्टा (Reverse) कर दें
-    test_data.reverse()
-    
-    # अगर आप सिर्फ लेटेस्ट 10 या 20 देखना चाहते हैं:
-    # test_data = test_data[:20] 
-        
-    return render(request, 'mystock/sr_testing.html', {'test_data': test_data})
-
 def get_dynamic_strikes_and_atm(base_qs, spot_price, symbol, start_time, end_time):
     """ स्पॉट प्राइस के आधार पर 15 CE, 15 PE और ATM स्ट्राइक निकालता है (optimized) """
 
@@ -947,220 +791,6 @@ def option_chart_api(request):
         "pe_reversals": pe_data
     })
 
-# ==========================================
-# RESISTANCE (CE) LOGIC
-# ==========================================
-def get_resistance_base_target(row):
-    if not row.ce_high_vol_strike or not row.ce_high_oi_strike:
-        return None, None, None, "N/A", "N/A"
-
-    vol_strike = row.ce_high_vol_strike
-    oi_strike = row.ce_high_oi_strike
-    vol_status = str(row.ce_vol_status).lower() if row.ce_vol_status else ""
-    oi_status = str(row.ce_oi_status).lower() if row.ce_oi_status else ""
-    vol_2nd_strike = row.ce_2nd_high_vol_strike
-    oi_2nd_strike = row.ce_2nd_high_oi_strike
-
-    # Condition 1: Volume और OI एक ही स्ट्राइक पर हैं (Both)
-    if vol_strike == oi_strike:
-        base_strike = vol_strike
-        base_type = "Both"
-        if "wtt" in vol_status and "wtt" in oi_status:
-            return base_strike, oi_2nd_strike, "wtt", f"WTT {oi_2nd_strike}", base_type
-        elif "wtb" in vol_status or "wtb" in oi_status:
-            target = vol_2nd_strike if "wtb" in vol_status else oi_2nd_strike
-            return base_strike, target, "wtb", f"WTB {target}", base_type
-        else:
-            return base_strike, None, "strong", f"Strong {base_strike}", base_type
-
-    # Condition 2: Volume और OI अलग-अलग स्ट्राइक पर हैं (छोटी स्ट्राइक लेंगे)
-    else:
-        if vol_strike < oi_strike:
-            base_strike = vol_strike
-            status_text = vol_status
-            target = vol_2nd_strike
-            base_type = "Vol"
-        else:
-            base_strike = oi_strike
-            status_text = oi_status
-            target = oi_2nd_strike
-            base_type = "OI"
-
-        if "wtt" in status_text:
-            return base_strike, target, "wtt", f"WTT {target}", base_type
-        elif "wtb" in status_text:
-            return base_strike, target, "wtb", f"WTB {target}", base_type
-        else:
-            return base_strike, None, "strong", f"Strong {base_strike}", base_type
-
-
-# ==========================================
-# SUPPORT (PE) LOGIC
-# ==========================================
-def get_support_base_target(row):
-    if not row.pe_high_vol_strike or not row.pe_high_oi_strike:
-        return None, None, None, "N/A", "N/A"
-
-    vol_strike = row.pe_high_vol_strike
-    oi_strike = row.pe_high_oi_strike
-    vol_status = str(row.pe_vol_status).lower() if row.pe_vol_status else ""
-    oi_status = str(row.pe_oi_status).lower() if row.pe_oi_status else ""
-    vol_2nd_strike = row.pe_2nd_high_vol_strike
-    oi_2nd_strike = row.pe_2nd_high_oi_strike
-
-    # Condition 1: Volume और OI एक ही स्ट्राइक पर हैं (Both)
-    if vol_strike == oi_strike:
-        base_strike = vol_strike
-        base_type = "Both"
-        # Support में WTT हावी (dominant) होता है
-        if "wtb" in vol_status and "wtb" in oi_status:
-            return base_strike, oi_2nd_strike, "wtb", f"WTB {oi_2nd_strike}", base_type
-        elif "wtt" in vol_status or "wtt" in oi_status:
-            target = vol_2nd_strike if "wtt" in vol_status else oi_2nd_strike
-            return base_strike, target, "wtt", f"WTT {target}", base_type
-        else:
-            return base_strike, None, "strong", f"Strong {base_strike}", base_type
-
-    # Condition 2: Volume और OI अलग-अलग स्ट्राइक पर हैं (बड़ी स्ट्राइक लेंगे)
-    else:
-        if vol_strike > oi_strike:
-            base_strike = vol_strike
-            status_text = vol_status
-            target = vol_2nd_strike
-            base_type = "Vol"
-        else:
-            base_strike = oi_strike
-            status_text = oi_status
-            target = oi_2nd_strike
-            base_type = "OI"
-
-        if "wtt" in status_text:
-            return base_strike, target, "wtt", f"WTT {target}", base_type
-        elif "wtb" in status_text:
-            return base_strike, target, "wtb", f"WTB {target}", base_type
-        else:
-            return base_strike, None, "strong", f"Strong {base_strike}", base_type
-
-
-# ==========================================
-# MAIN VIEW
-# ==========================================
-def live_data_view(request):
-    today = date.today()
-    data_records = LiveSRData.objects.filter(Time__date=today).order_by('Time')
-
-    context_data = []
-    
-    # Resistance Tracking Variables
-    ce_prev_base = None
-    ce_prev_target = None
-    ce_is_shifted = False
-    ce_is_shifted_strong = False
-
-    # Support Tracking Variables
-    pe_prev_base = None
-    pe_prev_target = None
-    pe_is_shifted = False
-    pe_is_shifted_strong = False
-    
-    for row in data_records:
-        # ---- 1. Calculate Resistance (CE) ----
-        ce_base, ce_target, ce_status, ce_basic_text, ce_base_type = get_resistance_base_target(row)
-        res_text = "N/A"
-
-        if ce_base is not None:
-            prefix = f"Resistance ({ce_base_type})"
-            if ce_prev_base is None:
-                ce_prev_base, ce_prev_target = ce_base, ce_target
-                res_text = f"{prefix} {ce_basic_text}"
-            else:
-                if ce_base != ce_prev_base:
-                    ce_is_shifted, ce_is_shifted_strong = True, False
-                    ce_prev_base, ce_prev_target = ce_base, ce_target
-                
-                if ce_is_shifted:
-                    if ce_status == "strong":
-                        ce_is_shifted_strong, ce_is_shifted = True, False
-                        res_text = f"{prefix} Shifted Strong {ce_base}"
-                    else:
-                        if ce_target != ce_prev_target:
-                            ce_is_shifted = False
-                            res_text = f"{prefix} {ce_basic_text}"
-                        else:
-                            res_text = f"{prefix} Shifted {ce_status.upper()} {ce_target}"
-                elif ce_is_shifted_strong:
-                    if ce_status == "strong":
-                        res_text = f"{prefix} Shifted Strong {ce_base}"
-                    else:
-                        ce_is_shifted_strong = False
-                        res_text = f"{prefix} {ce_basic_text}"
-                else:
-                    res_text = f"{prefix} {ce_basic_text}"
-                ce_prev_target = ce_target
-
-        # ---- 2. Calculate Support (PE) ----
-        pe_base, pe_target, pe_status, pe_basic_text, pe_base_type = get_support_base_target(row)
-        sup_text = "N/A"
-
-        if pe_base is not None:
-            prefix = f"Support ({pe_base_type})"
-            if pe_prev_base is None:
-                pe_prev_base, pe_prev_target = pe_base, pe_target
-                sup_text = f"{prefix} {pe_basic_text}"
-            else:
-                if pe_base != pe_prev_base:
-                    pe_is_shifted, pe_is_shifted_strong = True, False
-                    pe_prev_base, pe_prev_target = pe_base, pe_target
-                
-                if pe_is_shifted:
-                    if pe_status == "strong":
-                        pe_is_shifted_strong, pe_is_shifted = True, False
-                        sup_text = f"{prefix} Shifted Strong {pe_base}"
-                    else:
-                        if pe_target != pe_prev_target:
-                            pe_is_shifted = False
-                            sup_text = f"{prefix} {pe_basic_text}"
-                        else:
-                            sup_text = f"{prefix} Shifted {pe_status.upper()} {pe_target}"
-                elif pe_is_shifted_strong:
-                    if pe_status == "strong":
-                        sup_text = f"{prefix} Shifted Strong {pe_base}"
-                    else:
-                        pe_is_shifted_strong = False
-                        sup_text = f"{prefix} {pe_basic_text}"
-                else:
-                    sup_text = f"{prefix} {pe_basic_text}"
-                pe_prev_target = pe_target
-
-        # ---- 3. Append to Context ----
-        context_data.insert(0, {
-            "time": localtime(row.Time).strftime("%H:%M:%S"),
-            'symbol': row.Symbol,
-            'spot_price': row.Spot_Price,
-            
-            'ce_high_vol': row.ce_high_vol_strike,
-            'ce_vol': row.ce_vol_status,
-            'ce_2nd_high_vol': row.ce_2nd_high_vol_strike, 
-            
-            'ce_high_oi': row.ce_high_oi_strike,
-            'ce_oi': row.ce_oi_status,
-            'ce_2nd_high_oi': row.ce_2nd_high_oi_strike,   
-            
-            'resistance_status': res_text,
-            
-            'pe_high_vol': row.pe_high_vol_strike,
-            'pe_vol': row.pe_vol_status,
-            'pe_2nd_high_vol': row.pe_2nd_high_vol_strike, 
-            
-            'pe_high_oi': row.pe_high_oi_strike,
-            'pe_oi': row.pe_oi_status,
-            'pe_2nd_high_oi': row.pe_2nd_high_oi_strike,  
-            
-            'support_status': sup_text
-        })
-
-    return render(request, 'mystock/live_data.html', {'data': context_data})
-
 import pandas as pd
 from django.core.cache import cache
 def reversal_chart_view2(request):
@@ -1329,131 +959,269 @@ def reversal_chart_view(request):
 
 
 
-"""
-views.py  — Resistance Live Dashboard API
-==========================================
 
-URLs में add करें:
+
+
+"""
+views.py  — Resistance / Support Live Dashboard API
+====================================================
+URLs:
     path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
-    path('resistance/', views.resistance_dashboard, name='resistance_dashboard'),
+    path('resistance/',     views.resistance_dashboard, name='resistance_dashboard'),
 """
 
-import json
+from datetime import datetime, timedelta, timezone as dt_timezone
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
-from django.utils import timezone
 from django.shortcuts import render
 from .models import LiveSRData
 
 
 # ─────────────────────────────────────────────────────
-# Resistance Calculator (Python logic — same as before)
+# IST Helper
+# ─────────────────────────────────────────────────────
+IST = dt_timezone(timedelta(hours=5, minutes=30))
+
+def to_ist(dt_obj) -> str:
+    if dt_obj is None:
+        return "—"
+    if dt_obj.tzinfo is None:
+        dt_obj = dt_obj.replace(tzinfo=dt_timezone.utc)
+    return dt_obj.astimezone(IST).strftime("%H:%M:%S")
+
+def today_ist():
+    return datetime.now(IST).date()
+
+def now_ist_str() -> str:
+    return datetime.now(IST).strftime("%H:%M:%S")
+
+
+# ─────────────────────────────────────────────────────
+# Constants
 # ─────────────────────────────────────────────────────
 WTT    = "WTT"
 WTB    = "WTB"
 STRONG = "STRONG"
 
 
+# ─────────────────────────────────────────────────────
+# State Machine:
+#
+#  NORMAL   → WTT/WTB found        → SHIFTING  (emit "WTT/WTB X")
+#  SHIFTING → pS == shift_strike   → IN_SHIFTED (emit "Shifted WTT/WTB")
+#  SHIFTING → pS != shift_strike,
+#             STR/STRONG           → NORMAL    (emit "Shifted strong")
+#  SHIFTING → pS != shift_strike,
+#             WTT/WTB              → SHIFTING  (new shift, emit "WTT/WTB Y")
+#  IN_SHIFTED → same strike,
+#               same 2nd           → IN_SHIFTED (emit "Shifted WTT/WTB")
+#  IN_SHIFTED → same strike,
+#               2nd changed        → SHIFTING  (emit "WTT/WTB new_2nd")  ← नई जगह
+#  IN_SHIFTED → strike changed,
+#               WTT/WTB            → SHIFTING  (emit "WTT/WTB p2nd")
+#  IN_SHIFTED → strike changed,
+#               STR/STRONG         → NORMAL    (emit "strong pS")
+#  CASE 1 same strike, STR/neutral → NORMAL    (emit "Both strong")
+# ─────────────────────────────────────────────────────
+
+def _fmt(v):
+    """Float → int string if whole number, else float string"""
+    if v is None:
+        return "—"
+    return str(int(v)) if v == int(v) else str(v)
+
+
 class ResistanceCalculator:
-    def __init__(self):
-        self.reset()
+    def __init__(self): self.reset()
 
     def reset(self):
-        self._prev_label  = None
-        self._is_strong   = False
-        self._shifted     = False
-        self._shift_strike = None
+        self._prev_label    = None
+        # SHIFTING state
+        self._shifting      = False   # "WTT/WTB X" emit हुआ, X का इंतज़ार
+        self._shift_strike  = None    # X (target strike)
+        self._shift_wt      = None    # WTT या WTB
+        # IN_SHIFTED state
+        self._in_shifted    = False   # X high strike बन गई
+        self._shifted_wt    = None    # current Shifted label का WTT/WTB
+        self._prev_p2nd     = None    # 2nd strike track (नई जगह detect)
+        # source
+        self._ptype         = "—"
+        self._primary_s     = None
 
     def calculate(self, row_dict):
-        result = self._compute(row_dict)
-        self._prev_label = result
-        return result
+        label, source = self._compute(row_dict)
+        self._prev_label = label
+        return label, source
 
+    # ── Source label ────────────────────────────────
+    def _src(self, ptype, pS):
+        return f"Resistance ({ptype}){_fmt(pS)}"
+
+    # ── Enter SHIFTING ──────────────────────────────
+    def _do_shift(self, shift_to, wt, src):
+        """नई shift शुरू — emit WTT/WTB shift_to"""
+        self._shifting     = True
+        self._in_shifted   = False
+        self._shift_strike = shift_to
+        self._shift_wt     = wt
+        self._prev_p2nd    = None
+        return f"Resistance {wt} {_fmt(shift_to)}", src
+
+    # ── Reset all states ────────────────────────────
+    def _reset(self):
+        self._shifting    = False
+        self._shift_strike= None
+        self._shift_wt    = None
+        self._in_shifted  = False
+        self._shifted_wt  = None
+        self._prev_p2nd   = None
+
+    # ── Core compute ────────────────────────────────
     def _compute(self, r):
         vs    = r.get("ce_high_vol_strike")
         os_   = r.get("ce_high_oi_strike")
         vStat = (r.get("ce_vol_status") or "").upper()
         oStat = (r.get("ce_oi_status")  or "").upper()
 
-        # ── CASE 1: Same Strike ──────────────────────────
+        # ════════════════════════════════════════
+        # CASE 1: Same Strike
+        # ════════════════════════════════════════
         if vs is not None and os_ is not None and vs == os_:
+            pS     = vs
             second = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
+            src    = self._src("Both", pS)
 
+            # दोनों WTT → shift to 2nd
             if vStat == WTT and oStat == WTT:
-                return (self._apply_shift(second, WTT, vs, r)
-                        if second else f"Resistance strong {vs}")
+                self._reset()
+                if second:
+                    return self._do_shift(second, WTT, src)
+                return f"Resistance strong {_fmt(pS)}", src
 
+            # कोई एक WTB → shift to 2nd
             if vStat == WTB or oStat == WTB:
-                return (self._apply_shift(second, WTB, vs, r)
-                        if second else f"Resistance strong {vs}")
+                self._reset()
+                if second:
+                    return self._do_shift(second, WTB, src)
+                return f"Resistance strong {_fmt(pS)}", src
 
-            self._is_strong = False
-            self._shifted   = False
-            return "Resistance Both"
+            # STR / neutral → Both strong (SHIFTING भी reset)
+            self._reset()
+            return "Resistance Both strong", src
 
-        # ── CASE 2: Different Strikes ────────────────────
+        # ════════════════════════════════════════
+        # CASE 2: Different Strikes
+        # ════════════════════════════════════════
         if vs is not None and os_ is not None:
             if vs < os_:
-                pS, pStat, p2nd = vs,  vStat, r.get("ce_2nd_high_vol_strike")
-                pType = "Volume"
+                pS, pStat, p2nd, pType = vs,  vStat, r.get("ce_2nd_high_vol_strike"), "Vol"
             else:
-                pS, pStat, p2nd = os_, oStat, r.get("ce_2nd_high_oi_strike")
-                pType = "OI"
+                pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"),  "OI"
         elif vs is not None:
-            pS, pStat, p2nd, pType = vs, vStat, r.get("ce_2nd_high_vol_strike"), "Volume"
+            pS, pStat, p2nd, pType = vs,  vStat, r.get("ce_2nd_high_vol_strike"), "Vol"
         else:
-            pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"), "OI"
+            pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"),  "OI"
 
-        if pStat == WTT:
-            return (self._apply_shift(p2nd, WTT, pS, r)
-                    if p2nd else f"Resistance strong {pS}")
-        if pStat == WTB:
-            return (self._apply_shift(p2nd, WTB, pS, r)
-                    if p2nd else f"Resistance strong {pS}")
+        src = self._src(pType, pS)
 
-        self._is_strong = False
-        self._shifted   = False
-        return f"Resistance strong {pS}"
+        # ── IN_SHIFTED state ─────────────────────
+        if self._in_shifted:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    # 2nd strike बदली → नई जगह
+                    if p2nd is not None and p2nd != self._prev_p2nd:
+                        self._in_shifted = False
+                        return self._do_shift(p2nd, pStat, src)
+                    # Same 2nd → continue Shifted
+                    self._shifted_wt = pStat
+                    self._prev_p2nd  = p2nd
+                    return f"Resistance Shifted {pStat}", src
+                else:
+                    # STR at shifted strike → strong
+                    self._reset()
+                    return f"Resistance strong {_fmt(pS)}", src
+            else:
+                # Strike बदल गई
+                self._in_shifted = False
+                if pStat in (WTT, WTB) and p2nd:
+                    return self._do_shift(p2nd, pStat, src)
+                self._reset()
+                return f"Resistance strong {_fmt(pS)}", src
 
-    def _apply_shift(self, new_strike, wt, high_strike, r):
-        if self._is_strong:
-            s2 = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
-            self._is_strong = False
-            return f"Resistance {wt} {s2}" if s2 else f"Resistance strong {high_strike}"
+        # ── SHIFTING state ───────────────────────
+        if self._shifting:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    # Shift strike high बन गई → IN_SHIFTED
+                    self._shifting    = False
+                    self._in_shifted  = True
+                    self._shifted_wt  = pStat
+                    self._prev_p2nd   = p2nd
+                    return f"Resistance Shifted {pStat}", src
+                else:
+                    # STR at shift strike → Shifted strong
+                    self._reset()
+                    return "Resistance Shifted strong", src
+            else:
+                # अलग strike
+                if pStat in (WTT, WTB) and p2nd:
+                    # New shift (नई जगह)
+                    return self._do_shift(p2nd, pStat, src)
+                # STR / no 2nd → Shifted strong
+                self._reset()
+                return "Resistance Shifted strong", src
 
-        if self._shifted and self._shift_strike == new_strike:
-            s2 = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
-            if s2 and s2 != new_strike:
-                return f"Resistance {wt} {s2}"
-            self._is_strong = True
-            return "Resistance Shifted strong"
+        # ── NORMAL state ─────────────────────────
+        if pStat == WTT and p2nd:
+            return self._do_shift(p2nd, WTT, src)
+        if pStat == WTB and p2nd:
+            return self._do_shift(p2nd, WTB, src)
 
-        prev = self._prev_label or ""
-        if f"Resistance {wt}" in prev and str(new_strike) not in prev:
-            return f"Resistance {wt} {new_strike}"
-
-        self._shift_strike = new_strike
-        self._shifted      = True
-        return f"Resistance {wt} {new_strike}"
+        self._reset()
+        return f"Resistance strong {_fmt(pS)}", src
 
 
 # ─────────────────────────────────────────────────────
-# Support Calculator (PE — Mirror of CE logic)
+# Support Calculator (PE) — Same logic, mirrored
+# PE में बड़ी (higher) strike primary होती है
 # ─────────────────────────────────────────────────────
 class SupportCalculator:
-    def __init__(self):
-        self.reset()
+    def __init__(self): self.reset()
 
     def reset(self):
         self._prev_label   = None
-        self._is_strong    = False
-        self._shifted      = False
+        self._shifting     = False
         self._shift_strike = None
+        self._shift_wt     = None
+        self._in_shifted   = False
+        self._shifted_wt   = None
+        self._prev_p2nd    = None
+        self._ptype        = "—"
+        self._primary_s    = None
 
     def calculate(self, row_dict):
-        result = self._compute(row_dict)
-        self._prev_label = result
-        return result
+        label, source = self._compute(row_dict)
+        self._prev_label = label
+        return label, source
+
+    def _src(self, ptype, pS):
+        return f"Support ({ptype}){_fmt(pS)}"
+
+    def _do_shift(self, shift_to, wt, src):
+        self._shifting     = True
+        self._in_shifted   = False
+        self._shift_strike = shift_to
+        self._shift_wt     = wt
+        self._prev_p2nd    = None
+        return f"Support {wt} {_fmt(shift_to)}", src
+
+    def _reset(self):
+        self._shifting    = False
+        self._shift_strike= None
+        self._shift_wt    = None
+        self._in_shifted  = False
+        self._shifted_wt  = None
+        self._prev_p2nd   = None
 
     def _compute(self, r):
         vs    = r.get("pe_high_vol_strike")
@@ -1461,78 +1229,95 @@ class SupportCalculator:
         vStat = (r.get("pe_vol_status") or "").upper()
         oStat = (r.get("pe_oi_status")  or "").upper()
 
+        # CASE 1: Same Strike
         if vs is not None and os_ is not None and vs == os_:
+            pS     = vs
             second = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
+            src    = self._src("Both", pS)
 
             if vStat == WTT and oStat == WTT:
-                return (self._apply_shift(second, WTT, vs, r)
-                        if second else f"Support strong {vs}")
+                self._reset()
+                if second:
+                    return self._do_shift(second, WTT, src)
+                return f"Support strong {_fmt(pS)}", src
+
             if vStat == WTB or oStat == WTB:
-                return (self._apply_shift(second, WTB, vs, r)
-                        if second else f"Support strong {vs}")
+                self._reset()
+                if second:
+                    return self._do_shift(second, WTB, src)
+                return f"Support strong {_fmt(pS)}", src
 
-            self._is_strong = False
-            self._shifted   = False
-            return "Support Both"
+            self._reset()
+            return "Support Both strong", src
 
+        # CASE 2: Different Strikes — PE में बड़ी strike primary
         if vs is not None and os_ is not None:
-            # PE में बड़ी (higher) strike primary होती है
             if vs > os_:
-                pS, pStat, p2nd = vs,  vStat, r.get("pe_2nd_high_vol_strike")
-                pType = "Volume"
+                pS, pStat, p2nd, pType = vs,  vStat, r.get("pe_2nd_high_vol_strike"), "Vol"
             else:
-                pS, pStat, p2nd = os_, oStat, r.get("pe_2nd_high_oi_strike")
-                pType = "OI"
+                pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"),  "OI"
         elif vs is not None:
-            pS, pStat, p2nd, pType = vs, vStat, r.get("pe_2nd_high_vol_strike"), "Volume"
+            pS, pStat, p2nd, pType = vs,  vStat, r.get("pe_2nd_high_vol_strike"), "Vol"
         else:
-            pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"), "OI"
+            pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"),  "OI"
 
-        if pStat == WTT:
-            return (self._apply_shift(p2nd, WTT, pS, r)
-                    if p2nd else f"Support strong {pS}")
-        if pStat == WTB:
-            return (self._apply_shift(p2nd, WTB, pS, r)
-                    if p2nd else f"Support strong {pS}")
+        src = self._src(pType, pS)
 
-        self._is_strong = False
-        self._shifted   = False
-        return f"Support strong {pS}"
+        if self._in_shifted:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    if p2nd is not None and p2nd != self._prev_p2nd:
+                        self._in_shifted = False
+                        return self._do_shift(p2nd, pStat, src)
+                    self._shifted_wt = pStat
+                    self._prev_p2nd  = p2nd
+                    return f"Support Shifted {pStat}", src
+                else:
+                    self._reset()
+                    return f"Support strong {_fmt(pS)}", src
+            else:
+                self._in_shifted = False
+                if pStat in (WTT, WTB) and p2nd:
+                    return self._do_shift(p2nd, pStat, src)
+                self._reset()
+                return f"Support strong {_fmt(pS)}", src
 
-    def _apply_shift(self, new_strike, wt, high_strike, r):
-        if self._is_strong:
-            s2 = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
-            self._is_strong = False
-            return f"Support {wt} {s2}" if s2 else f"Support strong {high_strike}"
+        if self._shifting:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    self._shifting    = False
+                    self._in_shifted  = True
+                    self._shifted_wt  = pStat
+                    self._prev_p2nd   = p2nd
+                    return f"Support Shifted {pStat}", src
+                else:
+                    self._reset()
+                    return "Support Shifted strong", src
+            else:
+                if pStat in (WTT, WTB) and p2nd:
+                    return self._do_shift(p2nd, pStat, src)
+                self._reset()
+                return "Support Shifted strong", src
 
-        if self._shifted and self._shift_strike == new_strike:
-            s2 = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
-            if s2 and s2 != new_strike:
-                return f"Support {wt} {s2}"
-            self._is_strong = True
-            return "Support Shifted strong"
+        if pStat == WTT and p2nd:
+            return self._do_shift(p2nd, WTT, src)
+        if pStat == WTB and p2nd:
+            return self._do_shift(p2nd, WTB, src)
 
-        prev = self._prev_label or ""
-        if f"Support {wt}" in prev and str(new_strike) not in prev:
-            return f"Support {wt} {new_strike}"
-
-        self._shift_strike = new_strike
-        self._shifted      = True
-        return f"Support {wt} {new_strike}"
+        self._reset()
+        return f"Support strong {_fmt(pS)}", src
 
 
 # ─────────────────────────────────────────────────────
-# Per-symbol calculator cache (दिन भर state रहे)
+# Per-symbol calculator cache
 # ─────────────────────────────────────────────────────
-_CALC_CACHE = {}   # { "NIFTY": (date, ResCalc, SupCalc), ... }
+_CALC_CACHE = {}
 
 def _get_calculators(symbol: str, today):
-    """Symbol के लिए आज के calculators return करता है।"""
     if symbol in _CALC_CACHE:
         cached_date, res_calc, sup_calc = _CALC_CACHE[symbol]
         if cached_date == today:
             return res_calc, sup_calc
-
     res_calc = ResistanceCalculator()
     sup_calc = SupportCalculator()
     _CALC_CACHE[symbol] = (today, res_calc, sup_calc)
@@ -1557,70 +1342,55 @@ def _row_to_dict(obj):
 
 
 # ─────────────────────────────────────────────────────
-# API View  →  GET /api/resistance/?symbol=NIFTY
+# API View
 # ─────────────────────────────────────────────────────
 @require_GET
 def resistance_live_api(request):
-    """
-    आज का सारा LiveSRData लेकर हर row पर
-    Resistance + Support calculate करके JSON return करता है।
-
-    Query params:
-        symbol  — NIFTY / BANKNIFTY (default: NIFTY)
-        limit   — कितने rows (default: 50, max: 200)
-    """
     symbol = request.GET.get("symbol", "NIFTY").upper()
     limit  = min(int(request.GET.get("limit", 50)), 200)
-
-    today = timezone.now().date()
+    today  = today_ist()
 
     qs = (LiveSRData.objects
           .filter(Time__date=today, Symbol=symbol)
           .order_by("Time"))
 
     res_calc, sup_calc = _get_calculators(symbol, today)
-
-    # Calculators को आज के सारे rows पर fresh run करते हैं
-    # (state को replay करना जरूरी है ताकि latest row सही हो)
     res_calc.reset()
     sup_calc.reset()
 
-    all_rows = list(qs)
+    all_rows  = list(qs)
     processed = []
 
     for obj in all_rows:
         rd = _row_to_dict(obj)
-        resistance = res_calc.calculate(rd)
-        support    = sup_calc.calculate(rd)
+        resistance, res_source = res_calc.calculate(rd)
+        support,    sup_source = sup_calc.calculate(rd)
 
         processed.append({
-            "time": localtime(obj.Time).strftime("%H:%M:%S"),
-            # "time":        obj.Time.strftime("%H:%M:%S"),
-            "spot":        obj.Spot_Price,
-            "expiry":      obj.Expiry_Date or "",
-
+            "time":   to_ist(obj.Time),
+            "spot":   obj.Spot_Price,
+            "expiry": obj.Expiry_Date or "",
             # CE
-            "ce_vol_strike":  obj.ce_high_vol_strike,
-            "ce_vol_status":  obj.ce_vol_status or "",
-            "ce_vol_2nd":     obj.ce_2nd_high_vol_strike,
-            "ce_oi_strike":   obj.ce_high_oi_strike,
-            "ce_oi_status":   obj.ce_oi_status or "",
-            "ce_oi_2nd":      obj.ce_2nd_high_oi_strike,
-
+            "ce_vol_strike": obj.ce_high_vol_strike,
+            "ce_vol_status": obj.ce_vol_status or "",
+            "ce_vol_2nd":    obj.ce_2nd_high_vol_strike,
+            "ce_oi_strike":  obj.ce_high_oi_strike,
+            "ce_oi_status":  obj.ce_oi_status or "",
+            "ce_oi_2nd":     obj.ce_2nd_high_oi_strike,
             # PE
-            "pe_vol_strike":  obj.pe_high_vol_strike,
-            "pe_vol_status":  obj.pe_vol_status or "",
-            "pe_vol_2nd":     obj.pe_2nd_high_vol_strike,
-            "pe_oi_strike":   obj.pe_high_oi_strike,
-            "pe_oi_status":   obj.pe_oi_status or "",
-            "pe_oi_2nd":      obj.pe_2nd_high_oi_strike,
-
+            "pe_vol_strike": obj.pe_high_vol_strike,
+            "pe_vol_status": obj.pe_vol_status or "",
+            "pe_vol_2nd":    obj.pe_2nd_high_vol_strike,
+            "pe_oi_strike":  obj.pe_high_oi_strike,
+            "pe_oi_status":  obj.pe_oi_status or "",
+            "pe_oi_2nd":     obj.pe_2nd_high_oi_strike,
             # Calculated
-            "resistance": resistance,
-            "support":    support,
+            "resistance":  resistance,
+            "res_source":  res_source,
+            "support":     support,
+            "sup_source":  sup_source,
         })
 
-    # Latest N rows (newest first)
     result = list(reversed(processed[-limit:]))
 
     return JsonResponse({
@@ -1629,14 +1399,16 @@ def resistance_live_api(request):
         "total_rows":  len(all_rows),
         "rows":        result,
         "latest":      result[0] if result else None,
-        "server_time": timezone.now().strftime("%H:%M:%S"),
+        "server_time": now_ist_str(),
     })
 
-
 # ─────────────────────────────────────────────────────
-# Dashboard View  →  GET /resistance/
+# Dashboard View
 # ─────────────────────────────────────────────────────
 def resistance_dashboard(request):
-    """HTML dashboard serve करता है।"""
     return render(request, "mystock/resistance_dashboard.html")
+
+
+
+
 
