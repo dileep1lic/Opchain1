@@ -1,5 +1,7 @@
 from django.urls import path
 from . import views
+from . import replay_views
+
 
 urlpatterns = [
     path('', views.option_chain_dashboard, name='dashboard'),
@@ -18,15 +20,18 @@ urlpatterns = [
 
     path('reversal-chart/', views.reversal_chart_view, name='reversal_chart'),
 
-    path('test-sr/', views.test_sr_logic_view, name='test_sr_logic'),
-    path('live-resistance/', views.live_data_view, name='live_resistance'),
-
 
     path('option-chart/', views.option_chart_view, name='option_chart'),
     path("option-chart-api/", views.option_chart_api, name="option_chart_api"),
 
-
-
     path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
     path('resistance/', views.resistance_dashboard, name='resistance_dashboard'),
+
+    # ── Market Replay ────────────────────────────────────────
+    path('replay/', replay_views.market_replay_view, name='market_replay'),
+
+    # AJAX endpoints
+    path('api/replay/dates/',      replay_views.get_replay_dates,      name='api_replay_dates'),
+    path('api/replay/timestamps/', replay_views.get_replay_timestamps,  name='api_replay_timestamps'),
+    path('api/replay/tick/',       replay_views.get_replay_tick,        name='api_replay_tick'),
 ]
