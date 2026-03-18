@@ -6,16 +6,12 @@
 <title>Resistance · Live Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
-/* ════════════════════════════════════
-   TOKENS
-════════════════════════════════════ */
 :root {
   --bg0:      #060809;
   --bg1:      #0c0f13;
   --bg2:      #111520;
   --border:   #1c2333;
   --border2:  #242d42;
-
   --cyan:     #00d4ff;
   --cyan-dim: rgba(0,212,255,.12);
   --red:      #ff3d5a;
@@ -28,175 +24,116 @@
   --pur-dim:  rgba(181,123,255,.12);
   --orange:   #ff8c42;
   --ora-dim:  rgba(255,140,66,.12);
-
   --text:     #d4dbe8;
   --muted:    #4a5568;
   --muted2:   #2d3748;
-
   --mono: 'IBM Plex Mono', monospace;
   --sans: 'Syne', sans-serif;
 }
-
-/* ════════════════════════════════════
-   RESET + BASE
-════════════════════════════════════ */
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { font-size:14px; background:var(--bg0); }
-body {
-  font-family: var(--mono);
-  color: var(--text);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-
-/* CRT scanlines */
+body { font-family:var(--mono); color:var(--text); min-height:100vh; }
 body::after {
   content:''; position:fixed; inset:0; pointer-events:none; z-index:9999;
-  background: repeating-linear-gradient(0deg,
-    transparent 0px, transparent 3px,
-    rgba(0,0,0,.06) 3px, rgba(0,0,0,.06) 4px);
+  background:repeating-linear-gradient(0deg,transparent 0px,transparent 3px,rgba(0,0,0,.06) 3px,rgba(0,0,0,.06) 4px);
 }
 
-/* ════════════════════════════════════
-   TOPBAR
-════════════════════════════════════ */
+/* TOPBAR */
 .topbar {
-  display: flex; align-items: center; gap: 16px;
-  padding: 0 20px; height: 48px;
-  background: var(--bg1);
-  border-bottom: 1px solid var(--border);
-  position: sticky; top:0; z-index: 100;
+  display:flex; align-items:center; gap:16px;
+  padding:0 20px; height:48px;
+  background:var(--bg1); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:100;
 }
-.topbar-title {
-  font-family: var(--sans);
-  font-size: 1rem; font-weight: 800;
-  letter-spacing: 3px; text-transform: uppercase;
-  color: var(--cyan);
+.back-btn {
+  display:inline-flex; align-items:center;
+  font-family:var(--mono); font-size:.72rem; font-weight:600;
+  letter-spacing:2px; text-transform:uppercase;
+  color:var(--muted); text-decoration:none;
+  border:1px solid var(--border2); border-radius:3px;
+  padding:4px 12px; background:var(--bg2);
+  transition:all .15s; white-space:nowrap;
 }
+.back-btn:hover { color:var(--cyan); border-color:var(--cyan); background:var(--cyan-dim); }
+
+.topbar-title { font-family:var(--sans); font-size:1rem; font-weight:800; letter-spacing:3px; text-transform:uppercase; color:var(--cyan); }
 .pulse { width:8px; height:8px; border-radius:50%; background:var(--green); flex-shrink:0;
-  box-shadow: 0 0 0 0 rgba(0,232,122,.6);
-  animation: pulse-ring 1.8s ease-out infinite; }
+  animation:pulse-ring 1.8s ease-out infinite; }
 @keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0   rgba(0,232,122,.7); }
-  70%  { box-shadow: 0 0 0 8px rgba(0,232,122,0); }
-  100% { box-shadow: 0 0 0 0   rgba(0,232,122,0); }
+  0%  { box-shadow:0 0 0 0   rgba(0,232,122,.7); }
+  70% { box-shadow:0 0 0 8px rgba(0,232,122,0); }
+  100%{ box-shadow:0 0 0 0   rgba(0,232,122,0); }
 }
-
 .topbar-meta { display:flex; gap:10px; align-items:center; margin-left:auto; }
-.meta-pill {
-  font-size:.7rem; letter-spacing:1.5px; padding:3px 10px;
-  border-radius:3px; border:1px solid var(--border2);
-  color:var(--muted); background:var(--bg2);
-  text-transform:uppercase;
-}
+.meta-pill { font-size:.7rem; letter-spacing:1.5px; padding:3px 10px; border-radius:3px;
+  border:1px solid var(--border2); color:var(--muted); background:var(--bg2); text-transform:uppercase; }
 .meta-pill b { color:var(--text); }
-
-/* Symbol Tabs */
 .sym-tabs { display:flex; gap:4px; }
-.sym-tab {
-  cursor:pointer; font-family:var(--mono); font-size:.75rem; font-weight:600;
+.sym-tab { cursor:pointer; font-family:var(--mono); font-size:.75rem; font-weight:600;
   letter-spacing:2px; padding:4px 14px; border-radius:3px;
   border:1px solid var(--border2); color:var(--muted);
-  background:transparent; text-transform:uppercase; transition:all .15s;
-}
+  background:transparent; text-transform:uppercase; transition:all .15s; }
 .sym-tab.active { background:var(--cyan-dim); border-color:var(--cyan); color:var(--cyan); }
 .sym-tab:hover:not(.active) { border-color:var(--border2); color:var(--text); background:var(--bg2); }
-
-/* Refresh countdown */
 .countdown-wrap { display:flex; align-items:center; gap:6px; }
-.countdown-bar-bg {
-  width:60px; height:3px; background:var(--muted2); border-radius:2px; overflow:hidden;
-}
-.countdown-bar {
-  height:100%; background:var(--cyan); border-radius:2px;
-  transition: width 1s linear;
-}
+.countdown-bar-bg { width:60px; height:3px; background:var(--muted2); border-radius:2px; overflow:hidden; }
+.countdown-bar { height:100%; background:var(--cyan); border-radius:2px; transition:width 1s linear; }
 .countdown-txt { font-size:.65rem; color:var(--muted); min-width:18px; text-align:right; }
 
-/* ════════════════════════════════════
-   HERO STRIP  (latest row)
-════════════════════════════════════ */
-.hero {
-  display: grid;
-  grid-template-columns: auto 1fr 1fr auto;
-  gap: 1px;
-  background: var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.hero-cell {
-  background: var(--bg1);
-  padding: 14px 20px;
-  display: flex; flex-direction:column; gap:4px;
-}
+/* HERO */
+.hero { display:grid; grid-template-columns:1fr 1fr auto; gap:1px; background:var(--border); border-bottom:1px solid var(--border); }
+.hero-cell { background:var(--bg1); padding:14px 20px; display:flex; flex-direction:column; gap:4px; }
 .hero-label { font-size:.6rem; letter-spacing:3px; text-transform:uppercase; color:var(--muted); }
-.hero-val   { font-family:var(--sans); font-size:1.5rem; font-weight:700; line-height:1; }
-.hero-sub   { font-size:.72rem; color:var(--muted); }
+.hero-val   { font-family:var(--sans); font-size:1.4rem; font-weight:700; line-height:1.1; }
+.hero-sub   { font-size:.7rem; color:var(--muted); margin-top:2px; }
+.hero-source { display:inline-block; margin-top:4px; font-size:.65rem; letter-spacing:1.5px;
+  padding:2px 8px; border-radius:3px; border:1px solid var(--border2);
+  background:var(--bg2); color:var(--muted); font-family:var(--mono); }
 
-/* ════════════════════════════════════
-   LAYOUT
-════════════════════════════════════ */
-.main {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  background: var(--border);
-  min-height: calc(100vh - 48px - 70px);
-}
-.pane {
-  background: var(--bg0);
-  display: flex; flex-direction:column;
-}
-.pane-head {
-  display:flex; align-items:center; gap:8px;
-  padding: 10px 16px;
-  background: var(--bg1);
-  border-bottom: 1px solid var(--border);
-  font-size:.65rem; letter-spacing:3px; text-transform:uppercase; color:var(--muted);
-  flex-shrink:0;
-}
+/* LAYOUT */
+.main { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border); min-height:calc(100vh - 48px - 82px); }
+.pane { background:var(--bg0); }
+.pane-head { display:flex; align-items:center; gap:8px; padding:10px 16px;
+  background:var(--bg1); border-bottom:1px solid var(--border);
+  font-size:.65rem; letter-spacing:3px; text-transform:uppercase; color:var(--muted); flex-shrink:0; }
 .pane-dot { width:6px; height:6px; border-radius:50%; }
 
-/* ════════════════════════════════════
-   TABLE
-════════════════════════════════════ */
-.tbl-wrap { overflow:auto; flex:1; }
+/* TABLE */
+.tbl-wrap { overflow:auto; }
+table { white-space:nowrap; }
 table { width:100%; border-collapse:collapse; font-size:.78rem; }
 thead th {
-  padding:7px 12px; text-align:left;
-  font-size:.6rem; letter-spacing:2.5px; text-transform:uppercase;
+  padding:7px 10px; text-align:left;
+  font-size:.6rem; letter-spacing:2px; text-transform:uppercase;
   color:var(--muted); border-bottom:1px solid var(--border);
   background:var(--bg1); position:sticky; top:0; white-space:nowrap; z-index:2;
 }
-tbody tr {
-  border-bottom:1px solid rgba(255,255,255,.025);
-  transition:background .1s;
-}
+tbody tr { border-bottom:1px solid rgba(255,255,255,.025); transition:background .1s; }
 tbody tr:hover { background:rgba(255,255,255,.025); }
-tbody tr.latest-row { background: rgba(0,212,255,.04); }
-tbody td { padding:7px 12px; white-space:nowrap; }
+tbody tr.latest-row { background:rgba(0,212,255,.04); }
+tbody td { padding:6px 10px; white-space:nowrap; vertical-align:middle; }
 
-/* NEW row flash */
-@keyframes rowFlash {
-  0%   { background:rgba(0,212,255,.2); }
-  100% { background:transparent; }
-}
-.row-flash { animation: rowFlash .8s ease-out; }
+/* CHIPS */
+.chip { display:inline-block; padding:1px 7px; border-radius:2px; font-size:.68rem; letter-spacing:1px; font-weight:600; }
+.wtt  { background:var(--yel-dim); color:var(--yellow); border:1px solid rgba(255,204,0,.2); }
+.wtb  { background:var(--pur-dim); color:var(--purple); border:1px solid rgba(181,123,255,.2); }
+.str  { background:var(--red-dim); color:var(--red);    border:1px solid rgba(255,61,90,.2); }
+.neut { background:var(--bg2);    color:var(--muted);  border:1px solid var(--border2); }
 
-/* ════════════════════════════════════
-   CHIPS
-════════════════════════════════════ */
-.chip {
+/* SOURCE BADGE */
+.src-badge {
   display:inline-block; padding:1px 7px; border-radius:2px;
-  font-size:.68rem; letter-spacing:1px; font-weight:600;
+  font-size:.65rem; letter-spacing:1px; font-weight:500;
+  background:var(--bg2); border:1px solid var(--border2); color:var(--muted);
 }
-.wtt    { background:var(--yel-dim); color:var(--yellow); border:1px solid rgba(255,204,0,.2); }
-.wtb    { background:var(--pur-dim); color:var(--purple); border:1px solid rgba(181,123,255,.2); }
-.strong-chip { background:var(--red-dim); color:var(--red); border:1px solid rgba(255,61,90,.2); }
-.neut   { background:var(--bg2); color:var(--muted); border:1px solid var(--border2); }
+.src-both     { background:rgba(0,212,255,.08);  color:var(--cyan);   border-color:rgba(0,212,255,.2); }
+.src-oi       { background:rgba(255,140,66,.08); color:var(--orange); border-color:rgba(255,140,66,.2); }
+.src-vol      { background:rgba(0,232,122,.08);  color:var(--green);  border-color:rgba(0,232,122,.2); }
+.src-shifted  { background:rgba(181,123,255,.08);color:var(--purple); border-color:rgba(181,123,255,.2); }
+.src-strong   { background:rgba(255,61,90,.08);  color:var(--red);    border-color:rgba(255,61,90,.2); }
+.src-2nd      { background:rgba(255,204,0,.08);  color:var(--yellow); border-color:rgba(255,204,0,.2); }
 
-/* ════════════════════════════════════
-   RESISTANCE / SUPPORT OUTPUT
-════════════════════════════════════ */
+/* RESISTANCE / SUPPORT TEXT */
 .r-both    { color:var(--text); }
 .r-wtt     { color:var(--yellow); font-weight:600; }
 .r-wtb     { color:var(--purple); font-weight:600; }
@@ -205,57 +142,31 @@ tbody td { padding:7px 12px; white-space:nowrap; }
 .r-oi      { color:var(--orange); font-weight:600; }
 .r-vol     { color:var(--cyan);   font-weight:600; }
 
-/* ════════════════════════════════════
-   EMPTY / ERROR STATE
-════════════════════════════════════ */
-.state-box {
-  display:flex; flex-direction:column; align-items:center;
-  justify-content:center; gap:10px; padding:60px 20px;
-  color:var(--muted); text-align:center;
-}
+/* EMPTY */
+.state-box { display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:10px; padding:60px 20px; color:var(--muted); text-align:center; }
 .state-box svg { opacity:.3; }
 .state-box p { font-size:.72rem; letter-spacing:2px; text-transform:uppercase; line-height:1.7; }
-.state-box.error p { color:var(--red); opacity:.7; }
 
-/* ════════════════════════════════════
-   LOADING OVERLAY
-════════════════════════════════════ */
-#loader {
-  position:fixed; inset:0; background:var(--bg0);
+/* LOADER */
+#loader { position:fixed; inset:0; background:var(--bg0);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:16px; z-index:9998; transition:opacity .4s;
-}
+  gap:16px; z-index:9998; transition:opacity .4s; }
 #loader.hide { opacity:0; pointer-events:none; }
-.loader-ring {
-  width:36px; height:36px;
-  border:2px solid var(--border2);
-  border-top-color:var(--cyan);
-  border-radius:50%;
-  animation:spin .8s linear infinite;
-}
+.loader-ring { width:36px; height:36px; border:2px solid var(--border2);
+  border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 .loader-txt { font-size:.72rem; letter-spacing:3px; color:var(--muted); }
 
-/* ════════════════════════════════════
-   TOAST
-════════════════════════════════════ */
-#toast {
-  position:fixed; bottom:20px; right:20px; z-index:9997;
-  padding:8px 16px; border-radius:4px;
-  font-size:.72rem; letter-spacing:1px;
-  background:var(--bg2); border:1px solid var(--border2);
-  color:var(--text); opacity:0;
-  transform:translateY(8px);
-  transition:all .3s;
-  pointer-events:none;
-}
+/* TOAST */
+#toast { position:fixed; bottom:20px; right:20px; z-index:9997;
+  padding:8px 16px; border-radius:4px; font-size:.72rem; letter-spacing:1px;
+  background:var(--bg2); border:1px solid var(--border2); color:var(--text);
+  opacity:0; transform:translateY(8px); transition:all .3s; pointer-events:none; }
 #toast.show { opacity:1; transform:translateY(0); }
-#toast.ok   { border-color:var(--green); color:var(--green); }
-#toast.err  { border-color:var(--red);   color:var(--red);   }
+#toast.ok  { border-color:var(--green); color:var(--green); }
+#toast.err { border-color:var(--red);   color:var(--red);   }
 
-/* ════════════════════════════════════
-   RESPONSIVE
-════════════════════════════════════ */
 @media (max-width:900px) {
   .main { grid-template-columns:1fr; }
   .hero { grid-template-columns:1fr 1fr; }
@@ -264,63 +175,54 @@ tbody td { padding:7px 12px; white-space:nowrap; }
 </head>
 <body>
 
-<!-- ── Loading overlay ── -->
 <div id="loader">
   <div class="loader-ring"></div>
   <div class="loader-txt">DATA LOADING...</div>
 </div>
-
-<!-- ── Toast ── -->
 <div id="toast"></div>
 
-<!-- ══════════════════════════════════
-     TOPBAR
-══════════════════════════════════ -->
+<!-- TOPBAR -->
 <div class="topbar">
   <div class="pulse"></div>
+  <a href="/" class="back-btn">← Dashboard</a>
   <div class="topbar-title">Resistance Live</div>
-
-  <!-- Symbol Tabs -->
   <div class="sym-tabs">
     <button class="sym-tab active" onclick="switchSymbol('NIFTY',this)">NIFTY</button>
-    <button class="sym-tab"        onclick="switchSymbol('BANKNIFTY',this)">BANKNIFTY</button>
-    <button class="sym-tab"        onclick="switchSymbol('FINNIFTY',this)">FINNIFTY</button>
+    <button class="sym-tab"       onclick="switchSymbol('BANKNIFTY',this)">BANKNIFTY</button>
+    <button class="sym-tab"       onclick="switchSymbol('FINNIFTY',this)">FINNIFTY</button>
   </div>
-
   <div class="topbar-meta">
-    <div class="meta-pill">Time: <b id="serverTime">--:--:--</b></div>
+    <div class="meta-pill">IST: <b id="serverTime">--:--:--</b></div>
     <div class="meta-pill">Rows: <b id="totalRows">0</b></div>
     <div class="meta-pill">Expiry: <b id="expiryDate">—</b></div>
-
-    <!-- Countdown bar -->
     <div class="countdown-wrap">
-      <div class="countdown-bar-bg">
-        <div class="countdown-bar" id="cBar" style="width:100%"></div>
-      </div>
+      <div class="countdown-bar-bg"><div class="countdown-bar" id="cBar" style="width:100%"></div></div>
       <div class="countdown-txt" id="cTxt">15</div>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════
-     HERO  (latest values)
-══════════════════════════════════ -->
+<!-- HERO -->
 <div class="hero">
   <div class="hero-cell">
-    <div class="hero-label">Spot Price</div>
-    <div class="hero-val" id="heroSpot">—</div>
-    <div class="hero-sub" id="heroSym">—</div>
-  </div>
-  <div class="hero-cell" style="border-left:1px solid var(--border);">
     <div class="hero-label">🔴 Resistance</div>
-    <div class="hero-val r-strong" id="heroRes" style="font-size:1.1rem;">—</div>
+    <div class="hero-val r-strong" id="heroRes" style="font-size:1rem;">—</div>
+    <!-- Source badge -->
+    <div>
+      <span class="hero-source" id="heroResSrc">—</span>
+    </div>
     <div class="hero-sub" id="heroResSub">—</div>
   </div>
+
   <div class="hero-cell" style="border-left:1px solid var(--border);">
     <div class="hero-label">🟢 Support</div>
-    <div class="hero-val r-shifted" id="heroSup" style="font-size:1.1rem;">—</div>
+    <div class="hero-val r-shifted" id="heroSup" style="font-size:1rem;">—</div>
+    <div>
+      <span class="hero-source" id="heroSupSrc">—</span>
+    </div>
     <div class="hero-sub" id="heroSupSub">—</div>
   </div>
+
   <div class="hero-cell" style="border-left:1px solid var(--border); min-width:130px;">
     <div class="hero-label">Last Update</div>
     <div class="hero-val" id="heroTime" style="font-size:1.1rem;color:var(--cyan);">—</div>
@@ -328,12 +230,10 @@ tbody td { padding:7px 12px; white-space:nowrap; }
   </div>
 </div>
 
-<!-- ══════════════════════════════════
-     MAIN  (CE | PE)
-══════════════════════════════════ -->
+<!-- MAIN -->
 <div class="main">
 
-  <!-- CE — Resistance Pane -->
+  <!-- CE Pane -->
   <div class="pane">
     <div class="pane-head">
       <div class="pane-dot" style="background:var(--red)"></div>
@@ -344,22 +244,20 @@ tbody td { padding:7px 12px; white-space:nowrap; }
         <thead>
           <tr>
             <th>Time</th>
-            <th>Spot</th>
-            <th>Vol Strike</th>
-            <th>Vol St.</th>
+            <th>Vol↑</th>
+            <th>St.</th>
             <th>Vol 2nd</th>
-            <th>OI Strike</th>
-            <th>OI St.</th>
+            <th>OI↑</th>
+            <th>St.</th>
             <th>OI 2nd</th>
+            <th>Source</th>
             <th>Resistance</th>
           </tr>
         </thead>
         <tbody id="ceTbody">
           <tr><td colspan="9">
-            <div class="state-box" id="ceEmpty">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-                <path d="M3 3h18v18H3zM3 9h18M9 21V9"/>
-              </svg>
+            <div class="state-box">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
               <p>डेटा लोड हो रहा है...</p>
             </div>
           </td></tr>
@@ -368,7 +266,7 @@ tbody td { padding:7px 12px; white-space:nowrap; }
     </div>
   </div>
 
-  <!-- PE — Support Pane -->
+  <!-- PE Pane -->
   <div class="pane" style="border-left:1px solid var(--border);">
     <div class="pane-head">
       <div class="pane-dot" style="background:var(--green)"></div>
@@ -379,22 +277,20 @@ tbody td { padding:7px 12px; white-space:nowrap; }
         <thead>
           <tr>
             <th>Time</th>
-            <th>Spot</th>
-            <th>Vol Strike</th>
-            <th>Vol St.</th>
+            <th>Vol↑</th>
+            <th>St.</th>
             <th>Vol 2nd</th>
-            <th>OI Strike</th>
-            <th>OI St.</th>
+            <th>OI↑</th>
+            <th>St.</th>
             <th>OI 2nd</th>
+            <th>Source</th>
             <th>Support</th>
           </tr>
         </thead>
         <tbody id="peTbody">
           <tr><td colspan="9">
-            <div class="state-box" id="peEmpty">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-                <path d="M3 3h18v18H3zM3 9h18M9 21V9"/>
-              </svg>
+            <div class="state-box">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
               <p>डेटा लोड हो रहा है...</p>
             </div>
           </td></tr>
@@ -407,28 +303,47 @@ tbody td { padding:7px 12px; white-space:nowrap; }
 
 
 <script>
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
 // CONFIG
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
 const API_BASE    = "/api/resistance/";
 const REFRESH_SEC = 15;
 const LIMIT       = 60;
 
-let currentSymbol = "NIFTY";
-let countdown     = REFRESH_SEC;
-let timerInterval = null;
+let currentSymbol  = "NIFTY";
+let countdown      = REFRESH_SEC;
+let timerInterval  = null;
 let prevLatestTime = null;
 
 
-// ══════════════════════════════════════════════════
-// STATUS / OUTPUT HELPERS
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
+// SOURCE BADGE
+// ════════════════════════════════════
+// src = full label जैसे "Resistance (Vol)23700" — सीधे दिखाओ
+function srcBadge(src) {
+  if (!src || src === "—") return '<span class="src-badge">—</span>';
+  const u = src.toUpperCase();
+  if (u.includes("(BOTH)"))   return `<span class="src-badge src-both">${src}</span>`;
+  if (u.includes("(OI)"))     return `<span class="src-badge src-oi">${src}</span>`;
+  if (u.includes("(VOL)"))    return `<span class="src-badge src-vol">${src}</span>`;
+  return `<span class="src-badge">${src}</span>`;
+}
+
+// Hero source badge (plain text label)
+function heroSrcLabel(src) {
+  if (!src || src === "—") return "—";
+  return src;
+}
+
+// ════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════
 function chipStatus(s) {
   if (!s) return '<span class="chip neut">—</span>';
   const u = s.toUpperCase();
   if (u === "WTT")    return `<span class="chip wtt">WTT</span>`;
   if (u === "WTB")    return `<span class="chip wtb">WTB</span>`;
-  if (u === "STRONG") return `<span class="chip strong-chip">STR</span>`;
+  if (u === "STRONG") return `<span class="chip str">STR</span>`;
   return `<span class="chip neut">${s}</span>`;
 }
 
@@ -444,69 +359,80 @@ function resClass(r) {
   return "r-both";
 }
 
-function fmt(v) { return v !== null && v !== undefined ? v : "—"; }
+function fmt(v) { return (v !== null && v !== undefined) ? v : "—"; }
 
 
-// ══════════════════════════════════════════════════
-// FETCH + RENDER
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
+// FETCH
+// ════════════════════════════════════
 async function fetchData() {
   try {
-    const url = `${API_BASE}?symbol=${currentSymbol}&limit=${LIMIT}`;
-    const res = await fetch(url);
+    const res  = await fetch(`${API_BASE}?symbol=${currentSymbol}&limit=${LIMIT}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     renderAll(data);
     hideLoader();
     showToast("✓ Updated", "ok");
-  } catch (e) {
-    showToast("⚠ Fetch error: " + e.message, "err");
+  } catch(e) {
+    showToast("⚠ " + e.message, "err");
     document.getElementById("heroStatus").textContent = "Error — retrying...";
     hideLoader();
   }
 }
 
+// ════════════════════════════════════
+// RENDER
+// ════════════════════════════════════
 function renderAll(data) {
-  const rows  = data.rows  || [];
+  const rows   = data.rows   || [];
   const latest = data.latest || null;
 
-  // ── Meta bar ──
   document.getElementById("serverTime").textContent = data.server_time || "—";
   document.getElementById("totalRows").textContent  = data.total_rows  || 0;
-  if (rows.length)
-    document.getElementById("expiryDate").textContent = rows[0].expiry || "—";
+  if (rows.length) document.getElementById("expiryDate").textContent = rows[0].expiry || "—";
 
-  // ── Hero ──
   if (latest) {
-    document.getElementById("heroSpot").textContent  = latest.spot ? latest.spot.toFixed(2) : "—";
-    document.getElementById("heroSym").textContent   = currentSymbol;
-    document.getElementById("heroTime").textContent  = latest.time || "—";
+    document.getElementById("heroTime").textContent = latest.time || "—";
 
     const resEl = document.getElementById("heroRes");
-    resEl.textContent  = latest.resistance || "—";
-    resEl.className    = `hero-val ${resClass(latest.resistance)}`;
+    resEl.textContent = latest.resistance || "—";
+    resEl.className   = `hero-val ${resClass(latest.resistance)}`;
 
     const supEl = document.getElementById("heroSup");
-    supEl.textContent  = latest.support || "—";
-    supEl.className    = `hero-val ${resClass(latest.support)}`;
+    supEl.textContent = latest.support || "—";
+    supEl.className   = `hero-val ${resClass(latest.support)}`;
 
-    // Sub labels
+    // Source badges in hero
+    const heroResSrc = document.getElementById("heroResSrc");
+    heroResSrc.textContent  = latest.res_source || "—";
+    heroResSrc.className    = `hero-source ${srcClass(latest.res_source)}`;
+
+    const heroSupSrc = document.getElementById("heroSupSrc");
+    heroSupSrc.textContent  = latest.sup_source || "—";
+    heroSupSrc.className    = `hero-source ${srcClass(latest.sup_source)}`;
+
     document.getElementById("heroResSub").textContent =
-      `CE Vol: ${fmt(latest.ce_vol_strike)}  |  OI: ${fmt(latest.ce_oi_strike)}`;
+      `Vol: ${fmt(latest.ce_vol_strike)}  |  OI: ${fmt(latest.ce_oi_strike)}`;
     document.getElementById("heroSupSub").textContent =
-      `PE Vol: ${fmt(latest.pe_vol_strike)}  |  OI: ${fmt(latest.pe_oi_strike)}`;
+      `Vol: ${fmt(latest.pe_vol_strike)}  |  OI: ${fmt(latest.pe_oi_strike)}`;
 
-    document.getElementById("heroStatus").textContent = "Live";
+    document.getElementById("heroStatus").textContent = "● Live";
 
-    // Flash if new row
-    const isNew = latest.time !== prevLatestTime;
     prevLatestTime = latest.time;
-    if (isNew) document.getElementById("heroTime").style.animation = "none";
   }
 
-  // ── Tables ──
   renderCE(rows);
   renderPE(rows);
+}
+
+// Source CSS class (for hero badge)
+function srcClass(src) {
+  if (!src) return "";
+  const u = src.toUpperCase();
+  if (u.includes("(BOTH)")) return "src-both";
+  if (u.includes("(OI)"))   return "src-oi";
+  if (u.includes("(VOL)"))  return "src-vol";
+  return "";
 }
 
 function renderCE(rows) {
@@ -515,17 +441,16 @@ function renderCE(rows) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="state-box"><p>आज का CE डेटा नहीं मिला</p></div></td></tr>`;
     return;
   }
-
   tbody.innerHTML = rows.map((r, i) => `
     <tr class="${i === 0 ? 'latest-row' : ''}">
       <td style="color:var(--muted)">${r.time}</td>
-      <td>${r.spot ? r.spot.toFixed(1) : "—"}</td>
       <td style="color:var(--cyan)">${fmt(r.ce_vol_strike)}</td>
       <td>${chipStatus(r.ce_vol_status)}</td>
       <td style="color:var(--muted)">${fmt(r.ce_vol_2nd)}</td>
       <td style="color:var(--cyan)">${fmt(r.ce_oi_strike)}</td>
       <td>${chipStatus(r.ce_oi_status)}</td>
       <td style="color:var(--muted)">${fmt(r.ce_oi_2nd)}</td>
+      <td>${srcBadge(r.res_source)}</td>
       <td class="${resClass(r.resistance)}">${r.resistance}</td>
     </tr>
   `).join("");
@@ -537,83 +462,70 @@ function renderPE(rows) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="state-box"><p>आज का PE डेटा नहीं मिला</p></div></td></tr>`;
     return;
   }
-
   tbody.innerHTML = rows.map((r, i) => `
     <tr class="${i === 0 ? 'latest-row' : ''}">
       <td style="color:var(--muted)">${r.time}</td>
-      <td>${r.spot ? r.spot.toFixed(1) : "—"}</td>
       <td style="color:var(--green)">${fmt(r.pe_vol_strike)}</td>
       <td>${chipStatus(r.pe_vol_status)}</td>
       <td style="color:var(--muted)">${fmt(r.pe_vol_2nd)}</td>
       <td style="color:var(--green)">${fmt(r.pe_oi_strike)}</td>
       <td>${chipStatus(r.pe_oi_status)}</td>
       <td style="color:var(--muted)">${fmt(r.pe_oi_2nd)}</td>
+      <td>${srcBadge(r.sup_source)}</td>
       <td class="${resClass(r.support)}">${r.support}</td>
     </tr>
   `).join("");
 }
 
 
-// ══════════════════════════════════════════════════
-// SYMBOL SWITCH
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
+// SYMBOL + TIMER
+// ════════════════════════════════════
 function switchSymbol(sym, btn) {
   document.querySelectorAll(".sym-tab").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
-  currentSymbol   = sym;
-  prevLatestTime  = null;
+  currentSymbol  = sym;
+  prevLatestTime = null;
   resetCountdown();
   fetchData();
 }
 
-
-// ══════════════════════════════════════════════════
-// COUNTDOWN TIMER
-// ══════════════════════════════════════════════════
 function resetCountdown() {
   countdown = REFRESH_SEC;
   updateCountdownUI();
 }
-
 function updateCountdownUI() {
-  document.getElementById("cBar").style.width  = (countdown / REFRESH_SEC * 100) + "%";
-  document.getElementById("cTxt").textContent  = countdown;
+  document.getElementById("cBar").style.width = (countdown / REFRESH_SEC * 100) + "%";
+  document.getElementById("cTxt").textContent = countdown;
 }
-
 function startTimer() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(() => {
     countdown--;
     updateCountdownUI();
-    if (countdown <= 0) {
-      countdown = REFRESH_SEC;
-      fetchData();
-    }
+    if (countdown <= 0) { countdown = REFRESH_SEC; fetchData(); }
   }, 1000);
 }
 
-
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
 // UI UTILS
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
 function hideLoader() {
-  document.getElementById("loader").classList.add("hide");
-  setTimeout(() => document.getElementById("loader").remove(), 500);
+  const l = document.getElementById("loader");
+  l.classList.add("hide");
+  setTimeout(() => l.remove(), 500);
 }
-
 let toastTimer;
 function showToast(msg, type) {
   const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.className   = `show ${type}`;
+  t.textContent = msg; t.className = `show ${type}`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.className = ""; }, 2500);
 }
 
-
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
 // INIT
-// ══════════════════════════════════════════════════
+// ════════════════════════════════════
 fetchData();
 startTimer();
 </script>
