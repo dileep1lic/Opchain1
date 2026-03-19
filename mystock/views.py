@@ -1411,4 +1411,292 @@ def resistance_dashboard(request):
 
 
 
+import requests
+from datetime import date, timedelta
+
+from django.shortcuts import render
+from django.http import JsonResponse
+from .credentials1 import access_token
+from .models import InstrumentStore, OptionChain, LiveSRData  # अपने app का नाम use करें
+
+# ─────────────────────────────────────────────
+# Helper: Symbol → instrument_key (DB से)
+# ─────────────────────────────────────────────
+def get_instrument_key(symbol: str):
+    """
+    InstrumentStore से symbol के basis पर instrument_key लौटाता है।
+    symbol case-insensitive match होता है।
+    नहीं मिला तो None return करता है।
+    """
+    try:
+        obj = InstrumentStore.objects.get(symbol__iexact=symbol.strip())
+        return obj.instrument_key
+    except InstrumentStore.DoesNotExist:
+        return None
+
+
+
+# ─────────────────────────────────────────────
+# Helper: OptionChain से Reversal lines fetch
+# सिर्फ Support–Resistance के बीच की strikes
+# ─────────────────────────────────────────────
+def get_reversal_lines(symbol: str, from_date: str, to_date: str):
+    """
+    1. LiveSRData से latest resistance_strike और supprt_strike लो
+    2. OptionChain से उन strikes की rows लो जो उस range में हों
+    3. हर strike की Reversl_Ce (लाल) और Reversl_Pe (हरी) line बनाओ
+    """
+    try:
+        # ── Step 1: SR range ──
+        sr = LiveSRData.objects.filter(
+            Symbol__iexact=symbol,
+            Time__date__gte=from_date,
+            Time__date__lte=to_date,
+        ).order_by('-Time').first()
+
+        if not sr or not sr.resistance_strike or not sr.supprt_strike:
+            return []
+
+        low  = min(sr.supprt_strike,    sr.resistance_strike)
+        high = max(sr.resistance_strike, sr.supprt_strike)
+
+        # ── Step 2: OptionChain latest timestamp ──
+        oc_qs = OptionChain.objects.filter(
+            Symbol__iexact=symbol,
+            Time__date__gte=from_date,
+            Time__date__lte=to_date,
+            Strike_Price__gte=low,
+            Strike_Price__lte=high,
+        ).order_by('-Time')
+
+        if not oc_qs.exists():
+            return []
+
+        latest_time = oc_qs.first().Time
+        rows = oc_qs.filter(Time=latest_time).order_by('Strike_Price')
+
+        # ── Step 3: Lines बनाओ ──
+        lines = []
+        seen  = set()
+
+        for row in rows:
+            strike = row.Strike_Price
+
+            # ── CE Reversal ──
+            if row.Reversl_Ce and row.Reversl_Ce not in seen:
+                seen.add(row.Reversl_Ce)
+                is_top = (strike == sr.resistance_strike)
+                lines.append({
+                    "price":  row.Reversl_Ce,
+                    "strike": strike,
+                    "type":   "CE",
+                    "color":  "#f85149",
+                    "width":  2 if is_top else 1,
+                    "dash":   0 if is_top else 2,
+                    "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
+                })
+
+            # ── PE Reversal ──
+            if row.Reversl_Pe and row.Reversl_Pe not in seen:
+                seen.add(row.Reversl_Pe)
+                is_bottom = (strike == sr.supprt_strike)
+                lines.append({
+                    "price":  row.Reversl_Pe,
+                    "strike": strike,
+                    "type":   "PE",
+                    "color":  "#3fb950",
+                    "width":  2 if is_bottom else 1,
+                    "dash":   0 if is_bottom else 2,
+                    "label":  f"S {strike:.0f}" if is_bottom else f"PE {strike:.0f}",
+                })
+
+        # Strike के हिसाब से sort (ऊपर से नीचे)
+        lines.sort(key=lambda x: x["price"], reverse=True)
+        return lines
+
+    except Exception:
+        return []
+
+
+# ─────────────────────────────────────────────
+# Helper: Upstox API से candle data fetch
+# ─────────────────────────────────────────────
+def fetch_candle_data(instrument_key: str, unit: str, interval: str, to_date: str, from_date: str):
+    """
+    आज की date है  → Intraday endpoint (date params नहीं चाहिए)
+    पुरानी date है → Historical endpoint (from/to date जरूरी)
+    """
+    encoded_key = requests.utils.quote(instrument_key, safe='')
+    today_str   = date.today().isoformat()
+
+    if from_date == today_str:
+        # ── Intraday (live today's data) ──
+        url = (
+            f"https://api.upstox.com/v3/historical-candle/intraday/"
+            f"{encoded_key}/{unit}/{interval}"
+        )
+    else:
+        # ── Historical (past dates) ──
+        url = (
+            f"https://api.upstox.com/v3/historical-candle/"
+            f"{encoded_key}/{unit}/{interval}/{to_date}/{from_date}"
+        )
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept":        "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return {"success": True, "data": response.json()}
+        else:
+            return {"success": False, "error": f"API Error {response.status_code}: {response.text}"}
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": f"Connection Error: {str(e)}"}
+
+
+# ─────────────────────────────────────────────
+# Helper: Raw candles parse करना
+# ─────────────────────────────────────────────
+def parse_candles(api_response: dict):
+    """
+    Upstox v3 response से candle list बनाता है।
+    Format: [timestamp, open, high, low, close, volume, oi]
+    """
+    raw = api_response.get("data", {}).get("candles", [])
+    candles = []
+    for c in raw:
+        candles.append({
+            "time":   c[0],
+            "open":   c[1],
+            "high":   c[2],
+            "low":    c[3],
+            "close":  c[4],
+            "volume": c[5],
+            "oi":     c[6] if len(c) > 6 else 0,
+        })
+    candles.reverse()
+    return candles
+
+
+# ─────────────────────────────────────────────
+# View 1: Chart Page (HTML render)
+# ─────────────────────────────────────────────
+def chart_view(request):
+    today     = date.today()
+    symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
+    unit      = request.GET.get("unit",      "minutes")
+    interval  = request.GET.get("interval",  "5")
+    from_date = request.GET.get("from_date", today.isoformat())  # default → आज
+    to_date   = request.GET.get("to_date",   today.isoformat())   # default → आज
+
+    candles        = []
+    error          = None
+    instrument_key = None
+
+    # Step 1: DB से instrument_key लो
+    instrument_key = get_instrument_key(symbol)
+
+    if not instrument_key:
+        error = f"'{symbol}' symbol DB में नहीं मिला। पहले InstrumentStore में add करें।"
+    else:
+        # Step 2: Upstox API hit करो
+        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+
+        if not result["success"]:
+            error = result["error"]
+        else:
+            candles = parse_candles(result["data"])
+            if not candles:
+                error = "इस date range में कोई candle data नहीं मिली।"
+
+    # Step 3: Reversal lines — OptionChain से
+    reversal_lines = get_reversal_lines(symbol, from_date, to_date)
+
+
+    context = {
+        "candles":        candles,
+        "reversal_lines": reversal_lines,
+        "error":          error,
+        "symbol":         symbol,
+        "instrument_key": instrument_key or "—",
+        "unit":           unit,
+        "interval":       interval,
+        "from_date":      from_date,
+        "to_date":        to_date,
+    }
+    return render(request, "mystock/chart.html", context)
+
+
+# ─────────────────────────────────────────────
+# View 2: AJAX JSON API endpoint
+# ─────────────────────────────────────────────
+def candle_api(request):
+    symbol    = request.GET.get("symbol",    "").strip().upper()
+    unit      = request.GET.get("unit",      "minutes")
+    interval  = request.GET.get("interval",  "5")
+    from_date = request.GET.get("from_date", "")
+    to_date   = request.GET.get("to_date",   "")
+
+    if not symbol:
+        return JsonResponse({"error": "symbol parameter जरूरी है।"}, status=400)
+
+    # Step 1: DB से instrument_key
+    instrument_key = get_instrument_key(symbol)
+    if not instrument_key:
+        return JsonResponse(
+            {"error": f"'{symbol}' symbol DB में नहीं मिला।"},
+            status=404
+        )
+
+    # Step 2: API call
+    result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+    if not result["success"]:
+        return JsonResponse({"error": result["error"]}, status=400)
+
+    candles        = parse_candles(result["data"])
+    reversal_lines = get_reversal_lines(symbol, from_date, to_date)
+
+    return JsonResponse({
+        "symbol":         symbol,
+        "instrument_key": instrument_key,
+        "interval":       interval,
+        "from_date":      from_date,
+        "to_date":        to_date,
+        "count":          len(candles),
+        "candles":        candles,
+        "reversal_lines": reversal_lines,
+    })
+
+
+# ─────────────────────────────────────────────
+# View 3: Symbol Autocomplete Search
+# ─────────────────────────────────────────────
+def symbol_search(request):
+    """
+    ?q=REL → DB में RELIANCE, RELINFRA आदि ढूंढता है
+    Frontend autocomplete के लिए उपयोगी
+    """
+    query = request.GET.get("q", "").strip()
+    if len(query) < 1:
+        return JsonResponse({"results": []})
+
+    results = InstrumentStore.objects.filter(
+        symbol__icontains=query
+    ).values("symbol", "instrument_key", "lot_size", "expiry_dates")[:20]
+
+    return JsonResponse({"results": list(results)})
+
+
+
+
+ 
+
+
+
+
+
 
