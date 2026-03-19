@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>📈 Upstox Candle Chart</title>
+
+  <!-- TradingView Lightweight Charts -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --accent:    #58a6ff;
+      --green:     #3fb950;
+      --red:       #f85149;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --font:      'Courier New', monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .logo {
+      font-size: 1.25rem;
+      font-weight: bold;
+      color: var(--accent);
+      letter-spacing: 2px;
+    }
+    .meta {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .meta span { color: var(--text); margin-left: 6px; }
+
+    /* ── Controls ── */
+    .controls {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 24px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .controls label { font-size: 0.75rem; color: var(--muted); }
+    .controls input, .controls select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.78rem;
+      padding: 5px 8px;
+      border-radius: 4px;
+      outline: none;
+    }
+    .controls input:focus, .controls select:focus { border-color: var(--accent); }
+    .controls button {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-family: var(--font);
+      font-size: 0.78rem;
+      font-weight: bold;
+      padding: 6px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: opacity .2s;
+    }
+    .controls button:hover { opacity: .85; }
+
+    /* ── Stats bar ── */
+    #stats {
+      display: flex;
+      gap: 24px;
+      padding: 10px 24px;
+      font-size: 0.78rem;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-item { display: flex; flex-direction: column; }
+    .stat-label { color: var(--muted); font-size: 0.68rem; margin-bottom: 2px; }
+    .stat-val { font-size: 0.9rem; font-weight: bold; }
+    .up   { color: var(--green); }
+    .down { color: var(--red); }
+
+    /* ── Chart container ── */
+    #chart-wrap {
+      padding: 16px 24px;
+      position: relative;
+    }
+    #chart { width: 100%; height: 460px; border-radius: 6px; overflow: hidden; }
+
+    /* ── Volume ── */
+
+    /* ── Error / Loading ── */
+    #message {
+      text-align: center;
+      padding: 20px;
+      font-size: 0.88rem;
+      color: var(--red);
+      display: none;
+    }
+    #loading {
+      text-align: center;
+      padding: 20px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      display: none;
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      padding: 0 24px 24px;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.76rem;
+    }
+    thead th {
+      text-align: left;
+      padding: 8px 12px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-weight: normal;
+      letter-spacing: 1px;
+      font-size: 0.68rem;
+    }
+    tbody tr:hover { background: var(--surface); }
+    tbody td {
+      padding: 6px 12px;
+      border-bottom: 1px solid #21262d;
+    }
+    .candle-up   { color: var(--green); }
+    .candle-down { color: var(--red); }
+
+    /* ── Auto Refresh ── */
+    .refresh-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 0.75rem;
+      padding: 5px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .refresh-btn.active {
+      border-color: var(--green);
+      color: var(--green);
+      background: #3fb95011;
+    }
+    .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    #countdown-bar {
+      height: 2px;
+      background: var(--border);
+      position: relative;
+      display: none;
+    }
+    #countdown-bar.active { display: block; }
+    #countdown-fill {
+      height: 100%;
+      background: var(--green);
+      width: 100%;
+      transition: width linear;
+    }
+    #refresh-status {
+      font-size: 0.7rem;
+      color: var(--muted);
+      padding: 3px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: none;
+    }
+    #refresh-status.active { display: block; }
+    .pulse { animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">📈 UPSTOX CHART</div>
+  <div class="meta">
+    Symbol: <span id="hdr-symbol">{{ symbol }}</span> &nbsp;|&nbsp;
+    Interval: <span id="hdr-interval">{{ interval }}m</span> &nbsp;|&nbsp;
+    Range: <span>{{ from_date }} → {{ to_date }}</span>
+  </div>
+</header>
+
+<!-- ── Controls ── -->
+<div class="controls">
+  <div>
+    <label>Symbol</label><br>
+    <input id="ctrl-symbol" type="text" value="{{ symbol }}" style="width:220px">
+  </div>
+  <div>
+    <label>Unit</label><br>
+    <select id="ctrl-unit" onchange="updateIntervalOptions()">
+      <option value="minutes" {% if unit == "minutes" or not unit %}selected{% endif %}>Minutes</option>
+      <option value="hours"   {% if unit == "hours"   %}selected{% endif %}>Hours</option>
+      <option value="days"    {% if unit == "days"    %}selected{% endif %}>Days</option>
+    </select>
+  </div>
+  <div>
+    <label>Interval</label><br>
+    <select id="ctrl-interval">
+      <option value="1" selected>1</option>
+    </select>
+  </div>
+  <div>
+    <label>From</label><br>
+    <input id="ctrl-from" type="date" value="{{ from_date }}">
+  </div>
+  <div>
+    <label>To</label><br>
+    <input id="ctrl-to" type="date" value="{{ to_date }}">
+  </div>
+  <div style="align-self:flex-end; display:flex; gap:8px; flex-wrap:wrap;">
+    <button onclick="loadChart()">🔄 Update</button>
+    <select id="refresh-interval" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--font);font-size:0.78rem;padding:5px 8px;border-radius:4px;">
+      <option value="15">15 सेकंड</option>
+      <option value="30" selected>30 सेकंड</option>
+      <option value="60">1 मिनट</option>
+      <option value="120">2 मिनट</option>
+      <option value="300">5 मिनट</option>
+    </select>
+    <button class="refresh-btn" id="auto-refresh-btn" onclick="toggleAutoRefresh()">
+      <span id="ar-icon">⏸</span>
+      <span id="ar-label">Auto OFF</span>
+    </button>
+  </div>
+</div>
+
+<!-- ── Countdown Bar ── -->
+<div id="countdown-bar"><div id="countdown-fill"></div></div>
+<div id="refresh-status">🟢 <span class="pulse">●</span> Auto Refresh चालू — अगला: <span id="next-refresh">—</span></div>
+
+<!-- ── Stats ── -->
+<div id="stats">
+  <div class="stat-item"><span class="stat-label">OPEN</span>  <span class="stat-val" id="s-open">—</span></div>
+  <div class="stat-item"><span class="stat-label">HIGH</span>  <span class="stat-val up"   id="s-high">—</span></div>
+  <div class="stat-item"><span class="stat-label">LOW</span>   <span class="stat-val down" id="s-low">—</span></div>
+  <div class="stat-item"><span class="stat-label">CLOSE</span> <span class="stat-val" id="s-close">—</span></div>
+  <div class="stat-item"><span class="stat-label">VOLUME</span><span class="stat-val" id="s-vol">—</span></div>
+  <div class="stat-item"><span class="stat-label">CANDLES</span><span class="stat-val" id="s-count">—</span></div>
+</div>
+
+<!-- ── Chart ── -->
+<div id="chart-wrap">
+  <div id="loading">⏳ Data load हो रही है...</div>
+  <div id="message"></div>
+  <div id="chart"></div>
+</div>
+
+<!-- ── Data Table Toggle Button ── -->
+<div style="padding: 8px 24px; border-top: 1px solid var(--border); background: var(--surface);">
+  <button class="refresh-btn" id="table-toggle-btn" onclick="toggleTable()" style="font-size:0.78rem;">
+    <span id="table-icon">📋</span>
+    <span id="table-label">Data Table दिखाएं</span>
+  </button>
+</div>
+
+<!-- ── Data Table (default: hidden) ── -->
+<div class="table-wrap" id="table-section" style="display:none;">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>TIME</th>
+        <th>OPEN</th>
+        <th>HIGH</th>
+        <th>LOW</th>
+        <th>CLOSE</th>
+        <th>VOLUME</th>
+        <th>CHANGE</th>
+      </tr>
+    </thead>
+    <tbody id="candle-table"></tbody>
+  </table>
+</div>
+
+<script>
+  // Django template से initial candle data
+  const initialCandles   = {{ candles|safe }};
+  const initialError     = "{{ error|default:'' }}";
+  const initialReversals = {{ reversal_lines|safe }};
+  let   lastReversals    = (initialReversals || []).filter(r => r && r.price > 0);
+  let   savedRange       = null;   // zoom range याद रखने के लिए
+
+  let mainChart = null;
+
+  // ── Chart बनाना ──
+  function buildCharts(candles, reversals = []) {
+    // पुराने charts साफ करें
+    if (mainChart) { mainChart.remove(); mainChart = null; }
+    document.getElementById("chart").innerHTML     = "";
+
+    if (!candles || candles.length === 0) {
+      showMsg("⚠️ कोई candle data नहीं मिली।");
+      return;
+    }
+
+    // ── Candlestick chart ──
+    mainChart = LightweightCharts.createChart(
+      document.getElementById("chart"), {
+        layout:     { background: { color: "#0d1117" }, textColor: "#8b949e" },
+        grid:       { vertLines: { color: "#21262d" }, horzLines: { color: "#21262d" } },
+        crosshair:  { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: { borderColor: "#30363d" },
+        timeScale:  { borderColor: "#30363d", timeVisible: true, secondsVisible: false },
+        width:  document.getElementById("chart").clientWidth,
+        height: 460,
+      }
+    );
+
+    const candleSeries = mainChart.addCandlestickSeries({
+      upColor:       "#3fb950",
+      downColor:     "#f85149",
+      borderUpColor: "#3fb950",
+      borderDownColor:"#f85149",
+      wickUpColor:   "#3fb950",
+      wickDownColor: "#f85149",
+    });
+
+
+    // Data format — IST offset (+5:30 = 19800 sec)
+    const IST_OFFSET = 19800;
+    const cdData = candles.map(c => ({
+      time:  Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET,
+      open:  c.open,
+      high:  c.high,
+      low:   c.low,
+      close: c.close,
+    }));
+
+    candleSeries.setData(cdData);
+
+    // ── Reversal Lines draw करना ──
+    // पुरानी lines हटाओ (rebuild पर)
+    if (window._reversalSeries) {
+      window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
+    }
+    window._reversalSeries = [];
+
+    // null/undefined/0 price skip करो → "Value is undefined" error से बचाव
+    const validReversals = (reversals || []).filter(rev => rev && rev.price != null && rev.price > 0);
+
+    validReversals.forEach(rev => {
+      try {
+        const lineSeries = mainChart.addLineSeries({
+          color:            rev.color,
+          lineWidth:        rev.width || 1,
+          lineStyle:        rev.dash  ?? 2,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          title:            rev.label || '',
+        });
+
+        // Chart की पूरी width पर line खींचो
+        if (cdData.length > 0) {
+          lineSeries.setData([
+            { time: cdData[0].time,                value: Number(rev.price) },
+            { time: cdData[cdData.length - 1].time, value: Number(rev.price) },
+          ]);
+        }
+        window._reversalSeries.push(lineSeries);
+      } catch(e) {
+        console.warn("Reversal line error:", rev.label, e.message);
+      }
+    });
+
+
+    // Zoom restore करो — पहली बार fitContent, बाद में savedRange
+    if (savedRange) {
+      mainChart.timeScale().setVisibleLogicalRange(savedRange);
+    } else {
+      mainChart.timeScale().fitContent();
+    }
+
+    // Zoom बदलने पर save करो
+    mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (range) savedRange = range;
+    });
+
+    // ── Crosshair hover: stats update ──
+    mainChart.subscribeCrosshairMove(param => {
+      if (param && param.seriesData && param.seriesData.size > 0) {
+        const d = param.seriesData.get(candleSeries);
+        if (d) {
+          document.getElementById("s-open").textContent  = d.open.toFixed(2);
+          document.getElementById("s-high").textContent  = d.high.toFixed(2);
+          document.getElementById("s-low").textContent   = d.low.toFixed(2);
+          document.getElementById("s-close").textContent = d.close.toFixed(2);
+        }
+      }
+    });
+
+    // Summary stats
+    const opens  = candles.map(c => c.open);
+    const highs  = candles.map(c => c.high);
+    const lows   = candles.map(c => c.low);
+    const closes = candles.map(c => c.close);
+    const vols   = candles.map(c => c.volume);
+
+    document.getElementById("s-open").textContent  = opens[0].toFixed(2);
+    document.getElementById("s-high").textContent  = Math.max(...highs).toFixed(2);
+    document.getElementById("s-low").textContent   = Math.min(...lows).toFixed(2);
+    document.getElementById("s-close").textContent = closes[closes.length - 1].toFixed(2);
+    document.getElementById("s-vol").textContent   = vols.reduce((a,b)=>a+b,0).toLocaleString("en-IN");
+    document.getElementById("s-count").textContent = candles.length;
+
+    // Table
+    buildTable(candles);
+  }
+
+  function buildTable(candles) {
+    const tbody = document.getElementById("candle-table");
+    tbody.innerHTML = "";
+    candles.slice().reverse().forEach((c, i) => {
+      const change = c.close - c.open;
+      const pct    = ((change / c.open) * 100).toFixed(2);
+      const cls    = change >= 0 ? "candle-up" : "candle-down";
+      const sign   = change >= 0 ? "▲" : "▼";
+      const dt     = new Date(c.time).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+      tbody.innerHTML += `
+        <tr>
+          <td class="${cls}">${i + 1}</td>
+          <td>${dt}</td>
+          <td>${c.open.toFixed(2)}</td>
+          <td class="candle-up">${c.high.toFixed(2)}</td>
+          <td class="candle-down">${c.low.toFixed(2)}</td>
+          <td class="${cls}">${c.close.toFixed(2)}</td>
+          <td>${c.volume.toLocaleString("en-IN")}</td>
+          <td class="${cls}">${sign} ${Math.abs(change).toFixed(2)} (${pct}%)</td>
+        </tr>`;
+    });
+  }
+
+  function showMsg(msg) {
+    const el = document.getElementById("message");
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+  function hideMsg() { document.getElementById("message").style.display = "none"; }
+
+  // ── AJAX से नया data load करना ──
+  function loadChart() {
+    const symbol   = document.getElementById("ctrl-symbol").value.trim();
+    const unit     = document.getElementById("ctrl-unit").value;
+    const interval = document.getElementById("ctrl-interval").value;
+    const fromDate = document.getElementById("ctrl-from").value;
+    const toDate   = document.getElementById("ctrl-to").value;
+
+    document.getElementById("loading").style.display = "block";
+    hideMsg();
+
+    const url = `/api/candle/?symbol=${encodeURIComponent(symbol)}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}`;
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById("loading").style.display = "none";
+        if (data.error) { showMsg("❌ Error: " + data.error); return; }
+        document.getElementById("hdr-symbol").textContent   = symbol;
+        document.getElementById("hdr-interval").textContent = interval + "m";
+        if (data.reversal_lines && data.reversal_lines.length > 0) {
+          lastReversals = data.reversal_lines.filter(r => r && r.price > 0);
+        }
+        buildCharts(data.candles, lastReversals);
+      })
+      .catch(err => {
+        document.getElementById("loading").style.display = "none";
+        showMsg("❌ Network Error: " + err.message);
+      });
+  }
+
+  // ── Auto Refresh Logic ──
+  let autoRefreshTimer  = null;   // setInterval ID
+  let countdownTimer    = null;   // setInterval for countdown
+  let isAutoRefresh     = false;
+  let remainingSeconds  = 0;
+
+  function toggleAutoRefresh() {
+    isAutoRefresh ? stopAutoRefresh() : startAutoRefresh();
+  }
+
+  function startAutoRefresh() {
+    isAutoRefresh = true;
+    const btn = document.getElementById("auto-refresh-btn");
+    btn.classList.add("active");
+    document.getElementById("ar-icon").textContent  = "▶";
+    document.getElementById("ar-label").textContent = "Auto ON";
+    document.getElementById("countdown-bar").classList.add("active");
+    document.getElementById("refresh-status").classList.add("active");
+
+    scheduleNext();
+  }
+
+  function stopAutoRefresh() {
+    isAutoRefresh = false;
+    clearTimeout(autoRefreshTimer);
+    clearInterval(countdownTimer);
+
+    const btn = document.getElementById("auto-refresh-btn");
+    btn.classList.remove("active");
+    document.getElementById("ar-icon").textContent  = "⏸";
+    document.getElementById("ar-label").textContent = "Auto OFF";
+    document.getElementById("countdown-bar").classList.remove("active");
+    document.getElementById("refresh-status").classList.remove("active");
+    document.getElementById("countdown-fill").style.width = "100%";
+  }
+
+  function scheduleNext() {
+    if (!isAutoRefresh) return;
+
+    const seconds = parseInt(document.getElementById("refresh-interval").value);
+    remainingSeconds = seconds;
+
+    // Countdown fill bar
+    const fill = document.getElementById("countdown-fill");
+    fill.style.transition = "none";
+    fill.style.width = "100%";
+    setTimeout(() => {
+      fill.style.transition = `width ${seconds}s linear`;
+      fill.style.width = "0%";
+    }, 50);
+
+    // Countdown text
+    clearInterval(countdownTimer);
+    updateCountdownText();
+    countdownTimer = setInterval(() => {
+      remainingSeconds--;
+      updateCountdownText();
+      if (remainingSeconds <= 0) clearInterval(countdownTimer);
+    }, 1000);
+
+    // Actual refresh
+    clearTimeout(autoRefreshTimer);
+    autoRefreshTimer = setTimeout(() => {
+      silentRefresh();
+    }, seconds * 1000);
+  }
+
+  function updateCountdownText() {
+    const s = remainingSeconds;
+    const txt = s >= 60
+      ? `${Math.floor(s/60)}m ${s%60}s`
+      : `${s}s`;
+    document.getElementById("next-refresh").textContent = txt + " में";
+  }
+
+  // Chart rebuild किए बिना सिर्फ data update करता है
+  function silentRefresh() {
+    if (!isAutoRefresh) return;
+
+    const symbol   = document.getElementById("ctrl-symbol").value.trim();
+    const unit     = document.getElementById("ctrl-unit").value;
+    const interval = document.getElementById("ctrl-interval").value;
+    const fromDate = document.getElementById("ctrl-from").value;
+    const toDate   = document.getElementById("ctrl-to").value;
+
+    const url = `/api/candle/?symbol=${encodeURIComponent(symbol)}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}`;
+
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.error && data.candles && data.candles.length > 0) {
+          // reversal_lines आई तो update, नहीं तो पुरानी रखो
+          if (data.reversal_lines && data.reversal_lines.length > 0) {
+            lastReversals = data.reversal_lines.filter(r => r && r.price > 0);
+          }
+          buildCharts(data.candles, lastReversals);  // data update
+        }
+        scheduleNext();  // अगला refresh schedule करो
+      })
+      .catch(() => {
+        scheduleNext();  // error पर भी retry
+      });
+  }
+
+  // ── Interval Options ──
+  const intervalOptions = {
+    minutes: [1,2,3,5,10,15,20,25,30,60,120,180,240,300],
+    hours:   [1,2,3,4,5],
+    days:    [1],
+  };
+
+  function updateIntervalOptions() {
+    const unit     = document.getElementById("ctrl-unit").value;
+    const select   = document.getElementById("ctrl-interval");
+    const prevVal  = select.value;
+    select.innerHTML = "";
+    intervalOptions[unit].forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      if (String(v) === prevVal) opt.selected = true;
+      select.appendChild(opt);
+    });
+    // अगर पुरानी value नहीं मिली तो पहला select करो
+    if (!select.value) select.selectedIndex = 0;
+  }
+
+  // Page load पर options set करो
+  updateIntervalOptions();
+
+  // ── Page load ──
+  if (initialError) {
+    showMsg("❌ " + initialError);
+  } else {
+    buildCharts(initialCandles, initialReversals);
+  }
+
+  // ── Table Toggle ──
+  let tableVisible = false;
+  function toggleTable() {
+    tableVisible = !tableVisible;
+    const section = document.getElementById("table-section");
+    const icon    = document.getElementById("table-icon");
+    const label   = document.getElementById("table-label");
+    const btn     = document.getElementById("table-toggle-btn");
+
+    if (tableVisible) {
+      section.style.display = "block";
+      icon.textContent  = "✖";
+      label.textContent = "Data Table छुपाएं";
+      btn.classList.add("active");
+    } else {
+      section.style.display = "none";
+      icon.textContent  = "📋";
+      label.textContent = "Data Table दिखाएं";
+      btn.classList.remove("active");
+    }
+  }
+
+  // Resize handling
+  window.addEventListener("resize", () => {
+    if (mainChart) mainChart.applyOptions({ width: document.getElementById("chart").clientWidth });
+  });
+</script>
+</body>
+</html>
