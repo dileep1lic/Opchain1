@@ -13,7 +13,8 @@ from .async_live import (
     save_sr_async_wrapper,
     # get_smart_expiry,
     calculate_data_async_optimized,
-    save_live_sr_data_async_wrapper,
+    # save_live_sr_data_async_wrapper,
+    save_live_sr_async,
     save_temp_async_wrapper,
     update_instrument_store_bulk,
     get_instrument_from_db
@@ -161,7 +162,7 @@ class Command(BaseCommand):
                     #         cursor.execute("VACUUM;") 
                     #         # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
                     
-                    await sync_to_async(optimize_db)()
+                    # await sync_to_async(optimize_db)()
                     
                     print(f"✅ Cleanup Complete: {deleted_count} old records removed. DB Optimized.")
                     cleanup_done_today = current_date # फ्लैग अपडेट करें ताकि दोबारा न चले
@@ -217,7 +218,7 @@ class Command(BaseCommand):
                         print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
                         
                         # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
-                        await save_live_sr_data_async_wrapper(df, fixes_sym)
+                        await save_live_sr_async(df, fixes_sym)
                 except Exception as e:
                     logger.error(f"NIFTY Loop Error: {e}")
             else:
