@@ -34,4 +34,8 @@ urlpatterns = [
     path('api/replay/dates/',      replay_views.get_replay_dates,      name='api_replay_dates'),
     path('api/replay/timestamps/', replay_views.get_replay_timestamps,  name='api_replay_timestamps'),
     path('api/replay/tick/',       replay_views.get_replay_tick,        name='api_replay_tick'),
+
+    path("chart/",         views.chart_view,   name="chart"),        # मुख्य chart page
+    path("api/candle/",    views.candle_api,    name="candle_api"),   # AJAX JSON data
+    path("api/symbols/",   views.symbol_search, name="symbol_search"),# Autocomplete
 ]
