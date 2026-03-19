@@ -1090,7 +1090,7 @@ def save_live_sr_data(df, symbol: str) -> bool:
         if (last is not None
                 and last.resistance_status == resistance_status
                 and last.supprt_status     == supprt_status):
-            print(f"⏭️  [{symbol}] Duplicate skip | R: {resistance_status} | S: {supprt_status}")
+            # print(f"⏭️  [{symbol}] Duplicate skip | R: {resistance_status} | S: {supprt_status}")
             return True
 
         # ════════════════════════════════════════════════════
