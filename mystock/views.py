@@ -1496,42 +1496,77 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         rows.sort(key=lambda r: r.Strike_Price)
 
         # ── Step 3: Lines बनाओ ──
-        lines    = []
-        seen_ce  = set()   # CE के लिए अलग
-        seen_pe  = set()   # PE के लिए अलग
+        # Logic:
+        #   Reversal price > Spot_Price → CE (Resistance) — लाल
+        #   Reversal price < Spot_Price → PE (Support)    — हरा
+        spot  = sr.Spot_Price or 0
+        lines = []
+        seen  = set()   # price duplicate skip
 
         for row in rows:
             strike = row.Strike_Price
 
-            # ── CE Reversal ──
-            if row.Reversl_Ce and row.Reversl_Ce not in seen_ce:
-                seen_ce.add(row.Reversl_Ce)
-                is_top = (strike == sr.resistance_strike)
-                lines.append({
-                    "price":  row.Reversl_Ce,
-                    "strike": strike,
-                    "type":   "CE",
-                    "color":  "#f85149",
-                    "width":  2 if is_top else 1,
-                    "dash":   0 if is_top else 2,
-                    "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
-                })
+            # ── Reversl_Ce check ──
+            if row.Reversl_Ce and row.Reversl_Ce not in seen:
+                price = row.Reversl_Ce
+                seen.add(price)
 
-            # ── PE Reversal ──
-            if row.Reversl_Pe and row.Reversl_Pe not in seen_pe:
-                seen_pe.add(row.Reversl_Pe)
-                is_bottom = (strike == sr.supprt_strike)
-                lines.append({
-                    "price":  row.Reversl_Pe,
-                    "strike": strike,
-                    "type":   "PE",
-                    "color":  "#3fb950",
-                    "width":  2 if is_bottom else 1,
-                    "dash":   0 if is_bottom else 2,
-                    "label":  f"S {strike:.0f}" if is_bottom else f"PE {strike:.0f}",
-                })
+                if price >= spot:
+                    # Market से ऊपर → CE Resistance (लाल)
+                    is_top = (strike == sr.resistance_strike)
+                    lines.append({
+                        "price":  price,
+                        "strike": strike,
+                        "type":   "CE",
+                        "color":  "#f85149",
+                        "width":  2 if is_top else 1,
+                        "dash":   0 if is_top else 2,
+                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
+                    })
+                else:
+                    # Market से नीचे → PE Support (हरा)
+                    is_bottom = (strike == sr.supprt_strike)
+                    lines.append({
+                        "price":  price,
+                        "strike": strike,
+                        "type":   "PE",
+                        "color":  "#3fb950",
+                        "width":  2 if is_bottom else 1,
+                        "dash":   0 if is_bottom else 2,
+                        "label":  f"S {strike:.0f}" if is_bottom else f"PE {strike:.0f}",
+                    })
 
-        # Strike के हिसाब से sort (ऊपर से नीचे)
+            # ── Reversl_Pe check ──
+            if row.Reversl_Pe and row.Reversl_Pe not in seen:
+                price = row.Reversl_Pe
+                seen.add(price)
+
+                if price >= spot:
+                    # Market से ऊपर → CE Resistance (लाल)
+                    is_top = (strike == sr.resistance_strike)
+                    lines.append({
+                        "price":  price,
+                        "strike": strike,
+                        "type":   "CE",
+                        "color":  "#f85149",
+                        "width":  2 if is_top else 1,
+                        "dash":   0 if is_top else 2,
+                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
+                    })
+                else:
+                    # Market से नीचे → PE Support (हरा)
+                    is_bottom = (strike == sr.supprt_strike)
+                    lines.append({
+                        "price":  price,
+                        "strike": strike,
+                        "type":   "PE",
+                        "color":  "#3fb950",
+                        "width":  2 if is_bottom else 1,
+                        "dash":   0 if is_bottom else 2,
+                        "label":  f"S {strike:.0f}" if is_bottom else f"PE {strike:.0f}",
+                    })
+
+        # Price के हिसाब से sort (ऊपर से नीचे)
         lines.sort(key=lambda x: x["price"], reverse=True)
         return lines
 
