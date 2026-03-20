@@ -147,22 +147,22 @@ class Command(BaseCommand):
                     )()
                     
                     # डेटाबेस इंडेक्स को रिसेट और ऑप्टिमाइज़ करें
-                    # from django.db import connection
-                    # def optimize_db():
-                    #     with connection.cursor() as cursor:
-                    #         cursor.execute("VACUUM ANALYZE mystock_optionchain;")
-                    
-                    # await sync_to_async(optimize_db)()
-
                     from django.db import connection
                     def optimize_db():
                         with connection.cursor() as cursor:
-                            # SQLite के लिए:
-                            cursor.execute("PRAGMA optimize;")
-                            cursor.execute("VACUUM;") 
-                            # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
+                            cursor.execute("VACUUM ANALYZE mystock_optionchain;")
                     
                     await sync_to_async(optimize_db)()
+
+                    # from django.db import connection
+                    # def optimize_db():
+                    #     with connection.cursor() as cursor:
+                    #         # SQLite के लिए:
+                    #         cursor.execute("PRAGMA optimize;")
+                    #         cursor.execute("VACUUM;") 
+                    #         # अगर भविष्य में Postgres पर जाएँ, तो वहां "VACUUM ANALYZE mystock_optionchain;" चलेगा
+                    
+                    # await sync_to_async(optimize_db)()
                     
                     print(f"✅ Cleanup Complete: {deleted_count} old records removed. DB Optimized.")
                     cleanup_done_today = current_date # फ्लैग अपडेट करें ताकि दोबारा न चले
