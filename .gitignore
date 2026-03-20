@@ -34,3 +34,9 @@ secrets.json
 # OS Files
 .DS_Store
 Thumbs.db
+Lot_Size.txt
+logs/stock_sync.log
+mystock/fetch_access_token_auto.py
+mystock/views1.py
+templates/dashboard.html
+templates/sr.html
