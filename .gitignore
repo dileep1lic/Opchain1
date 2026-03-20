@@ -1,1 +1,36 @@
 
+stock_sync/
+# Python / Django
+*.pyc
+*~
+__pycache__/
+
+# Local Database (लोकल डेटाबेस को कभी अपलोड न करें)
+# db.sqlite3
+# db.sqlite3-journal
+
+# Environments (वर्चुअल एनवायरनमेंट)
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Django Media / Static Files (यूजर द्वारा अपलोड की गई फाइलें)
+media/
+# static/ (अगर आप डेवलपमेंट के दौरान स्टैटिक फाइल्स को इग्नोर करना चाहते हैं, 
+# लेकिन आमतौर पर प्रोडक्शन के लिए कलेक्ट की गई फाइल्स को इग्नोर करते हैं जैसे staticfiles/)
+staticfiles/
+
+# Security / Secrets (आपके प्रोजेक्ट के सीक्रेट्स)
+.env
+local_settings.py
+secrets.json
+
+# IDEs / Editors (VS Code, PyCharm आदि की फाइलें)
+.vscode/
+.idea/
+
+# OS Files
+.DS_Store
+Thumbs.db
