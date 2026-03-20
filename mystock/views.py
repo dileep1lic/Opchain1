@@ -1460,31 +1460,52 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         low  = min(sr.supprt_strike,    sr.resistance_strike)
         high = max(sr.resistance_strike, sr.supprt_strike)
 
-        # ── Step 2: OptionChain latest timestamp ──
+        # ── Step 2: OptionChain — हर Strike की latest row ──
+        # latest_time से exact filter नहीं करते — हर strike की
+        # latest entry अलग अलग समय की हो सकती है
+        from django.db.models import Max
+
         oc_qs = OptionChain.objects.filter(
             Symbol__iexact=symbol,
             Time__date__gte=from_date,
             Time__date__lte=to_date,
             Strike_Price__gte=low,
             Strike_Price__lte=high,
-        ).order_by('-Time')
+        )
 
         if not oc_qs.exists():
             return []
 
-        latest_time = oc_qs.first().Time
-        rows = oc_qs.filter(Time=latest_time).order_by('Strike_Price')
+        # हर Strike_Price की सबसे latest Time लो
+        latest_per_strike = (
+            oc_qs.values('Strike_Price')
+                 .annotate(latest=Max('Time'))
+        )
+
+        # उन rows को fetch करो
+        rows = []
+        for entry in latest_per_strike:
+            row = oc_qs.filter(
+                Strike_Price=entry['Strike_Price'],
+                Time=entry['latest']
+            ).first()
+            if row:
+                rows.append(row)
+
+        # Strike_Price से sort करो
+        rows.sort(key=lambda r: r.Strike_Price)
 
         # ── Step 3: Lines बनाओ ──
-        lines = []
-        seen  = set()
+        lines    = []
+        seen_ce  = set()   # CE के लिए अलग
+        seen_pe  = set()   # PE के लिए अलग
 
         for row in rows:
             strike = row.Strike_Price
 
             # ── CE Reversal ──
-            if row.Reversl_Ce and row.Reversl_Ce not in seen:
-                seen.add(row.Reversl_Ce)
+            if row.Reversl_Ce and row.Reversl_Ce not in seen_ce:
+                seen_ce.add(row.Reversl_Ce)
                 is_top = (strike == sr.resistance_strike)
                 lines.append({
                     "price":  row.Reversl_Ce,
@@ -1497,8 +1518,8 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
                 })
 
             # ── PE Reversal ──
-            if row.Reversl_Pe and row.Reversl_Pe not in seen:
-                seen.add(row.Reversl_Pe)
+            if row.Reversl_Pe and row.Reversl_Pe not in seen_pe:
+                seen_pe.add(row.Reversl_Pe)
                 is_bottom = (strike == sr.supprt_strike)
                 lines.append({
                     "price":  row.Reversl_Pe,
@@ -1689,7 +1710,6 @@ def symbol_search(request):
     ).values("symbol", "instrument_key", "lot_size", "expiry_dates")[:20]
 
     return JsonResponse({"results": list(results)})
-
 
 
 
