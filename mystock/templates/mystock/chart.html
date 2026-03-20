@@ -257,6 +257,10 @@
       <span id="ar-icon">⏸</span>
       <span id="ar-label">Auto OFF</span>
     </button>
+    <button class="refresh-btn active" id="reversal-toggle-btn" onclick="toggleReversalLines()">
+      <span id="rv-icon">📉</span>
+      <span id="rv-label">Reversal ON</span>
+    </button>
   </div>
 </div>
 
@@ -316,10 +320,12 @@
   let   lastReversals    = (initialReversals || []).filter(r => r && r.price > 0);
   let   savedRange       = null;   // zoom range याद रखने के लिए
 
-  let mainChart = null;
+  let mainChart        = null;
+  let reversalVisible  = true;   // Reversal lines ON/OFF
 
   // ── Chart बनाना ──
   function buildCharts(candles, reversals = []) {
+    window._lastCandles = candles;  // zoom restore के लिए cache
     // पुराने charts साफ करें
     if (mainChart) { mainChart.remove(); mainChart = null; }
     document.getElementById("chart").innerHTML     = "";
@@ -371,8 +377,10 @@
     }
     window._reversalSeries = [];
 
-    // null/undefined/0 price skip करो → "Value is undefined" error से बचाव
-    const validReversals = (reversals || []).filter(rev => rev && rev.price != null && rev.price > 0);
+    // null/undefined/0 price skip + toggle check
+    const validReversals = reversalVisible
+      ? (reversals || []).filter(rev => rev && rev.price != null && rev.price > 0)
+      : [];
 
     validReversals.forEach(rev => {
       try {
@@ -637,6 +645,31 @@
     showMsg("❌ " + initialError);
   } else {
     buildCharts(initialCandles, initialReversals);
+  }
+
+  // ── Reversal Lines Toggle ──
+  function toggleReversalLines() {
+    reversalVisible = !reversalVisible;
+    const btn   = document.getElementById("reversal-toggle-btn");
+    const icon  = document.getElementById("rv-icon");
+    const label = document.getElementById("rv-label");
+
+    if (reversalVisible) {
+      btn.classList.add("active");
+      label.textContent = "Reversal ON";
+      // lines वापस draw करो
+      buildCharts(window._lastCandles || [], lastReversals);
+    } else {
+      btn.classList.remove("active");
+      label.textContent = "Reversal OFF";
+      // सिर्फ reversal series हटाओ — chart rebuild मत करो
+      if (window._reversalSeries) {
+        window._reversalSeries.forEach(s => {
+          try { mainChart.removeSeries(s); } catch(e) {}
+        });
+        window._reversalSeries = [];
+      }
+    }
   }
 
   // ── Table Toggle ──
