@@ -670,13 +670,21 @@ def _fmt(v):
 #      "Resistance Both strong" → None
 # ────────────────────────────────────────────────────────────────
 def _extract_strike(label: str):
+    """String में से पहला number निकालता है (regex से)
+    e.g. 'Resistance (Vol)23500' → 23500.0
+    e.g. 'Resistance WTT 23500'  → 23500.0
+    e.g. 'Resistance Both strong' → None
+    """
+    import re
     if not label:
         return None
-    last = label.strip().split()[-1]
-    try:
-        return float(last)
-    except ValueError:
-        return None
+    m = re.search(r'[\d]+(?:[.][\d]+)?', label)
+    if m:
+        try:
+            return float(m.group())
+        except ValueError:
+            return None
+    return None
 
 
 # ────────────────────────────────────────────────────────────────
@@ -686,7 +694,7 @@ def _get_status(s1_percent: float, s2_percent: float,
                 s1_strike:  float, s2_strike:  float) -> str:
     """
     Returns:
-        "Strong"  अगर s2_percent >= 75
+        "Strong"  अगर s2_percent < 75
         "WTB"     अगर s2_strike  <  s1_strike
         "WTT"     अगर s2_strike  >= s1_strike
     """
@@ -1070,12 +1078,28 @@ def save_live_sr_data(df, symbol: str) -> bool:
         res_label, _res_src = res_calc.calculate(row_dict)
         sup_label, _sup_src = sup_calc.calculate(row_dict)
 
-        # Label का आखिरी token अगर number है तो strike, वरना None
-        resistance_strike = _extract_strike(res_label)
-        resistance_status = res_label      # "Resistance WTT 18500", "Resistance Both strong" etc.
+        # ── resistance_strike / supprt_strike ───────────────
+        # Primary strike (highest OI/Vol) → source से निकालो
+        # _res_src = "Resistance (Vol)23500"  ← यही चाहिए
+        resistance_strike = _extract_strike(_res_src)
+        supprt_strike     = _extract_strike(_sup_src)
 
-        supprt_strike     = _extract_strike(sup_label)
-        supprt_status     = sup_label      # "Support WTB 17500", "Support Shifted WTT" etc.
+        # ── resistance_status / supprt_status ───────────────
+        # Format: "Resistance (Vol) WTT 23500"
+        # _res_src से type निकालो, res_label से action निकालो
+        import re as _re
+
+        def _build_status(src: str, label: str, prefix: str) -> str:
+            # type = "(Vol)" / "(OI)" / "(Both)"
+            m = _re.search(r'([(][^)]+[)])', src)
+            ptype  = m.group(1) if m else ""
+            # action = label से prefix हटाकर बाकी
+            # e.g. "Resistance WTT 23500" → "WTT 23500"
+            action = label[len(prefix):].strip()
+            return f"{prefix} {ptype} {action}".strip()
+
+        resistance_status = _build_status(_res_src, res_label, "Resistance")
+        supprt_status     = _build_status(_sup_src, sup_label, "Support")
 
         # ════════════════════════════════════════════════════
         # DUPLICATE CHECK
@@ -1086,16 +1110,13 @@ def save_live_sr_data(df, symbol: str) -> bool:
                 .order_by("-Time")
                 .only("resistance_status", "supprt_status")
                 .first())
- 
+
         if (last is not None
                 and last.resistance_status == resistance_status
                 and last.supprt_status     == supprt_status):
-            # print(f"⏭️  [{symbol}] Duplicate skip | R: {resistance_status} | S: {supprt_status}")
+            print(f"⏭️  [{symbol}] Duplicate skip | R: {resistance_status} | S: {supprt_status}")
             return True
 
-        # ════════════════════════════════════════════════════
-        # DATABASE SAVE
-        # ════════════════════════════════════════════════════
         LiveSRData.objects.create(
             Time        = now,
             Symbol      = symbol,
