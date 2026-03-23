@@ -126,8 +126,29 @@
             font-size: 13px;
         }
 
-        .spot-line-row td { border-top: 3px solid #ff1744 !important; }
+        .spot-line-row td { border-top: 3px solid #ff1744 !important; padding-top: 12px !important; }
+        tr:has(+ .spot-line-row) td { padding-bottom: 12px !important; }
         
+        .sr-line-label {
+            position: absolute; top: -11px;
+            padding: 1px 7px; font-size: 10px; font-weight: 900;
+            border-radius: 8px; z-index: 5;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            white-space: nowrap; letter-spacing: 0.3px;
+        }
+        .res-line-label {
+            left: 4px;
+            background: rgba(0,200,83,0.2);
+            color: #00e676;
+            border: 1px solid #00c853;
+        }
+        .sup-line-label {
+            right: 4px;
+            background: rgba(255,23,68,0.2);
+            color: #ff5252;
+            border: 1px solid #ff1744;
+        }
+
         .spot-label {
             position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
             background: var(--accent-yellow); color: #000; padding: 2px 8px;
@@ -322,9 +343,45 @@ function refreshData() {
             if(supStrike) {
                 document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
             }
+            addSRLabelsToLine();
         }
     })
     .catch(err => console.warn("Update Error:", err));
+}
+
+function addSRLabelsToLine() {
+    const spotRow = document.querySelector('.spot-line-row');
+    if (!spotRow) return;
+
+    // Find first td that is position:relative (strike cell) or use first td
+    // Use the strike/price cell (middle) for spot label reference
+    const firstTd = spotRow.querySelector('td');
+    if (!firstTd) return;
+
+    // Remove old labels
+    spotRow.querySelectorAll('.sr-line-label').forEach(el => el.remove());
+
+    const resEl = document.getElementById('header-res');
+    const supEl = document.getElementById('header-sup');
+
+    if (resEl) {
+        const resText = resEl.innerText.trim().split('[')[0].trim();
+        const resLabel = document.createElement('span');
+        resLabel.className = 'sr-line-label res-line-label';
+        resLabel.innerText = 'R: ' + resText;
+        firstTd.style.position = 'relative';
+        firstTd.appendChild(resLabel);
+    }
+
+    if (supEl) {
+        const supText = supEl.innerText.trim().split('[')[0].trim();
+        const supLabel = document.createElement('span');
+        supLabel.className = 'sr-line-label sup-line-label';
+        supLabel.innerText = 'S: ' + supText;
+        const lastTd = spotRow.querySelector('td:last-child');
+        lastTd.style.position = 'relative';
+        lastTd.appendChild(supLabel);
+    }
 }
 
 function scrollToSpot() {
@@ -378,8 +435,10 @@ ltpDragHandle.addEventListener('mousedown', function(e) { isLtpDragging = true; 
 document.addEventListener('mouseup', function() { isLtpDragging = false; }, true);
 document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
+
 setInterval(refreshData, 5000);
-window.onload = scrollToSpot;
+window.onload = function() { scrollToSpot(); addSRLabelsToLine(); };
+
 </script>
 
 </body>
