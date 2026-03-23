@@ -129,27 +129,28 @@
         .spot-line-row td { border-top: 3px solid #ff1744 !important; padding-top: 12px !important; }
         tr:has(+ .spot-line-row) td { padding-bottom: 12px !important; }
         
-        .sr-line-label {
-            position: absolute; top: -11px;
-            padding: 1px 7px; font-size: 10px; font-weight: 900;
-            border-radius: 8px; z-index: 5;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
-            white-space: nowrap; letter-spacing: 0.3px;
+        .sr-float-label {
+            position: absolute;
+            transform: translateX(-50%);
+            z-index: 20; white-space: nowrap;
+            padding: 2px 9px; font-size: 11px; font-weight: 900;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.6);
+            letter-spacing: 0.2px;
+            pointer-events: none;
         }
         .res-line-label {
-            left: 4px;
-            background: rgba(0,200,83,0.2);
-            color: #00e676;
+            background: rgba(27,94,32,0.85);
+            color: #ffffff;
             border: 1px solid #00c853;
         }
         .sup-line-label {
-            right: 4px;
-            background: rgba(255,23,68,0.2);
-            color: #ff5252;
+            background: rgba(183,28,28,0.85);
+            color: #ffffff;
             border: 1px solid #ff1744;
         }
 
-        .spot-label {
+                .spot-label {
             position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
             background: var(--accent-yellow); color: #000; padding: 2px 8px;
             font-size: 11px; font-weight: 900; border-radius: 10px; z-index: 5;
@@ -182,6 +183,97 @@
         .close-btn { position: absolute; top: 8px; right: 8px; background: #c62828; color: white; border: none; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; z-index: 10; }
         .chart-frame { width: 100%; flex-grow: 1; border: none; background-color: #0f1115; }
         .modal-header { padding: 10px; background: #222; cursor: move; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+    
+
+        /* === OI / VOL ALERT ANIMATIONS === */
+        .oi-alert-ce td { animation: oiFlashCE 0.6s ease-in-out 4 !important; }
+        .oi-alert-pe td { animation: oiFlashPE 0.6s ease-in-out 4 !important; }
+        .vol-alert-ce td { animation: volFlashCE 0.6s ease-in-out 4 !important; }
+        .vol-alert-pe td { animation: volFlashPE 0.6s ease-in-out 4 !important; }
+
+        @keyframes oiFlashCE {
+            0%,100% { background-color: inherit; }
+            50% { background-color: rgba(0,230,118,0.55) !important; }
+        }
+        @keyframes oiFlashPE {
+            0%,100% { background-color: inherit; }
+            50% { background-color: rgba(255,82,82,0.55) !important; }
+        }
+        @keyframes volFlashCE {
+            0%,100% { background-color: inherit; }
+            50% { background-color: rgba(41,182,255,0.55) !important; }
+        }
+        @keyframes volFlashPE {
+            0%,100% { background-color: inherit; }
+            50% { background-color: rgba(255,193,7,0.55) !important; }
+        }
+
+        .log-entry {
+            font-size: 11px; padding: 3px 0; border-bottom: 1px solid #222;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .log-time { color: #555; font-size: 10px; }
+
+        /* === DROPDOWN MENU === */
+        .nav-dropdown { position: relative; }
+        .nav-dropdown-btn {
+            background: rgba(41,98,255,0.15);
+            border: 1px solid rgba(41,98,255,0.35);
+            color: #64b5f6; border-radius: 6px;
+            padding: 7px 14px; cursor: pointer;
+            font-size: 13px; font-weight: 700;
+            display: flex; align-items: center; gap: 6px;
+            white-space: nowrap; transition: all 0.2s;
+        }
+        .nav-dropdown-btn:hover { filter: brightness(1.2); }
+        .nav-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px); right: 0;
+            background: #1e2230;
+            border: 1px solid #333;
+            border-radius: 8px;
+            width: 220px;
+            z-index: 500;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.8);
+            overflow: hidden;
+        }
+        .nav-dropdown.open .nav-dropdown-menu { display: block; }
+        .nav-menu-item {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center; gap: 10px;
+            padding: 11px 16px; text-decoration: none;
+            color: #e0e0e0; font-size: 12px; font-weight: 600;
+            border-bottom: 1px solid #2a2a3a;
+            transition: background 0.15s;
+            width: 100%; box-sizing: border-box;
+        }
+        .nav-menu-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+        .nav-menu-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+        .nav-menu-label { flex: 1; }
+        .nav-menu-badge {
+            font-size: 9px; padding: 1px 6px; border-radius: 4px;
+            background: rgba(41,98,255,0.2); color: #64b5f6;
+            border: 1px solid rgba(41,98,255,0.3); flex-shrink: 0;
+        }
+        .nav-menu-divider {
+            padding: 7px 16px 5px;
+            font-size: 9px; color: #666; text-transform: uppercase;
+            font-weight: 700; letter-spacing: 0.8px;
+            background: #13161e; border-bottom: 1px solid #2a2a3a;
+            display: block;
+        }
+        .nav-menu-slider {
+            padding: 10px 16px 12px;
+            border-bottom: 1px solid #2a2a3a;
+            display: block;
+        }
+        .nav-menu-slider label {
+            font-size: 10px; color: #909399;
+            display: flex; justify-content: space-between; margin-bottom: 6px;
+        }
+
     </style>
 </head>
 <body>
@@ -205,50 +297,85 @@
             <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
         </div>
         
-        <div class="stat-item sr-badge sr-res">
-            <span class="label sr-label-res">Resistance (CE)</span>
+        <a href="{% url 'resistance_dashboard' %}" target="_blank" style="text-decoration: none;">
+        <div class="stat-item sr-badge sr-res" style="cursor: pointer;" onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1)'">
+            <span class="label sr-label-res">Resistance (CE) ↗</span>
             <span id="header-res" class="value" style="color: var(--accent-green); font-size: 14px;">
                 {{ sr_data.resistance_strike|floatformat:0|default:"-" }} 
                 <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.resistance_status|default:"Waiting..." }}]</span>
             </span>
         </div>
+        </a>
 
         
 
     </div>
 
     <div class="controls-group">
-        <div class="stat-item sr-badge sr-sup">
-            <span class="label sr-label-sup">Support (PE)</span>
+        <a href="{% url 'resistance_dashboard' %}" target="_blank" style="text-decoration: none;">
+        <div class="stat-item sr-badge sr-sup" style="cursor: pointer;" onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1)'">
+            <span class="label sr-label-sup">Support (PE) ↗</span>
             <span id="header-sup" class="value" style="color: var(--accent-red); font-size: 14px;">
                 {{ sr_data.supprt_strike|floatformat:0|default:"-" }} 
                 <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.supprt_status|default:"Waiting..." }}]</span>
             </span>
         </div>
+        </a>
         
-        <div class="control-card">
-            <span class="card-title">Search</span>
-            <a href="{% url 'search_dashboard' %}" target="_blank">
-                <button class="action-btn btn-blue">OPEN ↗</button>
-            </a>
-        </div>
-        <div class="control-card">
-            <span class="card-title">Market</span>
-            <a href="{% url 'stock_dashboard' %}" target="_blank">
-                <button class="action-btn btn-blue">ALL ↗</button>
-            </a>
-        </div>
-        <div class="control-card">
-            <span class="card-title">S&R History</span>
-            <a href="{% url 'resistance_dashboard' %}" target="_blank">
-                <button class="action-btn btn-blue">NIFTY ↗</button>
-            </a>
-        </div>
-        <div class="control-card" style="background: rgba(255,193,7,0.06); border-color: rgba(255,193,7,0.25);">
-            <span class="card-title" style="color: #ffc107;">Market Replay</span>
-            <a href="{% url 'market_replay' %}" target="_blank">
-                <button class="action-btn" style="background: rgba(255,193,7,0.15); color: #ffc107; border: 1px solid rgba(255,193,7,0.35);">▶ REPLAY</button>
-            </a>
+        <div class="nav-dropdown" id="navDropdown">
+            <button class="nav-dropdown-btn" onclick="toggleNavMenu()">
+                ☰ Menu <span style="font-size:10px;">▾</span>
+            </button>
+            <div class="nav-dropdown-menu">
+                <div class="nav-menu-divider">Navigation</div>
+                <a href="{% url 'search_dashboard' %}" target="_blank" class="nav-menu-item">
+                    <span class="nav-menu-icon">🔍</span>
+                    <span class="nav-menu-label">Search</span>
+                    <span class="nav-menu-badge">↗</span>
+                </a>
+                <a href="{% url 'stock_dashboard' %}" target="_blank" class="nav-menu-item">
+                    <span class="nav-menu-icon">📊</span>
+                    <span class="nav-menu-label">Market</span>
+                    <span class="nav-menu-badge">↗</span>
+                </a>
+                <a href="{% url 'chart' %}" target="_blank" class="nav-menu-item">
+                    <span class="nav-menu-icon">📈</span>
+                    <span class="nav-menu-label">Chart View</span>
+                    <span class="nav-menu-badge">↗</span>
+                </a>
+                <a href="{% url 'market_replay' %}" target="_blank" class="nav-menu-item" style="color:#ffc107;">
+                    <span class="nav-menu-icon">▶</span>
+                    <span class="nav-menu-label">Market Replay</span>
+                    <span class="nav-menu-badge" style="color:#ffc107; border-color:rgba(255,193,7,0.3); background:rgba(255,193,7,0.1);">↗</span>
+                </a>
+                <div class="nav-menu-divider">Settings</div>
+                <div class="nav-menu-slider">
+                    <label>
+                        <span>⚡ OI / VOL Alert Threshold</span>
+                        <span id="oiThreshVal" style="color:#ffc107; font-weight:700;">5%</span>
+                    </label>
+                    <input type="range" class="oi-slider" id="oiThreshold" min="1" max="20" value="5"
+                        style="width:100%; accent-color:#ffc107;"
+                        oninput="document.getElementById('oiThreshVal').innerText = this.value + '%'">
+                </div>
+                <div class="nav-menu-divider">Alert Panels</div>
+                <div style="padding:8px 16px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid #2a2a3a;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:11px; color:#00e676; font-weight:600;">🟢 CE Alerts</span>
+                        <div style="display:flex; gap:6px;">
+                            <button onclick="togglePanel('CE','show',event)" style="font-size:10px; padding:2px 8px; background:rgba(0,200,83,0.2); color:#00e676; border:1px solid #00c853; border-radius:4px; cursor:pointer;">Show</button>
+                            <button onclick="togglePanel('CE','hide',event)" style="font-size:10px; padding:2px 8px; background:rgba(255,23,68,0.15); color:#ff5252; border:1px solid #ff1744; border-radius:4px; cursor:pointer;">Hide</button>
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:11px; color:#ff5252; font-weight:600;">🔴 PE Alerts</span>
+                        <div style="display:flex; gap:6px;">
+                            <button onclick="togglePanel('PE','show',event)" style="font-size:10px; padding:2px 8px; background:rgba(0,200,83,0.2); color:#00e676; border:1px solid #00c853; border-radius:4px; cursor:pointer;">Show</button>
+                            <button onclick="togglePanel('PE','hide',event)" style="font-size:10px; padding:2px 8px; background:rgba(255,23,68,0.15); color:#ff5252; border:1px solid #ff1744; border-radius:4px; cursor:pointer;">Hide</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -300,6 +427,44 @@
     </div>
 </div>
 
+<!-- CE Alert Panel -->
+<div id="ceAlertLog" style="position:fixed; bottom:15px; left:15px; width:260px;
+     background:#181b21; border:1px solid #00c853; border-radius:8px; z-index:999;
+     box-shadow:0 4px 20px rgba(0,0,0,0.7); display:none; user-select:none;">
+    <div id="ceAlertHeader" style="padding:7px 10px; background:#0d1f14; border-bottom:1px solid #1b5e20;
+         border-radius:8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;
+         cursor:move;">
+        <span style="font-size:10px; color:#00e676; font-weight:700; text-transform:uppercase;">🟢 CE Alerts</span>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <span onclick="clearAlerts('CE')" title="Clear" style="cursor:pointer; color:#909399; font-size:11px;">🗑</span>
+            <span onclick="toggleMinimize('CE')" id="ceMinBtn" title="Minimize" style="cursor:pointer; color:#ffc107; font-size:13px; line-height:1;">─</span>
+            <span onclick="document.getElementById('ceAlertLog').style.display='none'" title="Close" style="cursor:pointer; color:#ff5252; font-size:13px; line-height:1;">✕</span>
+        </div>
+    </div>
+    <div id="ceAlertBody" style="max-height:200px; overflow-y:auto; padding:6px 8px;">
+        <div id="ceAlertEntries"></div>
+    </div>
+</div>
+
+<!-- PE Alert Panel -->
+<div id="peAlertLog" style="position:fixed; bottom:15px; right:15px; width:260px;
+     background:#181b21; border:1px solid #ff1744; border-radius:8px; z-index:999;
+     box-shadow:0 4px 20px rgba(0,0,0,0.7); display:none; user-select:none;">
+    <div id="peAlertHeader" style="padding:7px 10px; background:#1f0d0d; border-bottom:1px solid #b71c1c;
+         border-radius:8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;
+         cursor:move;">
+        <span style="font-size:10px; color:#ff5252; font-weight:700; text-transform:uppercase;">🔴 PE Alerts</span>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <span onclick="clearAlerts('PE')" title="Clear" style="cursor:pointer; color:#909399; font-size:11px;">🗑</span>
+            <span onclick="toggleMinimize('PE')" id="peMinBtn" title="Minimize" style="cursor:pointer; color:#ffc107; font-size:13px; line-height:1;">─</span>
+            <span onclick="document.getElementById('peAlertLog').style.display='none'" title="Close" style="cursor:pointer; color:#ff5252; font-size:13px; line-height:1;">✕</span>
+        </div>
+    </div>
+    <div id="peAlertBody" style="max-height:200px; overflow-y:auto; padding:6px 8px;">
+        <div id="peAlertEntries"></div>
+    </div>
+</div>
+
 <script>
 // --- Cookie Helper ---
 function getCookie(name) {
@@ -344,46 +509,271 @@ function refreshData() {
                 document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
             }
             addSRLabelsToLine();
+            checkOIBuildup();
         }
     })
     .catch(err => console.warn("Update Error:", err));
+}
+
+
+// === OI BUILDUP ALERT ===
+let prevOIData = {};
+
+function saveOISnapshot() {
+    document.querySelectorAll('table tbody tr').forEach(row => {
+        const tds = row.querySelectorAll('td');
+        if (tds.length < 16) return;
+        const strikeTd = row.querySelector('td.strike');
+        if (!strikeTd) return;
+        const strike = strikeTd.innerText.trim().replace(/[^0-9]/g, '');
+        if (!strike) return;
+        // CE OI = tds[3], PE OI = tds[13]
+        prevOIData['CE_OI_' + strike] = parseInt(tds[3].innerText.replace(/[^0-9]/g, '')) || 0;
+        prevOIData['PE_OI_' + strike] = parseInt(tds[13].innerText.replace(/[^0-9]/g, '')) || 0;
+        // CE VOL = tds[5], PE VOL = tds[11]
+        prevOIData['CE_VOL_' + strike] = parseInt(tds[5].innerText.replace(/[^0-9]/g, '')) || 0;
+        prevOIData['PE_VOL_' + strike] = parseInt(tds[11].innerText.replace(/[^0-9]/g, '')) || 0;
+    });
+}
+
+// === ALERT STORAGE ===
+function getTodayKey(side) {
+    const d = new Date();
+    const dateStr = d.toISOString().slice(0,10); // YYYY-MM-DD
+    return 'alerts_' + side + '_' + dateStr;
+}
+
+function saveAlertToStorage(side, alertObj) {
+    const key = getTodayKey(side);
+    let existing = [];
+    try { existing = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+    existing.unshift(alertObj);
+    if (existing.length > 100) existing = existing.slice(0, 100);
+    localStorage.setItem(key, JSON.stringify(existing));
+    // Clean old keys
+    Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('alerts_') && k !== getTodayKey('CE') && k !== getTodayKey('PE')) {
+            localStorage.removeItem(k);
+        }
+    });
+}
+
+
+
+// === PANEL DRAG & MINIMIZE ===
+function makeDraggable(panelId, headerId) {
+    const panel = document.getElementById(panelId);
+    const header = document.getElementById(headerId);
+    let isDrag = false, ox = 0, oy = 0;
+    header.addEventListener('mousedown', function(e) {
+        if (e.target.tagName === 'SPAN' && e.target.getAttribute('onclick')) return;
+        isDrag = true;
+        ox = e.clientX - panel.getBoundingClientRect().left;
+        oy = e.clientY - panel.getBoundingClientRect().top;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!isDrag) return;
+        panel.style.left = (e.clientX - ox) + 'px';
+        panel.style.top  = (e.clientY - oy) + 'px';
+    });
+    document.addEventListener('mouseup', function() { isDrag = false; });
+}
+
+function toggleMinimize(side) {
+    const body  = document.getElementById(side === 'CE' ? 'ceAlertBody' : 'peAlertBody');
+    const btn   = document.getElementById(side === 'CE' ? 'ceMinBtn'   : 'peMinBtn');
+    const isMin = body.style.display === 'none';
+    body.style.display = isMin ? 'block' : 'none';
+    btn.innerText = isMin ? '─' : '□';
+    btn.title     = isMin ? 'Minimize' : 'Restore';
+}
+
+window.addEventListener('load', function() {
+    makeDraggable('ceAlertLog', 'ceAlertHeader');
+    makeDraggable('peAlertLog', 'peAlertHeader');
+});
+
+
+function togglePanel(side, action, event) {
+    if (event) event.stopPropagation();
+    const panel = document.getElementById(side === 'CE' ? 'ceAlertLog' : 'peAlertLog');
+    if (action === 'show') {
+        panel.style.display = 'block';
+        // Reload today's saved alerts into panel
+        const key = getTodayKey(side);
+        let alerts = [];
+        try { alerts = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+        const entries = document.getElementById(side === 'CE' ? 'ceAlertEntries' : 'peAlertEntries');
+        entries.innerHTML = '';
+        alerts.forEach(a => {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${a.strike} <strong>${a.sign}${a.pct}</strong></span><span class="log-time">${a.time}</span>`;
+            entries.appendChild(entry);
+        });
+    } else {
+        panel.style.display = 'none';
+    }
+    document.getElementById('navDropdown').classList.remove('open');
+}
+
+function clearAlerts(side) {
+    localStorage.removeItem(getTodayKey(side));
+    const entries = document.getElementById(side === 'CE' ? 'ceAlertEntries' : 'peAlertEntries');
+    entries.innerHTML = '';
+    document.getElementById(side === 'CE' ? 'ceAlertLog' : 'peAlertLog').style.display = 'none';
+}
+
+function loadAlertsFromStorage() {
+    ['CE','PE'].forEach(side => {
+        const key = getTodayKey(side);
+        let alerts = [];
+        try { alerts = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+        if (alerts.length === 0) return;
+        const panel   = document.getElementById(side === 'CE' ? 'ceAlertLog' : 'peAlertLog');
+        const entries = document.getElementById(side === 'CE' ? 'ceAlertEntries' : 'peAlertEntries');
+        panel.style.display = 'block';
+        entries.innerHTML = '';
+        alerts.forEach(a => {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${a.strike} <strong>${a.sign}${a.pct}</strong></span><span class="log-time">${a.time}</span>`;
+            entries.appendChild(entry);
+        });
+    });
+}
+
+function addAlertLog(strike, side, pct, type) {
+    const isCE = side === 'CE';
+    const panel   = document.getElementById(isCE ? 'ceAlertLog' : 'peAlertLog');
+    const entries = document.getElementById(isCE ? 'ceAlertEntries' : 'peAlertEntries');
+    panel.style.display = 'block';
+    const now  = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    const sign = pct > 0 ? '+' : '';
+    const icon  = type === 'OI' ? '📊' : '📈';
+    const color = type === 'OI'
+        ? (isCE ? '#00e676' : '#ff5252')
+        : (isCE ? '#29b6ff' : '#ffc107');
+    const pctStr = pct.toFixed(1) + '%';
+
+    // Save to localStorage
+    saveAlertToStorage(side, { strike, type, sign, pct: pctStr, color, icon, time: now });
+
+    // Show in panel
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.innerHTML = `<span style="color:${color}">${icon} ${type} ${strike} <strong>${sign}${pctStr}</strong></span><span class="log-time">${now}</span>`;
+    entries.insertBefore(entry, entries.firstChild);
+    while (entries.children.length > 100) entries.removeChild(entries.lastChild);
+}
+
+function checkOIBuildup() {
+    if (Object.keys(prevOIData).length === 0) { saveOISnapshot(); return; }
+    const threshold = parseFloat(document.getElementById('oiThreshold')?.value || 5);
+
+    document.querySelectorAll('table tbody tr').forEach(row => {
+        const tds = row.querySelectorAll('td');
+        if (tds.length < 16) return;
+        const strikeTd = row.querySelector('td.strike');
+        if (!strikeTd) return;
+        const strike = strikeTd.innerText.trim().replace(/[^0-9]/g, '');
+        if (!strike) return;
+
+        const ceOI  = parseInt(tds[3].innerText.replace(/[^0-9]/g, '')) || 0;
+        const peOI  = parseInt(tds[13].innerText.replace(/[^0-9]/g, '')) || 0;
+        const ceVOL = parseInt(tds[5].innerText.replace(/[^0-9]/g, '')) || 0;
+        const peVOL = parseInt(tds[11].innerText.replace(/[^0-9]/g, '')) || 0;
+
+        const prevCEOI  = prevOIData['CE_OI_'  + strike] || 0;
+        const prevPEOI  = prevOIData['PE_OI_'  + strike] || 0;
+        const prevCEVOL = prevOIData['CE_VOL_' + strike] || 0;
+        const prevPEVOL = prevOIData['PE_VOL_' + strike] || 0;
+
+        // OI Alerts
+        if (prevCEOI > 0) {
+            const pct = ((ceOI - prevCEOI) / prevCEOI) * 100;
+            if (Math.abs(pct) >= threshold) {
+                row.classList.remove('oi-alert-ce'); void row.offsetWidth;
+                row.classList.add('oi-alert-ce');
+                setTimeout(() => row.classList.remove('oi-alert-ce'), 2500);
+                addAlertLog(strike, 'CE', pct, 'OI');
+            }
+        }
+        if (prevPEOI > 0) {
+            const pct = ((peOI - prevPEOI) / prevPEOI) * 100;
+            if (Math.abs(pct) >= threshold) {
+                row.classList.remove('oi-alert-pe'); void row.offsetWidth;
+                row.classList.add('oi-alert-pe');
+                setTimeout(() => row.classList.remove('oi-alert-pe'), 2500);
+                addAlertLog(strike, 'PE', pct, 'OI');
+            }
+        }
+
+        // VOL Alerts
+        if (prevCEVOL > 0) {
+            const pct = ((ceVOL - prevCEVOL) / prevCEVOL) * 100;
+            if (Math.abs(pct) >= threshold) {
+                row.classList.remove('vol-alert-ce'); void row.offsetWidth;
+                row.classList.add('vol-alert-ce');
+                setTimeout(() => row.classList.remove('vol-alert-ce'), 2500);
+                addAlertLog(strike, 'CE', pct, 'VOL');
+            }
+        }
+        if (prevPEVOL > 0) {
+            const pct = ((peVOL - prevPEVOL) / prevPEVOL) * 100;
+            if (Math.abs(pct) >= threshold) {
+                row.classList.remove('vol-alert-pe'); void row.offsetWidth;
+                row.classList.add('vol-alert-pe');
+                setTimeout(() => row.classList.remove('vol-alert-pe'), 2500);
+                addAlertLog(strike, 'PE', pct, 'VOL');
+            }
+        }
+    });
+    saveOISnapshot();
 }
 
 function addSRLabelsToLine() {
     const spotRow = document.querySelector('.spot-line-row');
     if (!spotRow) return;
 
-    // Find first td that is position:relative (strike cell) or use first td
-    // Use the strike/price cell (middle) for spot label reference
-    const firstTd = spotRow.querySelector('td');
-    if (!firstTd) return;
-
-    // Remove old labels
-    spotRow.querySelectorAll('.sr-line-label').forEach(el => el.remove());
+    document.querySelectorAll('.sr-float-label').forEach(el => el.remove());
 
     const resEl = document.getElementById('header-res');
     const supEl = document.getElementById('header-sup');
 
-    if (resEl) {
-        const resText = resEl.innerText.trim().split('[')[0].trim();
-        const resLabel = document.createElement('span');
-        resLabel.className = 'sr-line-label res-line-label';
-        resLabel.innerText = 'R: ' + resText;
-        firstTd.style.position = 'relative';
-        firstTd.appendChild(resLabel);
+    const tds = spotRow.querySelectorAll('td');
+    const ceTd = tds[3];   // CE OI column
+    const peTd = tds[13];  // PE OI column
+
+    function placeLabel(td, text, className) {
+        if (!td) return;
+        const rect = td.getBoundingClientRect();
+        const tableContainer = document.getElementById('table-container');
+        const containerRect = tableContainer.getBoundingClientRect();
+        const label = document.createElement('div');
+        label.className = 'sr-float-label ' + className;
+        label.innerText = text;
+        label.style.left = (rect.left - containerRect.left + rect.width / 2) + 'px';
+        label.style.top = (rect.top - containerRect.top - 14 + tableContainer.scrollTop) + 'px';
+        tableContainer.style.position = 'relative';
+        tableContainer.appendChild(label);
     }
 
-    if (supEl) {
-        const supText = supEl.innerText.trim().split('[')[0].trim();
-        const supLabel = document.createElement('span');
-        supLabel.className = 'sr-line-label sup-line-label';
-        supLabel.innerText = 'S: ' + supText;
-        const lastTd = spotRow.querySelector('td:last-child');
-        lastTd.style.position = 'relative';
-        lastTd.appendChild(supLabel);
-    }
+    if (resEl && ceTd) placeLabel(ceTd, 'R: ' + resEl.innerText.trim(), 'res-line-label');
+    if (supEl && peTd) placeLabel(peTd, 'S: ' + supEl.innerText.trim(), 'sup-line-label');
 }
 
+
+function toggleNavMenu() {
+    document.getElementById('navDropdown').classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+    const dd = document.getElementById('navDropdown');
+    if (dd && !dd.contains(e.target)) dd.classList.remove('open');
+});
 function scrollToSpot() {
     const spotRow = document.querySelector('.spot-line-row');
     if (spotRow) { spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
@@ -435,10 +825,8 @@ ltpDragHandle.addEventListener('mousedown', function(e) { isLtpDragging = true; 
 document.addEventListener('mouseup', function() { isLtpDragging = false; }, true);
 document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
-
 setInterval(refreshData, 5000);
-window.onload = function() { scrollToSpot(); addSRLabelsToLine(); };
-
+window.onload = function() { scrollToSpot(); addSRLabelsToLine(); saveOISnapshot(); loadAlertsFromStorage(); };
 </script>
 
 </body>
