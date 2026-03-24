@@ -349,15 +349,6 @@
                     <span class="nav-menu-badge" style="color:#ffc107; border-color:rgba(255,193,7,0.3); background:rgba(255,193,7,0.1);">↗</span>
                 </a>
                 <div class="nav-menu-divider">Settings</div>
-                <div class="nav-menu-slider">
-                    <label>
-                        <span>⚡ OI / VOL Alert Threshold</span>
-                        <span id="oiThreshVal" style="color:#ffc107; font-weight:700;">5%</span>
-                    </label>
-                    <input type="range" class="oi-slider" id="oiThreshold" min="1" max="20" value="5"
-                        style="width:100%; accent-color:#ffc107;"
-                        oninput="document.getElementById('oiThreshVal').innerText = this.value + '%'">
-                </div>
                 <div class="nav-menu-divider">Alert Panels</div>
                 <div style="padding:8px 16px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid #2a2a3a;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -518,6 +509,50 @@ function refreshData() {
 
 // === OI BUILDUP ALERT ===
 let prevOIData = {};
+let lastAlerted  = { CE_VOL: '', PE_VOL: '' };
+
+function saveLastAlerted() {
+    try {
+        const d = new Date().toISOString().slice(0,10);
+        localStorage.setItem('lastAlerted_' + d, JSON.stringify(lastAlerted));
+        // Clean old keys
+        Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('lastAlerted_') && k !== 'lastAlerted_' + d)
+                localStorage.removeItem(k);
+        });
+    } catch(e) {}
+}
+
+function loadLastAlerted() {
+    try {
+        const d = new Date().toISOString().slice(0,10);
+        const saved = JSON.parse(localStorage.getItem('lastAlerted_' + d) || '{}');
+        if (saved.CE_VOL !== undefined) lastAlerted.CE_VOL = saved.CE_VOL;
+        if (saved.PE_VOL !== undefined) lastAlerted.PE_VOL = saved.PE_VOL;
+    } catch(e) {}
+}
+let maxSinceTime  = { CE_VOL: 0, PE_VOL: 0 };
+let firstSeenTime = {};  // firstSeenTime['CE_VOL_22700'] = timestamp
+
+function loadFirstSeenTime() {
+    try {
+        const d = new Date().toISOString().slice(0,10);
+        const saved = JSON.parse(localStorage.getItem('firstSeen_' + d) || '{}');
+        firstSeenTime = saved;
+        // Clean old keys
+        Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('firstSeen_') && k !== 'firstSeen_' + d)
+                localStorage.removeItem(k);
+        });
+    } catch(e) {}
+}
+
+function saveFirstSeenTime() {
+    try {
+        const d = new Date().toISOString().slice(0,10);
+        localStorage.setItem('firstSeen_' + d, JSON.stringify(firstSeenTime));
+    } catch(e) {}
+}
 
 function saveOISnapshot() {
     document.querySelectorAll('table tbody tr').forEach(row => {
@@ -525,8 +560,8 @@ function saveOISnapshot() {
         if (tds.length < 16) return;
         const strikeTd = row.querySelector('td.strike');
         if (!strikeTd) return;
-        const strike = strikeTd.innerText.trim().replace(/[^0-9]/g, '');
-        if (!strike) return;
+        const strike = Array.from(strikeTd.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('').replace(/[^0-9]/g,'');
+        if (!strike || strike.length > 6) return;
         // CE OI = tds[3], PE OI = tds[13]
         prevOIData['CE_OI_' + strike] = parseInt(tds[3].innerText.replace(/[^0-9]/g, '')) || 0;
         prevOIData['PE_OI_' + strike] = parseInt(tds[13].innerText.replace(/[^0-9]/g, '')) || 0;
@@ -611,7 +646,10 @@ function togglePanel(side, action, event) {
         alerts.forEach(a => {
             const entry = document.createElement('div');
             entry.className = 'log-entry';
-            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${a.strike} <strong>${a.sign}${a.pct}</strong></span><span class="log-time">${a.time}</span>`;
+            const label = a.prevStrike
+                ? `${a.prevStrike} → <strong>${a.strike}</strong>`
+                : `<strong>${a.strike}</strong>`;
+            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${label}</span><span class="log-time">${a.time}</span>`;
             entries.appendChild(entry);
         });
     } else {
@@ -640,99 +678,162 @@ function loadAlertsFromStorage() {
         alerts.forEach(a => {
             const entry = document.createElement('div');
             entry.className = 'log-entry';
-            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${a.strike} <strong>${a.sign}${a.pct}</strong></span><span class="log-time">${a.time}</span>`;
+            const label = a.prevStrike
+                ? `${a.prevStrike} → <strong>${a.strike}</strong>`
+                : `<strong>${a.strike}</strong>`;
+            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${label}</span><span class="log-time">${a.time}</span>`;
             entries.appendChild(entry);
         });
     });
 }
 
-function addAlertLog(strike, side, pct, type) {
+function addAlertLog(strike, side, diff, type, prevStrike) {
     const isCE = side === 'CE';
     const panel   = document.getElementById(isCE ? 'ceAlertLog' : 'peAlertLog');
     const entries = document.getElementById(isCE ? 'ceAlertEntries' : 'peAlertEntries');
     panel.style.display = 'block';
     const now  = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-    const sign = pct > 0 ? '+' : '';
     const icon  = type === 'OI' ? '📊' : '📈';
     const color = type === 'OI'
         ? (isCE ? '#00e676' : '#ff5252')
         : (isCE ? '#29b6ff' : '#ffc107');
-    const pctStr = pct.toFixed(1) + '%';
+    const label = prevStrike
+        ? `${prevStrike} → <strong>${strike}</strong>`
+        : `<strong>${strike}</strong>`;
 
-    // Save to localStorage
-    saveAlertToStorage(side, { strike, type, sign, pct: pctStr, color, icon, time: now });
+    saveAlertToStorage(side, { strike, prevStrike: prevStrike||'', type, color, icon, time: now });
 
-    // Show in panel
     const entry = document.createElement('div');
     entry.className = 'log-entry';
-    entry.innerHTML = `<span style="color:${color}">${icon} ${type} ${strike} <strong>${sign}${pctStr}</strong></span><span class="log-time">${now}</span>`;
+    entry.innerHTML = `<span style="color:${color}">${icon} ${type} ${label}</span><span class="log-time">${now}</span>`;
     entries.insertBefore(entry, entries.firstChild);
     while (entries.children.length > 100) entries.removeChild(entries.lastChild);
 }
 
 function checkOIBuildup() {
-    if (Object.keys(prevOIData).length === 0) { saveOISnapshot(); return; }
-    const threshold = parseFloat(document.getElementById('oiThreshold')?.value || 5);
+    const rows = document.querySelectorAll('table tbody tr');
 
-    document.querySelectorAll('table tbody tr').forEach(row => {
+    // Step 1: Calculate difference (new - old) for each strike
+    let maxCEVOLDiff = 0, maxCEVOLStrike = '';
+    let maxPEVOLDiff = 0, maxPEVOLStrike = '';
+
+    rows.forEach(row => {
         const tds = row.querySelectorAll('td');
         if (tds.length < 16) return;
         const strikeTd = row.querySelector('td.strike');
         if (!strikeTd) return;
-        const strike = strikeTd.innerText.trim().replace(/[^0-9]/g, '');
-        if (!strike) return;
+        const strike = Array.from(strikeTd.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('').replace(/[^0-9]/g,'');
+        if (!strike || strike.length > 6) return;
 
-        const ceOI  = parseInt(tds[3].innerText.replace(/[^0-9]/g, '')) || 0;
-        const peOI  = parseInt(tds[13].innerText.replace(/[^0-9]/g, '')) || 0;
-        const ceVOL = parseInt(tds[5].innerText.replace(/[^0-9]/g, '')) || 0;
-        const peVOL = parseInt(tds[11].innerText.replace(/[^0-9]/g, '')) || 0;
+        const ceVOL  = parseInt(tds[5].innerText.replace(/[^0-9]/g, ''))  || 0;
+        const peVOL  = parseInt(tds[11].innerText.replace(/[^0-9]/g, '')) || 0;
 
-        const prevCEOI  = prevOIData['CE_OI_'  + strike] || 0;
-        const prevPEOI  = prevOIData['PE_OI_'  + strike] || 0;
         const prevCEVOL = prevOIData['CE_VOL_' + strike] || 0;
         const prevPEVOL = prevOIData['PE_VOL_' + strike] || 0;
 
-        // OI Alerts
-        if (prevCEOI > 0) {
-            const pct = ((ceOI - prevCEOI) / prevCEOI) * 100;
-            if (Math.abs(pct) >= threshold) {
-                row.classList.remove('oi-alert-ce'); void row.offsetWidth;
-                row.classList.add('oi-alert-ce');
-                setTimeout(() => row.classList.remove('oi-alert-ce'), 2500);
-                addAlertLog(strike, 'CE', pct, 'OI');
-            }
-        }
-        if (prevPEOI > 0) {
-            const pct = ((peOI - prevPEOI) / prevPEOI) * 100;
-            if (Math.abs(pct) >= threshold) {
-                row.classList.remove('oi-alert-pe'); void row.offsetWidth;
-                row.classList.add('oi-alert-pe');
-                setTimeout(() => row.classList.remove('oi-alert-pe'), 2500);
-                addAlertLog(strike, 'PE', pct, 'OI');
-            }
-        }
+        const ceVOLDiff = ceVOL - prevCEVOL;
+        const peVOLDiff = peVOL - prevPEVOL;
 
-        // VOL Alerts
-        if (prevCEVOL > 0) {
-            const pct = ((ceVOL - prevCEVOL) / prevCEVOL) * 100;
-            if (Math.abs(pct) >= threshold) {
-                row.classList.remove('vol-alert-ce'); void row.offsetWidth;
-                row.classList.add('vol-alert-ce');
-                setTimeout(() => row.classList.remove('vol-alert-ce'), 2500);
-                addAlertLog(strike, 'CE', pct, 'VOL');
-            }
+        if (ceVOLDiff > maxCEVOLDiff) { maxCEVOLDiff = ceVOLDiff; maxCEVOLStrike = strike; }
+        if (peVOLDiff > maxPEVOLDiff) { maxPEVOLDiff = peVOLDiff; maxPEVOLStrike = strike; }
+    });
+
+    // Step 2: Alert only if strike changed AND different from last alerted
+    if (maxCEVOLStrike && maxCEVOLDiff > 0 && maxCEVOLStrike !== lastAlerted.CE_VOL) {
+        highlightStrikeRow(maxCEVOLStrike, 'vol-alert-ce');
+        addAlertLog(maxCEVOLStrike, 'CE', maxCEVOLDiff, 'VOL', lastAlerted.CE_VOL);
+        lastAlerted.CE_VOL = maxCEVOLStrike;
+        saveLastAlerted();
+    }
+    if (maxPEVOLStrike && maxPEVOLDiff > 0 && maxPEVOLStrike !== lastAlerted.PE_VOL) {
+        highlightStrikeRow(maxPEVOLStrike, 'vol-alert-pe');
+        addAlertLog(maxPEVOLStrike, 'PE', maxPEVOLDiff, 'VOL', lastAlerted.PE_VOL);
+        lastAlerted.PE_VOL = maxPEVOLStrike;
+        saveLastAlerted();
+    }
+
+    // Step 3: Track FIRST time each strike became max (never reset for same strike)
+    const now = Date.now();
+    function getFirstSeen(key, strike) {
+        const k = key + '_' + strike;
+        if (!firstSeenTime[k]) {
+            firstSeenTime[k] = now;
+            saveFirstSeenTime();
         }
-        if (prevPEVOL > 0) {
-            const pct = ((peVOL - prevPEVOL) / prevPEVOL) * 100;
-            if (Math.abs(pct) >= threshold) {
-                row.classList.remove('vol-alert-pe'); void row.offsetWidth;
-                row.classList.add('vol-alert-pe');
-                setTimeout(() => row.classList.remove('vol-alert-pe'), 2500);
-                addAlertLog(strike, 'PE', pct, 'VOL');
-            }
+        return firstSeenTime[k];
+    }
+    if (maxCEVOLStrike && maxCEVOLDiff > 0) maxSinceTime.CE_VOL = getFirstSeen('CE_VOL', maxCEVOLStrike);
+    if (maxPEVOLStrike && maxPEVOLDiff > 0) maxSinceTime.PE_VOL = getFirstSeen('PE_VOL', maxPEVOLStrike);
+
+    lastAlerted.CE_VOL_prev = maxCEVOLStrike;
+    lastAlerted.PE_VOL_prev = maxPEVOLStrike;
+
+    // Step 4: Show elapsed time in REVERSL column
+    updateReversalTimers(maxCEVOLStrike, maxPEVOLStrike);
+
+    // Step 5: Save snapshot for next diff calculation
+    saveOISnapshot();
+}
+
+
+function formatElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    if (h > 0) return h + 'h ' + (m % 60) + 'm';
+    if (m > 0) return m + 'm ' + (s % 60) + 's';
+    return s + 's';
+}
+
+function updateReversalTimers(cevolStrike, pevolStrike) {
+    const now = Date.now();
+
+    // Remove all old timers first
+    document.querySelectorAll('.reversl-timer').forEach(el => el.remove());
+
+    // Only show timer for CURRENT max strike per category
+    const active = [
+        { strike: cevolStrike, side: 'CE', type: 'VOL', col: 7, color: '#29b6ff', key: 'CE_VOL_' + cevolStrike },
+        { strike: pevolStrike, side: 'PE', type: 'VOL', col: 9, color: '#ffc107', key: 'PE_VOL_' + pevolStrike },
+    ];
+
+    const rows = document.querySelectorAll('table tbody tr');
+    rows.forEach(row => {
+        const tds = row.querySelectorAll('td');
+        if (tds.length < 16) return;
+        const strikeTd = row.querySelector('td.strike');
+        if (!strikeTd) return;
+        const strike = Array.from(strikeTd.childNodes)
+            .filter(n => n.nodeType === 3)
+            .map(n => n.textContent.trim())
+            .join('').replace(/[^0-9]/g, '');
+        if (!strike || strike.length > 6) return;
+
+        active.forEach(({ strike: maxStrike, type, col, color, key }) => {
+            if (strike !== maxStrike || !firstSeenTime[key]) return;
+            const td = tds[col];
+            if (!td) return;
+            const elapsed = formatElapsed(now - firstSeenTime[key]);
+            const badge = document.createElement('div');
+            badge.className = 'reversl-timer';
+            badge.style.cssText = 'margin-top:2px; line-height:1.3;';
+            badge.innerHTML = `<span style="color:${color};font-size:9px;font-weight:700;">⏱ ${type}</span> <span style="color:#fff;font-size:10px;font-weight:900;">${elapsed}</span>`;
+            td.appendChild(badge);
+        });
+    });
+}
+
+function highlightStrikeRow(strike, cls) {
+    document.querySelectorAll('table tbody tr').forEach(row => {
+        const strikeTd = row.querySelector('td.strike');
+        if (!strikeTd) return;
+        const rowStrike = Array.from(strikeTd.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('').replace(/[^0-9]/g,'');
+        if (rowStrike === strike) {
+            row.classList.remove(cls); void row.offsetWidth;
+            row.classList.add(cls);
+            setTimeout(() => row.classList.remove(cls), 2500);
         }
     });
-    saveOISnapshot();
 }
 
 function addSRLabelsToLine() {
@@ -826,7 +927,7 @@ document.addEventListener('mouseup', function() { isLtpDragging = false; }, true
 document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
 setInterval(refreshData, 5000);
-window.onload = function() { scrollToSpot(); addSRLabelsToLine(); saveOISnapshot(); loadAlertsFromStorage(); };
+window.onload = function() { scrollToSpot(); addSRLabelsToLine(); saveOISnapshot(); loadAlertsFromStorage(); loadFirstSeenTime(); loadLastAlerted(); };
 </script>
 
 </body>
