@@ -95,6 +95,80 @@
             transition: all 0.2s ease; text-decoration: none; display: inline-block;
             text-align: center; min-width: 60px;
         }
+
+
+        /* --- MENU DROPDOWN STYLES --- */
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .dropbtn {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dropbtn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 100%;
+            margin-top: 5px;
+            background-color: var(--header-bg);
+            min-width: 180px;
+            box-shadow: 0px 8px 20px rgba(0,0,0,0.8);
+            z-index: 200;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .dropdown-content a {
+            color: var(--text-primary);
+            padding: 12px 16px;
+            text-decoration: none;
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            font-weight: 600;
+            border-bottom: 1px solid #2a2d35;
+            transition: background 0.2s;
+        }
+
+        .dropdown-content a:last-child {
+            border-bottom: none;
+        }
+
+        .dropdown-content a:hover {
+            background-color: rgba(41, 98, 255, 0.1);
+        }
+
+        .dropdown-content a.replay-link {
+            color: var(--accent-yellow);
+        }
+        .dropdown-content a.replay-link:hover {
+            background-color: rgba(255,193,7,0.1);
+        }
+
+        /* Show the dropdown menu on hover */
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+
         .action-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
         .btn-blue { background: rgba(41, 98, 255, 0.15); color: #64b5f6; border: 1px solid rgba(41, 98, 255, 0.3); }
 
@@ -183,97 +257,6 @@
         .close-btn { position: absolute; top: 8px; right: 8px; background: #c62828; color: white; border: none; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; z-index: 10; }
         .chart-frame { width: 100%; flex-grow: 1; border: none; background-color: #0f1115; }
         .modal-header { padding: 10px; background: #222; cursor: move; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
-    
-
-        /* === OI / VOL ALERT ANIMATIONS === */
-        .oi-alert-ce td { animation: oiFlashCE 0.6s ease-in-out 4 !important; }
-        .oi-alert-pe td { animation: oiFlashPE 0.6s ease-in-out 4 !important; }
-        .vol-alert-ce td { animation: volFlashCE 0.6s ease-in-out 4 !important; }
-        .vol-alert-pe td { animation: volFlashPE 0.6s ease-in-out 4 !important; }
-
-        @keyframes oiFlashCE {
-            0%,100% { background-color: inherit; }
-            50% { background-color: rgba(0,230,118,0.55) !important; }
-        }
-        @keyframes oiFlashPE {
-            0%,100% { background-color: inherit; }
-            50% { background-color: rgba(255,82,82,0.55) !important; }
-        }
-        @keyframes volFlashCE {
-            0%,100% { background-color: inherit; }
-            50% { background-color: rgba(41,182,255,0.55) !important; }
-        }
-        @keyframes volFlashPE {
-            0%,100% { background-color: inherit; }
-            50% { background-color: rgba(255,193,7,0.55) !important; }
-        }
-
-        .log-entry {
-            font-size: 11px; padding: 3px 0; border-bottom: 1px solid #222;
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .log-time { color: #555; font-size: 10px; }
-
-        /* === DROPDOWN MENU === */
-        .nav-dropdown { position: relative; }
-        .nav-dropdown-btn {
-            background: rgba(41,98,255,0.15);
-            border: 1px solid rgba(41,98,255,0.35);
-            color: #64b5f6; border-radius: 6px;
-            padding: 7px 14px; cursor: pointer;
-            font-size: 13px; font-weight: 700;
-            display: flex; align-items: center; gap: 6px;
-            white-space: nowrap; transition: all 0.2s;
-        }
-        .nav-dropdown-btn:hover { filter: brightness(1.2); }
-        .nav-dropdown-menu {
-            display: none;
-            position: absolute;
-            top: calc(100% + 8px); right: 0;
-            background: #1e2230;
-            border: 1px solid #333;
-            border-radius: 8px;
-            width: 220px;
-            z-index: 500;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.8);
-            overflow: hidden;
-        }
-        .nav-dropdown.open .nav-dropdown-menu { display: block; }
-        .nav-menu-item {
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: center; gap: 10px;
-            padding: 11px 16px; text-decoration: none;
-            color: #e0e0e0; font-size: 12px; font-weight: 600;
-            border-bottom: 1px solid #2a2a3a;
-            transition: background 0.15s;
-            width: 100%; box-sizing: border-box;
-        }
-        .nav-menu-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
-        .nav-menu-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
-        .nav-menu-label { flex: 1; }
-        .nav-menu-badge {
-            font-size: 9px; padding: 1px 6px; border-radius: 4px;
-            background: rgba(41,98,255,0.2); color: #64b5f6;
-            border: 1px solid rgba(41,98,255,0.3); flex-shrink: 0;
-        }
-        .nav-menu-divider {
-            padding: 7px 16px 5px;
-            font-size: 9px; color: #666; text-transform: uppercase;
-            font-weight: 700; letter-spacing: 0.8px;
-            background: #13161e; border-bottom: 1px solid #2a2a3a;
-            display: block;
-        }
-        .nav-menu-slider {
-            padding: 10px 16px 12px;
-            border-bottom: 1px solid #2a2a3a;
-            display: block;
-        }
-        .nav-menu-slider label {
-            font-size: 10px; color: #909399;
-            display: flex; justify-content: space-between; margin-bottom: 6px;
-        }
-
     </style>
 </head>
 <body>
@@ -322,51 +305,27 @@
         </div>
         </a>
         
-        <div class="nav-dropdown" id="navDropdown">
-            <button class="nav-dropdown-btn" onclick="toggleNavMenu()">
-                ☰ Menu <span style="font-size:10px;">▾</span>
+        
+        <div class="dropdown">
+            <button class="dropbtn">
+                <span>⚙️ Tools Menu</span> 
+                <span style="font-size: 10px;">▼</span>
             </button>
-            <div class="nav-dropdown-menu">
-                <div class="nav-menu-divider">Navigation</div>
-                <a href="{% url 'search_dashboard' %}" target="_blank" class="nav-menu-item">
-                    <span class="nav-menu-icon">🔍</span>
-                    <span class="nav-menu-label">Search</span>
-                    <span class="nav-menu-badge">↗</span>
+            <div class="dropdown-content">
+                <a href="{% url 'search_dashboard' %}" target="_blank">
+                    <span>Search</span> <span style="color: #64b5f6;">OPEN ↗</span>
                 </a>
-                <a href="{% url 'stock_dashboard' %}" target="_blank" class="nav-menu-item">
-                    <span class="nav-menu-icon">📊</span>
-                    <span class="nav-menu-label">Market</span>
-                    <span class="nav-menu-badge">↗</span>
+                <a href="{% url 'stock_dashboard' %}" target="_blank">
+                    <span>Market</span> <span style="color: #64b5f6;">ALL ↗</span>
                 </a>
-                <a href="{% url 'chart' %}" target="_blank" class="nav-menu-item">
-                    <span class="nav-menu-icon">📈</span>
-                    <span class="nav-menu-label">Chart View</span>
-                    <span class="nav-menu-badge">↗</span>
+                <a href="{% url 'chart' %}" target="_blank">
+                    <span>Chart View</span> <span style="color: #64b5f6;">NIFTY ↗</span>
                 </a>
-                <a href="{% url 'market_replay' %}" target="_blank" class="nav-menu-item" style="color:#ffc107;">
-                    <span class="nav-menu-icon">▶</span>
-                    <span class="nav-menu-label">Market Replay</span>
-                    <span class="nav-menu-badge" style="color:#ffc107; border-color:rgba(255,193,7,0.3); background:rgba(255,193,7,0.1);">↗</span>
+                <a href="{% url 'market_replay' %}" target="_blank" class="replay-link">
+                    <span>Market Replay</span> <span>▶ REPLAY</span>
                 </a>
-                <div class="nav-menu-divider">Settings</div>
-                <div class="nav-menu-divider">Alert Panels</div>
-                <div style="padding:8px 16px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid #2a2a3a;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-size:11px; color:#00e676; font-weight:600;">🟢 CE Alerts</span>
-                        <div style="display:flex; gap:6px;">
-                            <button onclick="togglePanel('CE','show',event)" style="font-size:10px; padding:2px 8px; background:rgba(0,200,83,0.2); color:#00e676; border:1px solid #00c853; border-radius:4px; cursor:pointer;">Show</button>
-                            <button onclick="togglePanel('CE','hide',event)" style="font-size:10px; padding:2px 8px; background:rgba(255,23,68,0.15); color:#ff5252; border:1px solid #ff1744; border-radius:4px; cursor:pointer;">Hide</button>
-                        </div>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-size:11px; color:#ff5252; font-weight:600;">🔴 PE Alerts</span>
-                        <div style="display:flex; gap:6px;">
-                            <button onclick="togglePanel('PE','show',event)" style="font-size:10px; padding:2px 8px; background:rgba(0,200,83,0.2); color:#00e676; border:1px solid #00c853; border-radius:4px; cursor:pointer;">Show</button>
-                            <button onclick="togglePanel('PE','hide',event)" style="font-size:10px; padding:2px 8px; background:rgba(255,23,68,0.15); color:#ff5252; border:1px solid #ff1744; border-radius:4px; cursor:pointer;">Hide</button>
-                        </div>
-                    </div>
-                </div>
             </div>
+        </div>
         </div>
     </div>
 </div>
@@ -418,44 +377,6 @@
     </div>
 </div>
 
-<!-- CE Alert Panel -->
-<div id="ceAlertLog" style="position:fixed; bottom:15px; left:15px; width:260px;
-     background:#181b21; border:1px solid #00c853; border-radius:8px; z-index:999;
-     box-shadow:0 4px 20px rgba(0,0,0,0.7); display:none; user-select:none;">
-    <div id="ceAlertHeader" style="padding:7px 10px; background:#0d1f14; border-bottom:1px solid #1b5e20;
-         border-radius:8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;
-         cursor:move;">
-        <span style="font-size:10px; color:#00e676; font-weight:700; text-transform:uppercase;">🟢 CE Alerts</span>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <span onclick="clearAlerts('CE')" title="Clear" style="cursor:pointer; color:#909399; font-size:11px;">🗑</span>
-            <span onclick="toggleMinimize('CE')" id="ceMinBtn" title="Minimize" style="cursor:pointer; color:#ffc107; font-size:13px; line-height:1;">─</span>
-            <span onclick="document.getElementById('ceAlertLog').style.display='none'" title="Close" style="cursor:pointer; color:#ff5252; font-size:13px; line-height:1;">✕</span>
-        </div>
-    </div>
-    <div id="ceAlertBody" style="max-height:200px; overflow-y:auto; padding:6px 8px;">
-        <div id="ceAlertEntries"></div>
-    </div>
-</div>
-
-<!-- PE Alert Panel -->
-<div id="peAlertLog" style="position:fixed; bottom:15px; right:15px; width:260px;
-     background:#181b21; border:1px solid #ff1744; border-radius:8px; z-index:999;
-     box-shadow:0 4px 20px rgba(0,0,0,0.7); display:none; user-select:none;">
-    <div id="peAlertHeader" style="padding:7px 10px; background:#1f0d0d; border-bottom:1px solid #b71c1c;
-         border-radius:8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;
-         cursor:move;">
-        <span style="font-size:10px; color:#ff5252; font-weight:700; text-transform:uppercase;">🔴 PE Alerts</span>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <span onclick="clearAlerts('PE')" title="Clear" style="cursor:pointer; color:#909399; font-size:11px;">🗑</span>
-            <span onclick="toggleMinimize('PE')" id="peMinBtn" title="Minimize" style="cursor:pointer; color:#ffc107; font-size:13px; line-height:1;">─</span>
-            <span onclick="document.getElementById('peAlertLog').style.display='none'" title="Close" style="cursor:pointer; color:#ff5252; font-size:13px; line-height:1;">✕</span>
-        </div>
-    </div>
-    <div id="peAlertBody" style="max-height:200px; overflow-y:auto; padding:6px 8px;">
-        <div id="peAlertEntries"></div>
-    </div>
-</div>
-
 <script>
 // --- Cookie Helper ---
 function getCookie(name) {
@@ -500,340 +421,9 @@ function refreshData() {
                 document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
             }
             addSRLabelsToLine();
-            checkOIBuildup();
         }
     })
     .catch(err => console.warn("Update Error:", err));
-}
-
-
-// === OI BUILDUP ALERT ===
-let prevOIData = {};
-let lastAlerted  = { CE_VOL: '', PE_VOL: '' };
-
-function saveLastAlerted() {
-    try {
-        const d = new Date().toISOString().slice(0,10);
-        localStorage.setItem('lastAlerted_' + d, JSON.stringify(lastAlerted));
-        // Clean old keys
-        Object.keys(localStorage).forEach(k => {
-            if (k.startsWith('lastAlerted_') && k !== 'lastAlerted_' + d)
-                localStorage.removeItem(k);
-        });
-    } catch(e) {}
-}
-
-function loadLastAlerted() {
-    try {
-        const d = new Date().toISOString().slice(0,10);
-        const saved = JSON.parse(localStorage.getItem('lastAlerted_' + d) || '{}');
-        if (saved.CE_VOL !== undefined) lastAlerted.CE_VOL = saved.CE_VOL;
-        if (saved.PE_VOL !== undefined) lastAlerted.PE_VOL = saved.PE_VOL;
-    } catch(e) {}
-}
-let maxSinceTime  = { CE_VOL: 0, PE_VOL: 0 };
-let firstSeenTime = {};  // firstSeenTime['CE_VOL_22700'] = timestamp
-
-function loadFirstSeenTime() {
-    try {
-        const d = new Date().toISOString().slice(0,10);
-        const saved = JSON.parse(localStorage.getItem('firstSeen_' + d) || '{}');
-        firstSeenTime = saved;
-        // Clean old keys
-        Object.keys(localStorage).forEach(k => {
-            if (k.startsWith('firstSeen_') && k !== 'firstSeen_' + d)
-                localStorage.removeItem(k);
-        });
-    } catch(e) {}
-}
-
-function saveFirstSeenTime() {
-    try {
-        const d = new Date().toISOString().slice(0,10);
-        localStorage.setItem('firstSeen_' + d, JSON.stringify(firstSeenTime));
-    } catch(e) {}
-}
-
-function saveOISnapshot() {
-    document.querySelectorAll('table tbody tr').forEach(row => {
-        const tds = row.querySelectorAll('td');
-        if (tds.length < 16) return;
-        const strikeTd = row.querySelector('td.strike');
-        if (!strikeTd) return;
-        const strike = Array.from(strikeTd.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('').replace(/[^0-9]/g,'');
-        if (!strike || strike.length > 6) return;
-        // CE OI = tds[3], PE OI = tds[13]
-        prevOIData['CE_OI_' + strike] = parseInt(tds[3].innerText.replace(/[^0-9]/g, '')) || 0;
-        prevOIData['PE_OI_' + strike] = parseInt(tds[13].innerText.replace(/[^0-9]/g, '')) || 0;
-        // CE VOL = tds[5], PE VOL = tds[11]
-        prevOIData['CE_VOL_' + strike] = parseInt(tds[5].innerText.replace(/[^0-9]/g, '')) || 0;
-        prevOIData['PE_VOL_' + strike] = parseInt(tds[11].innerText.replace(/[^0-9]/g, '')) || 0;
-    });
-}
-
-// === ALERT STORAGE ===
-function getTodayKey(side) {
-    const d = new Date();
-    const dateStr = d.toISOString().slice(0,10); // YYYY-MM-DD
-    return 'alerts_' + side + '_' + dateStr;
-}
-
-function saveAlertToStorage(side, alertObj) {
-    const key = getTodayKey(side);
-    let existing = [];
-    try { existing = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
-    existing.unshift(alertObj);
-    if (existing.length > 100) existing = existing.slice(0, 100);
-    localStorage.setItem(key, JSON.stringify(existing));
-    // Clean old keys
-    Object.keys(localStorage).forEach(k => {
-        if (k.startsWith('alerts_') && k !== getTodayKey('CE') && k !== getTodayKey('PE')) {
-            localStorage.removeItem(k);
-        }
-    });
-}
-
-
-
-// === PANEL DRAG & MINIMIZE ===
-function makeDraggable(panelId, headerId) {
-    const panel = document.getElementById(panelId);
-    const header = document.getElementById(headerId);
-    let isDrag = false, ox = 0, oy = 0;
-    header.addEventListener('mousedown', function(e) {
-        if (e.target.tagName === 'SPAN' && e.target.getAttribute('onclick')) return;
-        isDrag = true;
-        ox = e.clientX - panel.getBoundingClientRect().left;
-        oy = e.clientY - panel.getBoundingClientRect().top;
-        panel.style.right = 'auto';
-        panel.style.bottom = 'auto';
-        e.preventDefault();
-    });
-    document.addEventListener('mousemove', function(e) {
-        if (!isDrag) return;
-        panel.style.left = (e.clientX - ox) + 'px';
-        panel.style.top  = (e.clientY - oy) + 'px';
-    });
-    document.addEventListener('mouseup', function() { isDrag = false; });
-}
-
-function toggleMinimize(side) {
-    const body  = document.getElementById(side === 'CE' ? 'ceAlertBody' : 'peAlertBody');
-    const btn   = document.getElementById(side === 'CE' ? 'ceMinBtn'   : 'peMinBtn');
-    const isMin = body.style.display === 'none';
-    body.style.display = isMin ? 'block' : 'none';
-    btn.innerText = isMin ? '─' : '□';
-    btn.title     = isMin ? 'Minimize' : 'Restore';
-}
-
-window.addEventListener('load', function() {
-    makeDraggable('ceAlertLog', 'ceAlertHeader');
-    makeDraggable('peAlertLog', 'peAlertHeader');
-});
-
-
-function togglePanel(side, action, event) {
-    if (event) event.stopPropagation();
-    const panel = document.getElementById(side === 'CE' ? 'ceAlertLog' : 'peAlertLog');
-    if (action === 'show') {
-        panel.style.display = 'block';
-        // Reload today's saved alerts into panel
-        const key = getTodayKey(side);
-        let alerts = [];
-        try { alerts = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
-        const entries = document.getElementById(side === 'CE' ? 'ceAlertEntries' : 'peAlertEntries');
-        entries.innerHTML = '';
-        alerts.forEach(a => {
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            const label = a.prevStrike
-                ? `${a.prevStrike} → <strong>${a.strike}</strong>`
-                : `<strong>${a.strike}</strong>`;
-            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${label}</span><span class="log-time">${a.time}</span>`;
-            entries.appendChild(entry);
-        });
-    } else {
-        panel.style.display = 'none';
-    }
-    document.getElementById('navDropdown').classList.remove('open');
-}
-
-function clearAlerts(side) {
-    localStorage.removeItem(getTodayKey(side));
-    const entries = document.getElementById(side === 'CE' ? 'ceAlertEntries' : 'peAlertEntries');
-    entries.innerHTML = '';
-    document.getElementById(side === 'CE' ? 'ceAlertLog' : 'peAlertLog').style.display = 'none';
-}
-
-function loadAlertsFromStorage() {
-    ['CE','PE'].forEach(side => {
-        const key = getTodayKey(side);
-        let alerts = [];
-        try { alerts = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
-        if (alerts.length === 0) return;
-        const panel   = document.getElementById(side === 'CE' ? 'ceAlertLog' : 'peAlertLog');
-        const entries = document.getElementById(side === 'CE' ? 'ceAlertEntries' : 'peAlertEntries');
-        panel.style.display = 'block';
-        entries.innerHTML = '';
-        alerts.forEach(a => {
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            const label = a.prevStrike
-                ? `${a.prevStrike} → <strong>${a.strike}</strong>`
-                : `<strong>${a.strike}</strong>`;
-            entry.innerHTML = `<span style="color:${a.color}">${a.icon} ${a.type} ${label}</span><span class="log-time">${a.time}</span>`;
-            entries.appendChild(entry);
-        });
-    });
-}
-
-function addAlertLog(strike, side, diff, type, prevStrike) {
-    const isCE = side === 'CE';
-    const panel   = document.getElementById(isCE ? 'ceAlertLog' : 'peAlertLog');
-    const entries = document.getElementById(isCE ? 'ceAlertEntries' : 'peAlertEntries');
-    panel.style.display = 'block';
-    const now  = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-    const icon  = type === 'OI' ? '📊' : '📈';
-    const color = type === 'OI'
-        ? (isCE ? '#00e676' : '#ff5252')
-        : (isCE ? '#29b6ff' : '#ffc107');
-    const label = prevStrike
-        ? `${prevStrike} → <strong>${strike}</strong>`
-        : `<strong>${strike}</strong>`;
-
-    saveAlertToStorage(side, { strike, prevStrike: prevStrike||'', type, color, icon, time: now });
-
-    const entry = document.createElement('div');
-    entry.className = 'log-entry';
-    entry.innerHTML = `<span style="color:${color}">${icon} ${type} ${label}</span><span class="log-time">${now}</span>`;
-    entries.insertBefore(entry, entries.firstChild);
-    while (entries.children.length > 100) entries.removeChild(entries.lastChild);
-}
-
-function checkOIBuildup() {
-    const rows = document.querySelectorAll('table tbody tr');
-
-    // Step 1: Calculate difference (new - old) for each strike
-    let maxCEVOLDiff = 0, maxCEVOLStrike = '';
-    let maxPEVOLDiff = 0, maxPEVOLStrike = '';
-
-    rows.forEach(row => {
-        const tds = row.querySelectorAll('td');
-        if (tds.length < 16) return;
-        const strikeTd = row.querySelector('td.strike');
-        if (!strikeTd) return;
-        const strike = Array.from(strikeTd.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('').replace(/[^0-9]/g,'');
-        if (!strike || strike.length > 6) return;
-
-        const ceVOL  = parseInt(tds[5].innerText.replace(/[^0-9]/g, ''))  || 0;
-        const peVOL  = parseInt(tds[11].innerText.replace(/[^0-9]/g, '')) || 0;
-
-        const prevCEVOL = prevOIData['CE_VOL_' + strike] || 0;
-        const prevPEVOL = prevOIData['PE_VOL_' + strike] || 0;
-
-        const ceVOLDiff = ceVOL - prevCEVOL;
-        const peVOLDiff = peVOL - prevPEVOL;
-
-        if (ceVOLDiff > maxCEVOLDiff) { maxCEVOLDiff = ceVOLDiff; maxCEVOLStrike = strike; }
-        if (peVOLDiff > maxPEVOLDiff) { maxPEVOLDiff = peVOLDiff; maxPEVOLStrike = strike; }
-    });
-
-    // Step 2: Alert only if strike changed AND different from last alerted
-    if (maxCEVOLStrike && maxCEVOLDiff > 0 && maxCEVOLStrike !== lastAlerted.CE_VOL) {
-        highlightStrikeRow(maxCEVOLStrike, 'vol-alert-ce');
-        addAlertLog(maxCEVOLStrike, 'CE', maxCEVOLDiff, 'VOL', lastAlerted.CE_VOL);
-        lastAlerted.CE_VOL = maxCEVOLStrike;
-        saveLastAlerted();
-    }
-    if (maxPEVOLStrike && maxPEVOLDiff > 0 && maxPEVOLStrike !== lastAlerted.PE_VOL) {
-        highlightStrikeRow(maxPEVOLStrike, 'vol-alert-pe');
-        addAlertLog(maxPEVOLStrike, 'PE', maxPEVOLDiff, 'VOL', lastAlerted.PE_VOL);
-        lastAlerted.PE_VOL = maxPEVOLStrike;
-        saveLastAlerted();
-    }
-
-    // Step 3: Track FIRST time each strike became max (never reset for same strike)
-    const now = Date.now();
-    function getFirstSeen(key, strike) {
-        const k = key + '_' + strike;
-        if (!firstSeenTime[k]) {
-            firstSeenTime[k] = now;
-            saveFirstSeenTime();
-        }
-        return firstSeenTime[k];
-    }
-    if (maxCEVOLStrike && maxCEVOLDiff > 0) maxSinceTime.CE_VOL = getFirstSeen('CE_VOL', maxCEVOLStrike);
-    if (maxPEVOLStrike && maxPEVOLDiff > 0) maxSinceTime.PE_VOL = getFirstSeen('PE_VOL', maxPEVOLStrike);
-
-    lastAlerted.CE_VOL_prev = maxCEVOLStrike;
-    lastAlerted.PE_VOL_prev = maxPEVOLStrike;
-
-    // Step 4: Show elapsed time in REVERSL column
-    updateReversalTimers(maxCEVOLStrike, maxPEVOLStrike);
-
-    // Step 5: Save snapshot for next diff calculation
-    saveOISnapshot();
-}
-
-
-function formatElapsed(ms) {
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    const h = Math.floor(m / 60);
-    if (h > 0) return h + 'h ' + (m % 60) + 'm';
-    if (m > 0) return m + 'm ' + (s % 60) + 's';
-    return s + 's';
-}
-
-function updateReversalTimers(cevolStrike, pevolStrike) {
-    const now = Date.now();
-
-    // Remove all old timers first
-    document.querySelectorAll('.reversl-timer').forEach(el => el.remove());
-
-    // Only show timer for CURRENT max strike per category
-    const active = [
-        { strike: cevolStrike, side: 'CE', type: 'VOL', col: 7, color: '#29b6ff', key: 'CE_VOL_' + cevolStrike },
-        { strike: pevolStrike, side: 'PE', type: 'VOL', col: 9, color: '#ffc107', key: 'PE_VOL_' + pevolStrike },
-    ];
-
-    const rows = document.querySelectorAll('table tbody tr');
-    rows.forEach(row => {
-        const tds = row.querySelectorAll('td');
-        if (tds.length < 16) return;
-        const strikeTd = row.querySelector('td.strike');
-        if (!strikeTd) return;
-        const strike = Array.from(strikeTd.childNodes)
-            .filter(n => n.nodeType === 3)
-            .map(n => n.textContent.trim())
-            .join('').replace(/[^0-9]/g, '');
-        if (!strike || strike.length > 6) return;
-
-        active.forEach(({ strike: maxStrike, type, col, color, key }) => {
-            if (strike !== maxStrike || !firstSeenTime[key]) return;
-            const td = tds[col];
-            if (!td) return;
-            const elapsed = formatElapsed(now - firstSeenTime[key]);
-            const badge = document.createElement('div');
-            badge.className = 'reversl-timer';
-            badge.style.cssText = 'margin-top:2px; line-height:1.3;';
-            badge.innerHTML = `<span style="color:${color};font-size:9px;font-weight:700;">⏱ ${type}</span> <span style="color:#fff;font-size:10px;font-weight:900;">${elapsed}</span>`;
-            td.appendChild(badge);
-        });
-    });
-}
-
-function highlightStrikeRow(strike, cls) {
-    document.querySelectorAll('table tbody tr').forEach(row => {
-        const strikeTd = row.querySelector('td.strike');
-        if (!strikeTd) return;
-        const rowStrike = Array.from(strikeTd.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('').replace(/[^0-9]/g,'');
-        if (rowStrike === strike) {
-            row.classList.remove(cls); void row.offsetWidth;
-            row.classList.add(cls);
-            setTimeout(() => row.classList.remove(cls), 2500);
-        }
-    });
 }
 
 function addSRLabelsToLine() {
@@ -867,14 +457,6 @@ function addSRLabelsToLine() {
     if (supEl && peTd) placeLabel(peTd, 'S: ' + supEl.innerText.trim(), 'sup-line-label');
 }
 
-
-function toggleNavMenu() {
-    document.getElementById('navDropdown').classList.toggle('open');
-}
-document.addEventListener('click', function(e) {
-    const dd = document.getElementById('navDropdown');
-    if (dd && !dd.contains(e.target)) dd.classList.remove('open');
-});
 function scrollToSpot() {
     const spotRow = document.querySelector('.spot-line-row');
     if (spotRow) { spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
@@ -927,7 +509,7 @@ document.addEventListener('mouseup', function() { isLtpDragging = false; }, true
 document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
 setInterval(refreshData, 5000);
-window.onload = function() { scrollToSpot(); addSRLabelsToLine(); saveOISnapshot(); loadAlertsFromStorage(); loadFirstSeenTime(); loadLastAlerted(); };
+window.onload = function() { scrollToSpot(); addSRLabelsToLine(); };
 </script>
 
 </body>
