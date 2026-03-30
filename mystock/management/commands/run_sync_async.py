@@ -141,7 +141,7 @@ class Command(BaseCommand):
                     print(f"🌅 Morning Maintenance starting for {fixes_sym}...")
                     
                     # 3 दिन पुराना डेटा डिलीट करें
-                    cutoff_time = current_now - timedelta(days=3)
+                    cutoff_time = current_now - timedelta(days=1)
                     deleted_count, _ = await sync_to_async(
                         OptionChain.objects.filter(Symbol="NIFTY", Time__lt=cutoff_time).delete
                     )()
