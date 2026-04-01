@@ -247,6 +247,7 @@ class Command(BaseCommand):
                     # 2. Save FULL DATA to TempOptionChain (New)
                     await save_temp_async_wrapper(df, sym)
 
+                    await save_live_sr_async(df, sym)
                     return True
             except Exception as e:
                 logger.error(f"Error {sym}: {e}")
