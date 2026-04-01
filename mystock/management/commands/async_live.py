@@ -4,7 +4,7 @@ import aiohttp
 import asyncio
 import pandas as pd
 from django.utils import timezone
-from mystock.credentials1 import access_token  # सीधे क्रेडेंशियल्स से लें
+from mystock.credentials import access_token  # सीधे क्रेडेंशियल्स से लें
 from .symbol import symbols as SYMBOLS        # सिंबल लिस्ट के लिए
 from asgiref.sync import sync_to_async
 import numpy as np
@@ -16,7 +16,7 @@ import gzip
 from .symbol import symbols as ALL_SYMBOLS
 from django.db import transaction
 import re
-
+cleanup_done_today = None
 
 
 logger = logging.getLogger(__name__)
@@ -641,7 +641,6 @@ def save_temp_async_wrapper(df, symbol):
 
 
 
-from datetime import datetime, timezone as dt_timezone, timedelta
 # ────────────────────────────────────────────────────────────────
 # Constants
 # ────────────────────────────────────────────────────────────────
@@ -649,11 +648,18 @@ WTT    = "WTT"
 WTB    = "WTB"
 STRONG = "STRONG"
 
+from datetime import datetime, timedelta, timezone as dt_timezone
+from django.utils import timezone
+import logging
+
+logger = logging.getLogger(__name__)
+
 IST = dt_timezone(timedelta(hours=5, minutes=30))
 
 def _today_ist():
     return datetime.now(IST).date()
 
+cleanup_done_today = None  # Global variable for cleanup tracking
 
 # ────────────────────────────────────────────────────────────────
 # Helper: Float formatter
@@ -663,18 +669,11 @@ def _fmt(v):
         return "—"
     return str(int(v)) if v == int(v) else str(v)
 
-
 # ────────────────────────────────────────────────────────────────
 # Helper: Label से Strike Price निकालना
-# e.g. "Resistance WTT 18500" → 18500.0
-#      "Resistance Both strong" → None
 # ────────────────────────────────────────────────────────────────
 def _extract_strike(label: str):
-    """String में से पहला number निकालता है (regex से)
-    e.g. 'Resistance (Vol)23500' → 23500.0
-    e.g. 'Resistance WTT 23500'  → 23500.0
-    e.g. 'Resistance Both strong' → None
-    """
+    """String में से पहला number निकालता है (regex से)"""
     import re
     if not label:
         return None
@@ -686,18 +685,11 @@ def _extract_strike(label: str):
             return None
     return None
 
-
 # ────────────────────────────────────────────────────────────────
 # Helper: WTT / WTB / Strong  (75% Rule — per OI/Volume column)
 # ────────────────────────────────────────────────────────────────
 def _get_status(s1_percent: float, s2_percent: float,
                 s1_strike:  float, s2_strike:  float) -> str:
-    """
-    Returns:
-        "Strong"  अगर s2_percent < 75
-        "WTB"     अगर s2_strike  <  s1_strike
-        "WTT"     अगर s2_strike  >= s1_strike
-    """
     if s2_percent < 75:
         return "Strong"
     elif s2_strike < s1_strike:
@@ -754,20 +746,28 @@ class ResistanceCalculator:
         # ── CASE 1: Same Strike ──────────────────────────────
         if vs is not None and os_ is not None and vs == os_:
             pS     = vs
-            second = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
             src    = self._src("Both", pS)
 
             if vStat == WTT and oStat == WTT:
+                target = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
                 self._reset()
-                if second:
-                    return self._do_shift(second, WTT, src)
-                return f"Resistance strong {_fmt(pS)}", src
+                if target:
+                    return self._do_shift(target, WTT, src)
+                return f"Resistance WTT {_fmt(pS)}", src # FIX: return WTT instead of strong
 
             if vStat == WTB or oStat == WTB:
+                # FIX: जो WTB है, टारगेट उसी का लेना है
+                if vStat == WTB and oStat == WTB:
+                    target = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
+                elif vStat == WTB:
+                    target = r.get("ce_2nd_high_vol_strike")
+                else:
+                    target = r.get("ce_2nd_high_oi_strike")
+                    
                 self._reset()
-                if second:
-                    return self._do_shift(second, WTB, src)
-                return f"Resistance strong {_fmt(pS)}", src
+                if target:
+                    return self._do_shift(target, WTB, src)
+                return f"Resistance WTB {_fmt(pS)}", src # FIX: return WTB instead of strong
 
             self._reset()
             return "Resistance Both strong", src
@@ -794,14 +794,18 @@ class ResistanceCalculator:
                         return self._do_shift(p2nd, pStat, src)
                     self._shifted_wt = pStat
                     self._prev_p2nd  = p2nd
-                    return f"Resistance Shifted {pStat}", src
+                    # FIX: p2nd if p2nd else pS
+                    return f"Resistance Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
                 else:
                     self._reset()
                     return f"Resistance strong {_fmt(pS)}", src
             else:
                 self._in_shifted = False
-                if pStat in (WTT, WTB) and p2nd:
-                    return self._do_shift(p2nd, pStat, src)
+                if pStat in (WTT, WTB):
+                    if p2nd:
+                        return self._do_shift(p2nd, pStat, src)
+                    self._reset()
+                    return f"Resistance {pStat} {_fmt(pS)}", src # FIX: return normal WTT/WTB
                 self._reset()
                 return f"Resistance strong {_fmt(pS)}", src
 
@@ -813,21 +817,30 @@ class ResistanceCalculator:
                     self._in_shifted = True
                     self._shifted_wt = pStat
                     self._prev_p2nd  = p2nd
-                    return f"Resistance Shifted {pStat}", src
+                    # FIX: p2nd if p2nd else pS
+                    return f"Resistance Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
                 else:
                     self._reset()
-                    return "Resistance Shifted strong", src
+                    return f"Resistance strong {_fmt(pS)}", src # FIX: removed 'Shifted strong'
             else:
-                if pStat in (WTT, WTB) and p2nd:
-                    return self._do_shift(p2nd, pStat, src)
+                if pStat in (WTT, WTB):
+                    if p2nd:
+                        return self._do_shift(p2nd, pStat, src)
+                    self._reset()
+                    return f"Resistance {pStat} {_fmt(pS)}", src # FIX: return normal WTT/WTB
                 self._reset()
-                return "Resistance Shifted strong", src
+                return f"Resistance strong {_fmt(pS)}", src # FIX: removed 'Shifted strong'
 
         # ── NORMAL ───────────────────────────────────────────
-        if pStat == WTT and p2nd:
-            return self._do_shift(p2nd, WTT, src)
-        if pStat == WTB and p2nd:
-            return self._do_shift(p2nd, WTB, src)
+        if pStat == WTT:
+            if p2nd:
+                return self._do_shift(p2nd, WTT, src)
+            return f"Resistance WTT {_fmt(pS)}", src
+
+        if pStat == WTB:
+            if p2nd:
+                return self._do_shift(p2nd, WTB, src)
+            return f"Resistance WTB {_fmt(pS)}", src
 
         self._reset()
         return f"Resistance strong {_fmt(pS)}", src
@@ -881,20 +894,28 @@ class SupportCalculator:
         # ── CASE 1: Same Strike ──────────────────────────────
         if vs is not None and os_ is not None and vs == os_:
             pS     = vs
-            second = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
             src    = self._src("Both", pS)
 
-            if vStat == WTT and oStat == WTT:
+            if vStat == WTB and oStat == WTB:
+                target = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
                 self._reset()
-                if second:
-                    return self._do_shift(second, WTT, src)
-                return f"Support strong {_fmt(pS)}", src
+                if target:
+                    return self._do_shift(target, WTB, src)
+                return f"Support WTB {_fmt(pS)}", src # FIX
 
-            if vStat == WTB or oStat == WTB:
+            if vStat == WTT or oStat == WTT:
+                # FIX: जो WTT है, टारगेट उसी का लेना है
+                if vStat == WTT and oStat == WTT:
+                    target = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
+                elif vStat == WTT:
+                    target = r.get("pe_2nd_high_vol_strike")
+                else:
+                    target = r.get("pe_2nd_high_oi_strike")
+                    
                 self._reset()
-                if second:
-                    return self._do_shift(second, WTB, src)
-                return f"Support strong {_fmt(pS)}", src
+                if target:
+                    return self._do_shift(target, WTT, src)
+                return f"Support WTT {_fmt(pS)}", src # FIX
 
             self._reset()
             return "Support Both strong", src
@@ -921,14 +942,18 @@ class SupportCalculator:
                         return self._do_shift(p2nd, pStat, src)
                     self._shifted_wt = pStat
                     self._prev_p2nd  = p2nd
-                    return f"Support Shifted {pStat}", src
+                    # FIX: Support string with proper target strike
+                    return f"Support Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
                 else:
                     self._reset()
                     return f"Support strong {_fmt(pS)}", src
             else:
                 self._in_shifted = False
-                if pStat in (WTT, WTB) and p2nd:
-                    return self._do_shift(p2nd, pStat, src)
+                if pStat in (WTT, WTB):
+                    if p2nd:
+                        return self._do_shift(p2nd, pStat, src)
+                    self._reset()
+                    return f"Support {pStat} {_fmt(pS)}", src
                 self._reset()
                 return f"Support strong {_fmt(pS)}", src
 
@@ -940,21 +965,30 @@ class SupportCalculator:
                     self._in_shifted = True
                     self._shifted_wt = pStat
                     self._prev_p2nd  = p2nd
-                    return f"Support Shifted {pStat}", src
+                    # FIX: Support string with proper target strike
+                    return f"Support Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
                 else:
                     self._reset()
-                    return "Support Shifted strong", src
+                    return f"Support strong {_fmt(pS)}", src # FIX: removed 'Shifted strong'
             else:
-                if pStat in (WTT, WTB) and p2nd:
-                    return self._do_shift(p2nd, pStat, src)
+                if pStat in (WTT, WTB):
+                    if p2nd:
+                        return self._do_shift(p2nd, pStat, src)
+                    self._reset()
+                    return f"Support {pStat} {_fmt(pS)}", src
                 self._reset()
-                return "Support Shifted strong", src
+                return f"Support strong {_fmt(pS)}", src # FIX: removed 'Shifted strong'
 
         # ── NORMAL ───────────────────────────────────────────
-        if pStat == WTT and p2nd:
-            return self._do_shift(p2nd, WTT, src)
-        if pStat == WTB and p2nd:
-            return self._do_shift(p2nd, WTB, src)
+        if pStat == WTT:
+            if p2nd:
+                return self._do_shift(p2nd, WTT, src)
+            return f"Support WTT {_fmt(pS)}", src
+            
+        if pStat == WTB:
+            if p2nd:
+                return self._do_shift(p2nd, WTB, src)
+            return f"Support WTB {_fmt(pS)}", src
 
         self._reset()
         return f"Support strong {_fmt(pS)}", src
@@ -990,6 +1024,7 @@ def save_live_sr_data(df, symbol: str) -> bool:
     resistance_strike/status और supprt_strike/status भरता है,
     LiveSRData में save करता है।
     """
+    global cleanup_done_today  
     try:
         if df is None or df.empty:
             print(f"⚠️ [{symbol}] DataFrame खाली — LiveSRData skip")
@@ -1079,22 +1114,15 @@ def save_live_sr_data(df, symbol: str) -> bool:
         sup_label, _sup_src = sup_calc.calculate(row_dict)
 
         # ── resistance_strike / supprt_strike ───────────────
-        # Primary strike (highest OI/Vol) → source से निकालो
-        # _res_src = "Resistance (Vol)23500"  ← यही चाहिए
         resistance_strike = _extract_strike(_res_src)
         supprt_strike     = _extract_strike(_sup_src)
 
         # ── resistance_status / supprt_status ───────────────
-        # Format: "Resistance (Vol) WTT 23500"
-        # _res_src से type निकालो, res_label से action निकालो
         import re as _re
 
         def _build_status(src: str, label: str, prefix: str) -> str:
-            # type = "(Vol)" / "(OI)" / "(Both)"
             m = _re.search(r'([(][^)]+[)])', src)
             ptype  = m.group(1) if m else ""
-            # action = label से prefix हटाकर बाकी
-            # e.g. "Resistance WTT 23500" → "WTT 23500"
             action = label[len(prefix):].strip()
             return f"{prefix} {ptype} {action}".strip()
 
@@ -1103,7 +1131,6 @@ def save_live_sr_data(df, symbol: str) -> bool:
 
         # ════════════════════════════════════════════════════
         # DUPLICATE CHECK
-        # Last entry से compare करो — दोनों status same हों तो skip
         # ════════════════════════════════════════════════════
         last = (LiveSRData.objects
                 .filter(Symbol=symbol)
@@ -1116,6 +1143,39 @@ def save_live_sr_data(df, symbol: str) -> bool:
                 and last.supprt_status     == supprt_status):
             print(f"⏭️  [{symbol}] Duplicate skip | R: {resistance_status} | S: {supprt_status}")
             return True
+
+        current_now = timezone.now()
+        current_date = current_now.date()
+        
+        # 1. 🧹 PRE-TRADE CLEANUP
+        if cleanup_done_today != current_date:
+            try:
+                print(f"🌅 Morning Maintenance starting for {symbol}...")
+
+                cutoff_time = current_now - timedelta(days=1)
+                deleted_count, _ = LiveSRData.objects.filter(
+                    Symbol=symbol, Time__lt=cutoff_time
+                ).delete()
+
+                # ✅ psycopg3 compatible VACUUM
+                from django.db import connection
+                def optimize_db():
+                    raw_conn = connection.connection
+                    old_autocommit = raw_conn.autocommit
+                    try:
+                        raw_conn.autocommit = True
+                        with connection.cursor() as cursor:
+                            cursor.execute("VACUUM ANALYZE mystock_livesrdata;")
+                    finally:
+                        raw_conn.autocommit = old_autocommit
+
+                optimize_db()
+
+                print(f"✅ Cleanup Complete: {deleted_count} old records removed. DB Optimized.")
+                cleanup_done_today = current_date
+
+            except Exception as e:
+                logger.error(f"Pre-Trade Cleanup Error: {e}")
 
         LiveSRData.objects.create(
             Time        = now,
@@ -1133,7 +1193,7 @@ def save_live_sr_data(df, symbol: str) -> bool:
             ce_vol_status          = ce_vol_status,
             ce_2nd_high_vol_strike = float(ce_vol_s2["Strike_Price"]),
 
-            # CE Combined ← Calculator output
+            # CE Combined
             resistance_strike = resistance_strike,
             resistance_status = resistance_status,
 
@@ -1147,7 +1207,7 @@ def save_live_sr_data(df, symbol: str) -> bool:
             pe_vol_status          = pe_vol_status,
             pe_2nd_high_vol_strike = float(pe_vol_s2["Strike_Price"]),
 
-            # PE Combined ← Calculator output
+            # PE Combined
             supprt_strike = supprt_strike,
             supprt_status = supprt_status,
         )
@@ -1163,6 +1223,8 @@ def save_live_sr_data(df, symbol: str) -> bool:
 # ────────────────────────────────────────────────────────────────
 # Async Wrapper
 # ────────────────────────────────────────────────────────────────
+from asgiref.sync import sync_to_async
+
 @sync_to_async
 def save_live_sr_async(df, symbol: str) -> bool:
     """Async Wrapper — Main async loop में call करें"""
