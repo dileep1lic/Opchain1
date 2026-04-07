@@ -23,12 +23,7 @@
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      min-height: 100vh;
-    }
+    
 
     /* ── Header ── */
     header {
@@ -105,11 +100,40 @@
     .down { color: var(--red); }
 
     /* ── Chart container ── */
-    #chart-wrap {
-      padding: 16px 24px;
-      position: relative;
+    /* नया फ्लेक्स लेआउट जो हाइट को फिक्स रखेगा */
+    body { 
+        background: var(--bg); 
+        color: var(--text); 
+        font-family: var(--font); 
+        overflow: hidden; 
+        margin: 0;
+        height: 100vh; /* पूरी स्क्रीन की हाइट */
+        display: flex; 
+        flex-direction: column; /* ऊपर से नीचे का अलाइनमेंट */
     }
-    #chart { width: 100%; height: 460px; border-radius: 6px; overflow: hidden; }
+    
+    .controls-bar, .controls { 
+        flex-shrink: 0; /* कंट्रोल पैनल को सिकुड़ने से रोकेगा */
+    }
+    
+    #countdown-bar { 
+        flex-shrink: 0; 
+    }
+    
+    #chart-wrap { 
+        position: relative; 
+        width: 100%; 
+        flex-grow: 1; /* बची हुई पूरी जगह सिर्फ चार्ट को दे देगा */
+        overflow: hidden;
+    }
+    
+    #chart { 
+        position: absolute; /* कंटेनर के अंदर पूरी तरह फिट होने के लिए */
+        width: 100%; 
+        height: 100%; 
+        top: 0; 
+        left: 0; 
+    }
 
     /* ── Volume ── */
 
@@ -202,6 +226,8 @@
     #refresh-status.active { display: block; }
     .pulse { animation: pulse 1s infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    
   </style>
 </head>
 <body>
@@ -233,7 +259,7 @@
   <div>
     <label>Interval</label><br>
     <select id="ctrl-interval">
-      <option value="1" selected>1</option>
+      <option value="5" selected>5</option>
     </select>
   </div>
   <div>
@@ -247,9 +273,9 @@
   <div style="align-self:flex-end; display:flex; gap:8px; flex-wrap:wrap;">
     <button onclick="loadChart()">🔄 Update</button>
     <select id="refresh-interval" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--font);font-size:0.78rem;padding:5px 8px;border-radius:4px;">
-      <option value="15">15 सेकंड</option>
-      <option value="30" selected>30 सेकंड</option>
-      <option value="60">1 मिनट</option>
+      
+      <option value="30" >30 सेकंड</option>
+      <option value="60" selected>1 मिनट</option>
       <option value="120">2 मिनट</option>
       <option value="300">5 मिनट</option>
     </select>
@@ -336,6 +362,8 @@
     }
 
     // ── Candlestick chart ──
+    const chartContainer = document.getElementById("chart-wrap"); // कंटेनर को नापेंगे
+    
     mainChart = LightweightCharts.createChart(
       document.getElementById("chart"), {
         layout:     { background: { color: "#0d1117" }, textColor: "#8b949e" },
@@ -343,8 +371,8 @@
         crosshair:  { mode: LightweightCharts.CrosshairMode.Normal },
         rightPriceScale: { borderColor: "#30363d" },
         timeScale:  { borderColor: "#30363d", timeVisible: true, secondsVisible: false },
-        width:  document.getElementById("chart").clientWidth,
-        height: 460,
+        width:  chartContainer.clientWidth,
+        height: chartContainer.clientHeight, // <-- अब यह बची हुई जगह के हिसाब से खुद हाइट ले लेगा
       }
     );
 
@@ -371,39 +399,59 @@
     candleSeries.setData(cdData);
 
     // ── Reversal Lines draw करना ──
-    // पुरानी lines हटाओ (rebuild पर)
+    
+
+    // ── Reversal Lines draw करना ──
     if (window._reversalSeries) {
-      window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
+        window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
     }
     window._reversalSeries = [];
 
-    // null/undefined/0 price skip + toggle check
-    const validReversals = reversalVisible
-      ? (reversals || []).filter(rev => rev && rev.price != null && rev.price > 0)
-      : [];
+    const validReversals = reversalVisible ? reversals.filter(r => r && r.price > 0) : [];
+
+    // ==========================================
+    // ── नया लॉजिक: लाइन को 9:15 से 15:30 तक फिक्स करना ──
+    // ==========================================
+    let lineStartTime = 0;
+    let lineEndTime = 0;
+
+    if (candles && candles.length > 0) {
+        // आखिरी कैंडल से आज की तारीख (Date) निकालें
+        let lastCandleDate = new Date(candles[candles.length - 1].time);
+        
+        // सुबह 09:15:00 का टाइम सेट करें
+        let startD = new Date(lastCandleDate);
+        startD.setHours(9, 15, 0, 0);
+        lineStartTime = Math.floor(startD.getTime() / 1000) + 19800; // 19800 = IST OFFSET
+
+        // दोपहर 15:30:00 का टाइम सेट करें
+        let endD = new Date(lastCandleDate);
+        endD.setHours(15, 30, 0, 0);
+        lineEndTime = Math.floor(endD.getTime() / 1000) + 19800;
+    }
+    // ==========================================
 
     validReversals.forEach(rev => {
-      try {
-        const lineSeries = mainChart.addLineSeries({
-          color:            rev.color,
-          lineWidth:        rev.width || 1,
-          lineStyle:        rev.dash  ?? 2,
-          priceLineVisible: false,
-          lastValueVisible: true,
-          title:            rev.label || '',
-        });
-
-        // Chart की पूरी width पर line खींचो
-        if (cdData.length > 0) {
-          lineSeries.setData([
-            { time: cdData[0].time,                value: Number(rev.price) },
-            { time: cdData[cdData.length - 1].time, value: Number(rev.price) },
-          ]);
+        try {
+            const ls = mainChart.addLineSeries({ 
+                color: rev.color, 
+                lineWidth: rev.width || 1, 
+                lineStyle: rev.dash || 0, 
+                priceLineVisible: false, 
+                lastValueVisible: true, 
+                title: rev.label || '' 
+            });
+            
+            if (cdData && cdData.length > 0) {
+                ls.setData([
+                    { time: lineStartTime, value: Number(rev.price) }, 
+                    { time: lineEndTime, value: Number(rev.price) }
+                ]);
+            }
+            window._reversalSeries.push(ls);
+        } catch (e) {
+            console.warn("Reversal line error:", e.message);
         }
-        window._reversalSeries.push(lineSeries);
-      } catch(e) {
-        console.warn("Reversal line error:", rev.label, e.message);
-      }
     });
 
 
@@ -695,8 +743,13 @@
   }
 
   // Resize handling
-  window.addEventListener("resize", () => {
-    if (mainChart) mainChart.applyOptions({ width: document.getElementById("chart").clientWidth });
+  window.addEventListener("resize", () => { 
+      if(mainChart) {
+          mainChart.applyOptions({ 
+              width: document.getElementById("chart-wrap").clientWidth, 
+              height: document.getElementById("chart-wrap").clientHeight 
+          }); 
+      }
   });
 </script>
 </body>
