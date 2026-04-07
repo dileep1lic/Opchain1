@@ -1144,38 +1144,6 @@ def save_live_sr_data(df, symbol: str) -> bool:
             print(f"⏭️  [{symbol}] Duplicate skip | R: {resistance_status} | S: {supprt_status}")
             return True
 
-        current_now = timezone.now()
-        current_date = current_now.date()
-        
-        # 1. 🧹 PRE-TRADE CLEANUP
-        if cleanup_done_today != current_date:
-            try:
-                print(f"🌅 Morning Maintenance starting for {symbol}...")
-
-                cutoff_time = current_now - timedelta(days=1)
-                deleted_count, _ = LiveSRData.objects.filter(
-                    Symbol=symbol, Time__lt=cutoff_time
-                ).delete()
-
-                # ✅ psycopg3 compatible VACUUM
-                from django.db import connection
-                def optimize_db():
-                    raw_conn = connection.connection
-                    old_autocommit = raw_conn.autocommit
-                    try:
-                        raw_conn.autocommit = True
-                        with connection.cursor() as cursor:
-                            cursor.execute("VACUUM ANALYZE mystock_livesrdata;")
-                    finally:
-                        raw_conn.autocommit = old_autocommit
-
-                optimize_db()
-
-                print(f"✅ Cleanup Complete: {deleted_count} old records removed. DB Optimized.")
-                cleanup_done_today = current_date
-
-            except Exception as e:
-                logger.error(f"Pre-Trade Cleanup Error: {e}")
 
         LiveSRData.objects.create(
             Time        = now,
