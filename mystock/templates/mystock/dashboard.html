@@ -176,11 +176,25 @@
         table { width: 100%; border-collapse: collapse; background: var(--card-bg); table-layout: fixed; margin-top: 0; }
         th, td { border: 1px solid #333; padding: 2px 1px; text-align: center; font-size: 12px; height: 22px; }
         
+        /* सभी Headers का बेसिक डिज़ाइन */
         th { 
-            background: var(--strike-bg); color: #fff; 
-            position: sticky; 
-            top: 82px; 
-            z-index: 10; height: 35px; 
+            background: var(--strike-bg); 
+            color: #fff; 
+            height: 35px; 
+        }
+        
+        /* हेडर की पहली लाइन (CALLS, STRIKE, PUTS) को एकदम ऊपर (0px) सेट करें */
+        thead tr:first-child th {
+            position: sticky;
+            top: 0;
+            z-index: 12;
+        }
+
+        /* हेडर की दूसरी लाइन (IV, OI, VOL) को पहली लाइन के ठीक नीचे (35px) सेट करें */
+        thead tr:nth-child(2) th {
+            position: sticky;
+            top: 35px; /* पहली लाइन की ऊंचाई */
+            z-index: 11;
         }
 
         .itm-bg { background-color: var(--itm-bg) !important; }
@@ -237,7 +251,7 @@
             .trading-header { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
             .stats-group { justify-content: space-between; width: 100%; }
             .controls-group { justify-content: space-between; width: 100%; overflow-x: auto; padding-bottom: 5px; }
-            th { top: 130px; }
+            /* th { top: 130px; } */
         }
 
        /* Modal Overlay */
@@ -257,6 +271,115 @@
         .close-btn { position: absolute; top: 8px; right: 8px; background: #c62828; color: white; border: none; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; z-index: 10; }
         .chart-frame { width: 100%; flex-grow: 1; border: none; background-color: #0f1115; }
         .modal-header { padding: 10px; background: #222; cursor: move; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        
+        /* --- COLUMN TOGGLE HIDE STYLES --- */
+        body.hide-iv .col-iv { display: none !important; }
+        body.hide-range .col-range { display: none !important; }
+        body.hide-chg-oi .col-chg-oi { display: none !important; }
+        body.hide-oi .col-oi { display: none !important; }
+        body.hide-vol-chg .col-vol-chg { display: none !important; }
+        body.hide-vol .col-vol { display: none !important; }
+        body.hide-ltp .col-ltp { display: none !important; }
+        body.hide-reversl .col-reversl { display: none !important; }
+
+        /* Toggle Checkbox Menu Styles */
+        .checkbox-menu label {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 16px; cursor: pointer; color: var(--text-primary);
+            font-size: 12px; font-weight: 500; transition: background 0.2s;
+        }
+        .checkbox-menu label:hover { background-color: rgba(255, 255, 255, 0.1); }
+        .checkbox-menu input[type="checkbox"] { cursor: pointer; accent-color: var(--accent-blue); }
+
+
+        /* --- STRIKE COLUMN PERFECT CENTERING FIX --- */
+        table {
+            table-layout: fixed !important; /* यह टेबल के साइज़ को बिगड़ने नहीं देगा */
+            width: 100% !important;
+        }
+
+        .col-strike {
+            width: 80px !important; /* STRIKE कॉलम की फिक्स चौड़ाई (इसे आप अपनी जरुरत के हिसाब से 70px या 90px कर सकते हैं) */
+            text-align: center !important;
+        }
+
+        /* CE और PE के मेन हेडर को बराबर जगह देने के लिए */
+        #ce-header, #pe-header {
+            width: calc((100% - 80px) / 2) !important;
+        }
+
+        /* --- RIGHT SIDE CHART PANEL STYLES --- */
+        .side-chart-panel {
+            position: fixed;
+            top: 60px; /* Header के ठीक नीचे से शुरू */
+            right: 0;
+            width: 50%; /* स्क्रीन का आधा हिस्सा लेगा, आप इसे px में भी दे सकते हैं जैसे 500px */
+            min-width: 400px;
+            height: calc(100vh - 60px);
+            background-color: var(--bg-dark);
+            border-left: 1px solid var(--border-color);
+            box-shadow: -10px 0 30px rgba(0,0,0,0.8);
+            transform: translateX(100%); /* डिफ़ॉल्ट रूप से बाहर छुपा रहेगा */
+            transition: transform 0.3s ease-in-out;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+
+       /* --- SIDE-BY-SIDE DASHBOARD LAYOUT --- */
+        .dashboard-layout {
+            display: flex;
+            width: 100%;
+            height: calc(100vh - 80px);
+            overflow: hidden;
+            flex-direction: row;
+        }
+
+        #table-container {
+            width: 60%;
+            overflow: auto;
+        }
+
+        /* --- THE DRAG RESIZER --- */
+        #drag-resizer {
+            width: 8px;
+            background: #2a2d35;
+            cursor: col-resize; /* माउस ले जाने पर खींचने वाला आइकॉन आएगा */
+            z-index: 50;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        
+        #drag-resizer:hover, #drag-resizer.active {
+            background: var(--accent-blue);
+        }
+        
+        #drag-resizer::after {
+            content: "⋮"; /* बीच में 3 डॉट्स का डिज़ाइन */
+            color: #888;
+            font-size: 16px;
+        }
+
+        #integrated-chart-container {
+            width: 40%;
+            background: var(--bg-dark);
+            display: flex;
+            flex-direction: column;
+            min-width: 0; /* इसे सिकुड़ने की अनुमति देने के लिए */
+        }
+
+        .integrated-chart-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* CSS */
+        .hidden {
+        display: none;
+        }
     </style>
 </head>
 <body>
@@ -305,33 +428,53 @@
         </div>
         </a>
         
-        
+        <div class="dropdown">
+            <button class="dropbtn" style="border-color: var(--accent-blue);">
+                <span>👁️ Columns</span> 
+                <span style="font-size: 10px;">▼</span>
+            </button>
+            <div class="dropdown-content checkbox-menu" style="min-width: 140px; padding: 5px 0;">
+                <label><input type="checkbox" id="chk-iv" onchange="toggleColumn('iv')" checked> IV(Δ)</label>
+                <label><input type="checkbox" id="chk-range" onchange="toggleColumn('range')" checked> Range</label>
+                <label><input type="checkbox" id="chk-chg-oi" onchange="toggleColumn('chg-oi')" checked> CHG OI</label>
+                <label><input type="checkbox" id="chk-oi" onchange="toggleColumn('oi')" checked> OI</label>
+                <label><input type="checkbox" id="chk-vol-chg" onchange="toggleColumn('vol-chg')" checked> VOL CHG</label>
+                <label><input type="checkbox" id="chk-vol" onchange="toggleColumn('vol')" checked> VOL</label>
+                <label><input type="checkbox" id="chk-ltp" onchange="toggleColumn('ltp')" checked> LTP</label>
+                <label><input type="checkbox" id="chk-reversl" onchange="toggleColumn('reversl')" checked> REVERSL</label>
+            </div>
+        </div>
+        <button class="dropbtn" id="chartToggleBtn" onclick="toggleChart()" style="border-color: var(--accent-green);">
+            <span id="chartToggleText">📈 Chart: ON</span>
+        </button>
+
         <div class="dropdown">
             <button class="dropbtn">
                 <span>⚙️ Tools Menu</span> 
                 <span style="font-size: 10px;">▼</span>
             </button>
             <div class="dropdown-content">
-                <a href="{% url 'search_dashboard' %}" target="_blank">
-                    <span>Search</span> <span style="color: #64b5f6;">OPEN ↗</span>
-                </a>
-                <a href="{% url 'stock_dashboard' %}" target="_blank">
-                    <span>Market</span> <span style="color: #64b5f6;">ALL ↗</span>
-                </a>
-                <a href="{% url 'chart' %}" target="_blank">
-                    <span>Chart View</span> <span style="color: #64b5f6;">NIFTY ↗</span>
-                </a>
-                <a href="{% url 'market_replay' %}" target="_blank" class="replay-link">
-                    <span>Market Replay</span> <span>▶ REPLAY</span>
-                </a>
+                <a href="{% url 'search_dashboard' %}" target="_blank"><span>Search</span> <span style="color: #64b5f6;">OPEN ↗</span></a>
+                <a href="{% url 'stock_dashboard' %}" target="_blank"><span>Market</span> <span style="color: #64b5f6;">ALL ↗</span></a>
+                <a href="{% url 'chart' %}" target="_blank"><span>Chart View</span> <span style="color: #64b5f6;">NIFTY ↗</span></a>
+                <a href="{% url 'market_replay' %}" target="_blank" class="replay-link"><span>Market Replay</span> <span>▶ REPLAY</span></a>
+                
             </div>
         </div>
-        </div>
+       
     </div>
 </div>
 
-<div id="table-container">
-    {% include 'mystock/table_partial.html' %}
+<div class="dashboard-layout">
+    <div id="table-container" style="width: 60%;">
+        {% include 'mystock/table_partial.html' %}
+    </div>
+
+    <div id="drag-resizer"></div>
+
+    <div id="integrated-chart-container" style="width: 40%;">
+        <iframe id="mainChartFrame" class="integrated-chart-frame" src="{% url 'dashboard_chart' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}"></iframe>
+    </div>
 </div>
 
 <div id="chartModal" class="modal-overlay">
@@ -377,6 +520,16 @@
     </div>
 </div>
 
+<!-- <div id="rightChartPanel" class="side-chart-panel">
+    <div class="side-panel-header">
+        <span class="side-panel-title" id="sideChartTitle">📈 Live Candlestick Chart</span>
+        <button class="side-panel-close" onclick="closeSideChart()">✖ Close Panel</button>
+    </div>
+    <div class="side-panel-content">
+        <iframe id="sideChartFrame" src=""></iframe>
+    </div>
+</div> -->
+
 <script>
 // --- Cookie Helper ---
 function getCookie(name) {
@@ -394,23 +547,86 @@ function getCookie(name) {
     return cookieValue;
 }
 
-// --- Refresh Data (UPDATED for SR Header) ---
+// --- COLUMN TOGGLE & COLSPAN FIX LOGIC ---
+const columnsList = ['iv', 'range', 'chg-oi', 'oi', 'vol-chg', 'vol', 'ltp', 'reversl'];
+
+function fixTableColspans() {
+    const ceHeader = document.getElementById('ce-header');
+    const peHeader = document.getElementById('pe-header');
+    if (!ceHeader || !peHeader) return;
+
+    let baseCols = 0;
+    let hiddenCols = 0;
+    
+    // Check which columns actually exist in the table and how many are hidden
+    columnsList.forEach(col => {
+        if (document.querySelector('th.col-' + col)) {
+            baseCols++; 
+            if (document.body.classList.contains('hide-' + col)) {
+                hiddenCols++;
+            }
+        }
+    });
+
+    let newColspan = baseCols - hiddenCols;
+    if (newColspan < 1) newColspan = 1;
+
+    // Apply the newly calculated size to the main headers
+    ceHeader.setAttribute('colspan', newColspan);
+    peHeader.setAttribute('colspan', newColspan);
+}
+
+function toggleColumn(colName) {
+    const checkbox = document.getElementById('chk-' + colName);
+    if (!checkbox) return;
+    
+    if (checkbox.checked) {
+        document.body.classList.remove('hide-' + colName);
+        localStorage.setItem('show-' + colName, 'true');
+    } else {
+        document.body.classList.add('hide-' + colName);
+        localStorage.setItem('show-' + colName, 'false');
+    }
+    fixTableColspans(); // Fix layout immediately after clicking
+}
+
+function loadColumnPreferences() {
+    columnsList.forEach(col => {
+        const isShown = localStorage.getItem('show-' + col);
+        const checkbox = document.getElementById('chk-' + col);
+        if (!checkbox) return;
+        
+        if (isShown === 'false') {
+            checkbox.checked = false;
+            document.body.classList.add('hide-' + col);
+        } else {
+            checkbox.checked = true;
+            document.body.classList.remove('hide-' + col);
+        }
+    });
+    fixTableColspans(); // Fix layout on page load
+}
+
+
+
+// --- Refresh Data ---
 function refreshData() {
     fetch('/table-update-url/') 
     .then(response => response.text())
     .then(html => {
         if(html.trim() !== "") {
+            // 1. सबसे पहले टेबल के अंदर नया डेटा डालें
             document.getElementById('table-container').innerHTML = html;
 
+            // 2. छुपे हुए इनपुट्स से नई वैल्यू निकालें
             const newTime = document.getElementById('hidden-latest-time')?.value;
             const newSpot = document.getElementById('hidden-spot-price')?.value;
-            
-            // Fetch updated SR Data from hidden inputs in table_partial
             const resStrike = document.getElementById('hidden-res-strike')?.value;
             const resStatus = document.getElementById('hidden-res-status')?.value;
             const supStrike = document.getElementById('hidden-sup-strike')?.value;
             const supStatus = document.getElementById('hidden-sup-status')?.value;
 
+            // 3. हेडर अपडेट करें
             if(newSpot) document.getElementById('header-spot').innerText = newSpot;
             if(newTime) document.getElementById('header-time').innerText = newTime;
             
@@ -420,7 +636,20 @@ function refreshData() {
             if(supStrike) {
                 document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
             }
-            addSRLabelsToLine();
+            
+            // ---------------------------------------------------------
+            // CRITICAL FIX: ऑर्डर और टाइमिंग सही करना
+            // ---------------------------------------------------------
+            
+            // STEP A: सबसे पहले Colspans और Table का लेआउट फिक्स करें
+            fixTableColspans(); 
+
+            // STEP B: टेबल का लेआउट सेट होने के लिए ब्राउज़र को 50ms का समय दें, 
+            // उसके बाद लेबल्स की जगह नापें ताकि वे खिसकें नहीं।
+            setTimeout(() => {
+                addSRLabelsToLine();
+            }, 50);
+            
         }
     })
     .catch(err => console.warn("Update Error:", err));
@@ -430,31 +659,51 @@ function addSRLabelsToLine() {
     const spotRow = document.querySelector('.spot-line-row');
     if (!spotRow) return;
 
+    // 1. पुराने लेबल्स हटाएँ
     document.querySelectorAll('.sr-float-label').forEach(el => el.remove());
 
     const resEl = document.getElementById('header-res');
     const supEl = document.getElementById('header-sup');
 
-    const tds = spotRow.querySelectorAll('td');
-    const ceTd = tds[3];   // CE OI column
-    const peTd = tds[13];  // PE OI column
+    const tableContainer = document.getElementById('table-container');
+    const ceHeader = document.getElementById('ce-header');
+    const peHeader = document.getElementById('pe-header');
+    
+    // अगर हेडर या कंटेनर नहीं है तो रुक जाएं
+    if (!tableContainer || !ceHeader || !peHeader) return;
 
-    function placeLabel(td, text, className) {
-        if (!td) return;
-        const rect = td.getBoundingClientRect();
-        const tableContainer = document.getElementById('table-container');
-        const containerRect = tableContainer.getBoundingClientRect();
+    tableContainer.style.position = 'relative';
+
+    // 2. एलिमेंट्स की असली जगह (Position) नापना
+    const containerRect = tableContainer.getBoundingClientRect();
+    const rowRect = spotRow.getBoundingClientRect();
+    const ceRect = ceHeader.getBoundingClientRect();
+    const peRect = peHeader.getBoundingClientRect();
+
+    // 3. Y-Axis (ऊपर से दूरी - लाल लाइन की पोजीशन)
+    const topPos = (rowRect.top - containerRect.top) + tableContainer.scrollTop;
+
+    // 4. CE और PE का एकदम सटीक सेंटर (सीधे हेडर की चौड़ाई से नापना)
+    const ceCenter = (ceRect.left - containerRect.left) + tableContainer.scrollLeft + (ceRect.width / 2);
+    const peCenter = (peRect.left - containerRect.left) + tableContainer.scrollLeft + (peRect.width / 2);
+
+    function placeCenterLabel(text, className, leftPos) {
         const label = document.createElement('div');
         label.className = 'sr-float-label ' + className;
         label.innerText = text;
-        label.style.left = (rect.left - containerRect.left + rect.width / 2) + 'px';
-        label.style.top = (rect.top - containerRect.top - 14 + tableContainer.scrollTop) + 'px';
-        tableContainer.style.position = 'relative';
+        
+        label.style.position = 'absolute';
+        label.style.top = (topPos - 14) + 'px'; // लाल लाइन के ठीक ऊपर
+        label.style.left = leftPos + 'px';
+        label.style.transform = 'translateX(-50%)'; // इसे बिल्कुल बीच में लॉक करने के लिए
+        label.style.zIndex = '50';
+        label.style.whiteSpace = 'nowrap';
+        
         tableContainer.appendChild(label);
     }
 
-    if (resEl && ceTd) placeLabel(ceTd, 'R: ' + resEl.innerText.trim(), 'res-line-label');
-    if (supEl && peTd) placeLabel(peTd, 'S: ' + supEl.innerText.trim(), 'sup-line-label');
+    if (resEl) placeCenterLabel('R: ' + resEl.innerText.trim(), 'res-line-label', ceCenter);
+    if (supEl) placeCenterLabel('S: ' + supEl.innerText.trim(), 'sup-line-label', peCenter);
 }
 
 function scrollToSpot() {
@@ -508,8 +757,134 @@ ltpDragHandle.addEventListener('mousedown', function(e) { isLtpDragging = true; 
 document.addEventListener('mouseup', function() { isLtpDragging = false; }, true);
 document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
+
+// --- SIDE PANEL CHART LOGIC ---
+// function openSideChart(symbol) {
+//     const panel = document.getElementById('rightChartPanel');
+//     const iframe = document.getElementById('sideChartFrame');
+//     const title = document.getElementById('sideChartTitle');
+    
+//     // अगर सिंबल नहीं भेजा गया है, तो हेडर से ले लें
+//     if (!symbol) {
+//         symbol = document.querySelector('.symbol-val').innerText.trim() || 'NIFTY';
+//     }
+
+//     title.innerText = `📈 Live Chart - ${symbol}`;
+    
+//     // आपके chart.html का URL (अपनी urls.py के हिसाब से इसे एडजस्ट कर लें)
+//     // उदाहरण: /chart/?symbol=NIFTY
+//     iframe.src = `/chart/?symbol=${symbol}`; 
+    
+//     panel.classList.add('open');
+// }
+
+// function closeSideChart() {
+//     const panel = document.getElementById('rightChartPanel');
+//     const iframe = document.getElementById('sideChartFrame');
+    
+//     panel.classList.remove('open'); // पैनल को बाहर खिसकाएं
+    
+//     // स्लाइड होने के बाद Iframe को खाली कर दें ताकि बैकग्राउंड में डाटा खर्च न हो
+//     setTimeout(() => { 
+//         iframe.src = ''; 
+//     }, 300);
+// }
+
+// JavaScript
+function toggleChart() {
+  const chartContainer = document.getElementById('chart-container');
+  chartContainer.classList.toggle('hidden');
+}
+
+// ==========================================
+// --- CHART RESIZE & TOGGLE LOGIC ---
+// ==========================================
+
+let chartVisible = true;
+
+// 1. Chart ON/OFF Function
+function toggleChart() {
+    const chartContainer = document.getElementById('integrated-chart-container');
+    const resizer = document.getElementById('drag-resizer');
+    const tableContainer = document.getElementById('table-container');
+    const btn = document.getElementById('chartToggleBtn');
+    const btnText = document.getElementById('chartToggleText');
+
+    chartVisible = !chartVisible;
+    
+    if (chartVisible) {
+        chartContainer.style.display = 'flex';
+        resizer.style.display = 'flex';
+        tableContainer.style.width = '60%'; // वापस डिफ़ॉल्ट 60% पर सेट
+        chartContainer.style.width = '40%';
+        btn.style.borderColor = 'var(--accent-green)';
+        btnText.innerHTML = '📈 Chart: ON';
+    } else {
+        chartContainer.style.display = 'none';
+        resizer.style.display = 'none';
+        tableContainer.style.width = '100%'; // चार्ट छुपने पर टेबल फुल स्क्रीन
+        btn.style.borderColor = 'var(--text-secondary)';
+        btnText.innerHTML = '📉 Chart: OFF';
+    }
+    
+    // लेआउट बदलने के बाद Table Headers को फिक्स करना
+    setTimeout(fixTableColspans, 100);
+}
+
+// 2. Drag & Resize Logic
+const resizer = document.getElementById('drag-resizer');
+const leftSide = document.getElementById('table-container');
+const rightSide = document.getElementById('integrated-chart-container');
+const iframeChart = document.getElementById('mainChartFrame');
+let isResizing = false;
+
+resizer.addEventListener('mousedown', function(e) {
+    isResizing = true;
+    resizer.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    // खींचते समय iframe के अंदर माउस न फंसे, इसलिए इसे disable कर देते हैं
+    iframeChart.style.pointerEvents = 'none'; 
+});
+
+document.addEventListener('mousemove', function(e) {
+    if (!isResizing) return;
+    
+    // स्क्रीन की कुल चौड़ाई
+    const containerWidth = document.querySelector('.dashboard-layout').clientWidth;
+    
+    // माउस जहाँ है, उसके हिसाब से नई चौड़ाई (% में)
+    let newLeftWidth = (e.clientX / containerWidth) * 100;
+    
+    // लिमिट लगाना (ताकि कोई भी हिस्सा 20% से कम न हो)
+    if (newLeftWidth < 20) newLeftWidth = 20;
+    if (newLeftWidth > 80) newLeftWidth = 80;
+
+    // दोनों को नई चौड़ाई देना
+    leftSide.style.width = `${newLeftWidth}%`;
+    rightSide.style.width = `${100 - newLeftWidth}%`;
+});
+
+document.addEventListener('mouseup', function(e) {
+    if (isResizing) {
+        isResizing = false;
+        resizer.classList.remove('active');
+        document.body.style.cursor = 'default';
+        iframeChart.style.pointerEvents = 'auto'; // माउस छोड़ते ही iframe चालू
+        
+        // ड्रैग खत्म होने के बाद एक बार हेडर फिक्स करें
+        fixTableColspans();
+    }
+});
+
 setInterval(refreshData, 5000);
-window.onload = function() { scrollToSpot(); addSRLabelsToLine(); };
+window.onload = function() { 
+    scrollToSpot(); 
+    addSRLabelsToLine(); 
+};
+
+// Start layout calculations immediately
+window.addEventListener('DOMContentLoaded', loadColumnPreferences);
+
 </script>
 
 </body>
