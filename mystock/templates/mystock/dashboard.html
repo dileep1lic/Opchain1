@@ -174,7 +174,7 @@
 
         /* --- 3. RESTORED TABLE COLOR STYLES --- */
         table { width: 100%; border-collapse: collapse; background: var(--card-bg); table-layout: fixed; margin-top: 0; }
-        th, td { border: 1px solid #333; padding: 2px 1px; text-align: center; font-size: 12px; height: 22px; }
+        th, td { border: 1px solid #333; padding: 2px 1px; text-align: center; font-size: 10px; height: 18px; }
         
         /* सभी Headers का बेसिक डिज़ाइन */
         th { 
@@ -299,7 +299,7 @@
         }
 
         .col-strike {
-            width: 80px !important; /* STRIKE कॉलम की फिक्स चौड़ाई (इसे आप अपनी जरुरत के हिसाब से 70px या 90px कर सकते हैं) */
+            width: 60px !important; /* STRIKE कॉलम की फिक्स चौड़ाई (इसे आप अपनी जरुरत के हिसाब से 70px या 90px कर सकते हैं) */
             text-align: center !important;
         }
 
@@ -520,15 +520,7 @@
     </div>
 </div>
 
-<!-- <div id="rightChartPanel" class="side-chart-panel">
-    <div class="side-panel-header">
-        <span class="side-panel-title" id="sideChartTitle">📈 Live Candlestick Chart</span>
-        <button class="side-panel-close" onclick="closeSideChart()">✖ Close Panel</button>
-    </div>
-    <div class="side-panel-content">
-        <iframe id="sideChartFrame" src=""></iframe>
-    </div>
-</div> -->
+
 
 <script>
 // --- Cookie Helper ---
@@ -757,38 +749,6 @@ ltpDragHandle.addEventListener('mousedown', function(e) { isLtpDragging = true; 
 document.addEventListener('mouseup', function() { isLtpDragging = false; }, true);
 document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
-
-// --- SIDE PANEL CHART LOGIC ---
-// function openSideChart(symbol) {
-//     const panel = document.getElementById('rightChartPanel');
-//     const iframe = document.getElementById('sideChartFrame');
-//     const title = document.getElementById('sideChartTitle');
-    
-//     // अगर सिंबल नहीं भेजा गया है, तो हेडर से ले लें
-//     if (!symbol) {
-//         symbol = document.querySelector('.symbol-val').innerText.trim() || 'NIFTY';
-//     }
-
-//     title.innerText = `📈 Live Chart - ${symbol}`;
-    
-//     // आपके chart.html का URL (अपनी urls.py के हिसाब से इसे एडजस्ट कर लें)
-//     // उदाहरण: /chart/?symbol=NIFTY
-//     iframe.src = `/chart/?symbol=${symbol}`; 
-    
-//     panel.classList.add('open');
-// }
-
-// function closeSideChart() {
-//     const panel = document.getElementById('rightChartPanel');
-//     const iframe = document.getElementById('sideChartFrame');
-    
-//     panel.classList.remove('open'); // पैनल को बाहर खिसकाएं
-    
-//     // स्लाइड होने के बाद Iframe को खाली कर दें ताकि बैकग्राउंड में डाटा खर्च न हो
-//     setTimeout(() => { 
-//         iframe.src = ''; 
-//     }, 300);
-// }
 
 // JavaScript
 function toggleChart() {
