@@ -38,4 +38,6 @@ urlpatterns = [
     path("chart/",         views.chart_view,   name="chart"),        # मुख्य chart page
     path("api/candle/",    views.candle_api,    name="candle_api"),   # AJAX JSON data
     path("api/symbols/",   views.symbol_search, name="symbol_search"),# Autocomplete
+
+    path('dashboard-chart/', views.dashboard_chart_view, name='dashboard_chart'),
 ]
