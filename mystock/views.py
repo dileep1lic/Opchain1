@@ -955,462 +955,6 @@ def reversal_chart_view(request):
 
 
 
-
-
-
-
-
-
-
-"""
-views.py  — Resistance / Support Live Dashboard API
-====================================================
-URLs:
-    path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
-    path('resistance/',     views.resistance_dashboard, name='resistance_dashboard'),
-"""
-
-from datetime import datetime, timedelta, timezone as dt_timezone
-from django.http import JsonResponse
-from django.views.decorators.http import require_GET
-from django.shortcuts import render
-from .models import LiveSRData
-
-
-# ─────────────────────────────────────────────────────
-# IST Helper
-# ─────────────────────────────────────────────────────
-IST = dt_timezone(timedelta(hours=5, minutes=30))
-
-def to_ist(dt_obj) -> str:
-    if dt_obj is None:
-        return "—"
-    if dt_obj.tzinfo is None:
-        dt_obj = dt_obj.replace(tzinfo=dt_timezone.utc)
-    return dt_obj.astimezone(IST).strftime("%H:%M:%S")
-
-def today_ist():
-    return datetime.now(IST).date()
-
-def now_ist_str() -> str:
-    return datetime.now(IST).strftime("%H:%M:%S")
-
-
-# ─────────────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────────────
-WTT    = "WTT"
-WTB    = "WTB"
-STRONG = "STRONG"
-
-
-# ─────────────────────────────────────────────────────
-# State Machine:
-#
-#  NORMAL   → WTT/WTB found        → SHIFTING  (emit "WTT/WTB X")
-#  SHIFTING → pS == shift_strike   → IN_SHIFTED (emit "Shifted WTT/WTB")
-#  SHIFTING → pS != shift_strike,
-#             STR/STRONG           → NORMAL    (emit "Shifted strong")
-#  SHIFTING → pS != shift_strike,
-#             WTT/WTB              → SHIFTING  (new shift, emit "WTT/WTB Y")
-#  IN_SHIFTED → same strike,
-#               same 2nd           → IN_SHIFTED (emit "Shifted WTT/WTB")
-#  IN_SHIFTED → same strike,
-#               2nd changed        → SHIFTING  (emit "WTT/WTB new_2nd")  ← नई जगह
-#  IN_SHIFTED → strike changed,
-#               WTT/WTB            → SHIFTING  (emit "WTT/WTB p2nd")
-#  IN_SHIFTED → strike changed,
-#               STR/STRONG         → NORMAL    (emit "strong pS")
-#  CASE 1 same strike, STR/neutral → NORMAL    (emit "Both strong")
-# ─────────────────────────────────────────────────────
-
-def _fmt(v):
-    """Float → int string if whole number, else float string"""
-    if v is None:
-        return "—"
-    return str(int(v)) if v == int(v) else str(v)
-
-
-class ResistanceCalculator:
-    def __init__(self): self.reset()
-
-    def reset(self):
-        self._prev_label    = None
-        # SHIFTING state
-        self._shifting      = False   # "WTT/WTB X" emit हुआ, X का इंतज़ार
-        self._shift_strike  = None    # X (target strike)
-        self._shift_wt      = None    # WTT या WTB
-        # IN_SHIFTED state
-        self._in_shifted    = False   # X high strike बन गई
-        self._shifted_wt    = None    # current Shifted label का WTT/WTB
-        self._prev_p2nd     = None    # 2nd strike track (नई जगह detect)
-        # source
-        self._ptype         = "—"
-        self._primary_s     = None
-
-    def calculate(self, row_dict):
-        label, source = self._compute(row_dict)
-        self._prev_label = label
-        return label, source
-
-    # ── Source label ────────────────────────────────
-    def _src(self, ptype, pS):
-        return f"Resistance ({ptype}){_fmt(pS)}"
-
-    # ── Enter SHIFTING ──────────────────────────────
-    def _do_shift(self, shift_to, wt, src):
-        """नई shift शुरू — emit WTT/WTB shift_to"""
-        self._shifting     = True
-        self._in_shifted   = False
-        self._shift_strike = shift_to
-        self._shift_wt     = wt
-        self._prev_p2nd    = None
-        return f"Resistance {wt} {_fmt(shift_to)}", src
-
-    # ── Reset all states ────────────────────────────
-    def _reset(self):
-        self._shifting    = False
-        self._shift_strike= None
-        self._shift_wt    = None
-        self._in_shifted  = False
-        self._shifted_wt  = None
-        self._prev_p2nd   = None
-
-    # ── Core compute ────────────────────────────────
-    def _compute(self, r):
-        vs    = r.get("ce_high_vol_strike")
-        os_   = r.get("ce_high_oi_strike")
-        vStat = (r.get("ce_vol_status") or "").upper()
-        oStat = (r.get("ce_oi_status")  or "").upper()
-
-        # ════════════════════════════════════════
-        # CASE 1: Same Strike
-        # ════════════════════════════════════════
-        if vs is not None and os_ is not None and vs == os_:
-            pS     = vs
-            second = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
-            src    = self._src("Both", pS)
-
-            # दोनों WTT → shift to 2nd
-            if vStat == WTT and oStat == WTT:
-                self._reset()
-                if second:
-                    return self._do_shift(second, WTT, src)
-                return f"Resistance strong {_fmt(pS)}", src
-
-            # कोई एक WTB → shift to 2nd
-            if vStat == WTB or oStat == WTB:
-                self._reset()
-                if second:
-                    return self._do_shift(second, WTB, src)
-                return f"Resistance strong {_fmt(pS)}", src
-
-            # STR / neutral → Both strong (SHIFTING भी reset)
-            self._reset()
-            return "Resistance Both strong", src
-
-        # ════════════════════════════════════════
-        # CASE 2: Different Strikes
-        # ════════════════════════════════════════
-        if vs is not None and os_ is not None:
-            if vs < os_:
-                pS, pStat, p2nd, pType = vs,  vStat, r.get("ce_2nd_high_vol_strike"), "Vol"
-            else:
-                pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"),  "OI"
-        elif vs is not None:
-            pS, pStat, p2nd, pType = vs,  vStat, r.get("ce_2nd_high_vol_strike"), "Vol"
-        else:
-            pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"),  "OI"
-
-        src = self._src(pType, pS)
-
-        # ── IN_SHIFTED state ─────────────────────
-        if self._in_shifted:
-            if pS == self._shift_strike:
-                if pStat in (WTT, WTB):
-                    # 2nd strike बदली → नई जगह
-                    if p2nd is not None and p2nd != self._prev_p2nd:
-                        self._in_shifted = False
-                        return self._do_shift(p2nd, pStat, src)
-                    # Same 2nd → continue Shifted
-                    self._shifted_wt = pStat
-                    self._prev_p2nd  = p2nd
-                    return f"Resistance Shifted {pStat}", src
-                else:
-                    # STR at shifted strike → strong
-                    self._reset()
-                    return f"Resistance strong {_fmt(pS)}", src
-            else:
-                # Strike बदल गई
-                self._in_shifted = False
-                if pStat in (WTT, WTB) and p2nd:
-                    return self._do_shift(p2nd, pStat, src)
-                self._reset()
-                return f"Resistance strong {_fmt(pS)}", src
-
-        # ── SHIFTING state ───────────────────────
-        if self._shifting:
-            if pS == self._shift_strike:
-                if pStat in (WTT, WTB):
-                    # Shift strike high बन गई → IN_SHIFTED
-                    self._shifting    = False
-                    self._in_shifted  = True
-                    self._shifted_wt  = pStat
-                    self._prev_p2nd   = p2nd
-                    return f"Resistance Shifted {pStat}", src
-                else:
-                    # STR at shift strike → Shifted strong
-                    self._reset()
-                    return "Resistance Shifted strong", src
-            else:
-                # अलग strike
-                if pStat in (WTT, WTB) and p2nd:
-                    # New shift (नई जगह)
-                    return self._do_shift(p2nd, pStat, src)
-                # STR / no 2nd → Shifted strong
-                self._reset()
-                return "Resistance Shifted strong", src
-
-        # ── NORMAL state ─────────────────────────
-        if pStat == WTT and p2nd:
-            return self._do_shift(p2nd, WTT, src)
-        if pStat == WTB and p2nd:
-            return self._do_shift(p2nd, WTB, src)
-
-        self._reset()
-        return f"Resistance strong {_fmt(pS)}", src
-
-
-# ─────────────────────────────────────────────────────
-# Support Calculator (PE) — Same logic, mirrored
-# PE में बड़ी (higher) strike primary होती है
-# ─────────────────────────────────────────────────────
-class SupportCalculator:
-    def __init__(self): self.reset()
-
-    def reset(self):
-        self._prev_label   = None
-        self._shifting     = False
-        self._shift_strike = None
-        self._shift_wt     = None
-        self._in_shifted   = False
-        self._shifted_wt   = None
-        self._prev_p2nd    = None
-        self._ptype        = "—"
-        self._primary_s    = None
-
-    def calculate(self, row_dict):
-        label, source = self._compute(row_dict)
-        self._prev_label = label
-        return label, source
-
-    def _src(self, ptype, pS):
-        return f"Support ({ptype}){_fmt(pS)}"
-
-    def _do_shift(self, shift_to, wt, src):
-        self._shifting     = True
-        self._in_shifted   = False
-        self._shift_strike = shift_to
-        self._shift_wt     = wt
-        self._prev_p2nd    = None
-        return f"Support {wt} {_fmt(shift_to)}", src
-
-    def _reset(self):
-        self._shifting    = False
-        self._shift_strike= None
-        self._shift_wt    = None
-        self._in_shifted  = False
-        self._shifted_wt  = None
-        self._prev_p2nd   = None
-
-    def _compute(self, r):
-        vs    = r.get("pe_high_vol_strike")
-        os_   = r.get("pe_high_oi_strike")
-        vStat = (r.get("pe_vol_status") or "").upper()
-        oStat = (r.get("pe_oi_status")  or "").upper()
-
-        # CASE 1: Same Strike
-        if vs is not None and os_ is not None and vs == os_:
-            pS     = vs
-            second = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
-            src    = self._src("Both", pS)
-
-            if vStat == WTT and oStat == WTT:
-                self._reset()
-                if second:
-                    return self._do_shift(second, WTT, src)
-                return f"Support strong {_fmt(pS)}", src
-
-            if vStat == WTB or oStat == WTB:
-                self._reset()
-                if second:
-                    return self._do_shift(second, WTB, src)
-                return f"Support strong {_fmt(pS)}", src
-
-            self._reset()
-            return "Support Both strong", src
-
-        # CASE 2: Different Strikes — PE में बड़ी strike primary
-        if vs is not None and os_ is not None:
-            if vs > os_:
-                pS, pStat, p2nd, pType = vs,  vStat, r.get("pe_2nd_high_vol_strike"), "Vol"
-            else:
-                pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"),  "OI"
-        elif vs is not None:
-            pS, pStat, p2nd, pType = vs,  vStat, r.get("pe_2nd_high_vol_strike"), "Vol"
-        else:
-            pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"),  "OI"
-
-        src = self._src(pType, pS)
-
-        if self._in_shifted:
-            if pS == self._shift_strike:
-                if pStat in (WTT, WTB):
-                    if p2nd is not None and p2nd != self._prev_p2nd:
-                        self._in_shifted = False
-                        return self._do_shift(p2nd, pStat, src)
-                    self._shifted_wt = pStat
-                    self._prev_p2nd  = p2nd
-                    return f"Support Shifted {pStat}", src
-                else:
-                    self._reset()
-                    return f"Support strong {_fmt(pS)}", src
-            else:
-                self._in_shifted = False
-                if pStat in (WTT, WTB) and p2nd:
-                    return self._do_shift(p2nd, pStat, src)
-                self._reset()
-                return f"Support strong {_fmt(pS)}", src
-
-        if self._shifting:
-            if pS == self._shift_strike:
-                if pStat in (WTT, WTB):
-                    self._shifting    = False
-                    self._in_shifted  = True
-                    self._shifted_wt  = pStat
-                    self._prev_p2nd   = p2nd
-                    return f"Support Shifted {pStat}", src
-                else:
-                    self._reset()
-                    return "Support Shifted strong", src
-            else:
-                if pStat in (WTT, WTB) and p2nd:
-                    return self._do_shift(p2nd, pStat, src)
-                self._reset()
-                return "Support Shifted strong", src
-
-        if pStat == WTT and p2nd:
-            return self._do_shift(p2nd, WTT, src)
-        if pStat == WTB and p2nd:
-            return self._do_shift(p2nd, WTB, src)
-
-        self._reset()
-        return f"Support strong {_fmt(pS)}", src
-
-
-# ─────────────────────────────────────────────────────
-# Per-symbol calculator cache
-# ─────────────────────────────────────────────────────
-_CALC_CACHE = {}
-
-def _get_calculators(symbol: str, today):
-    if symbol in _CALC_CACHE:
-        cached_date, res_calc, sup_calc = _CALC_CACHE[symbol]
-        if cached_date == today:
-            return res_calc, sup_calc
-    res_calc = ResistanceCalculator()
-    sup_calc = SupportCalculator()
-    _CALC_CACHE[symbol] = (today, res_calc, sup_calc)
-    return res_calc, sup_calc
-
-
-def _row_to_dict(obj):
-    return {
-        "ce_high_vol_strike":      obj.ce_high_vol_strike,
-        "ce_vol_status":           obj.ce_vol_status,
-        "ce_2nd_high_vol_strike":  obj.ce_2nd_high_vol_strike,
-        "ce_high_oi_strike":       obj.ce_high_oi_strike,
-        "ce_oi_status":            obj.ce_oi_status,
-        "ce_2nd_high_oi_strike":   obj.ce_2nd_high_oi_strike,
-        "pe_high_vol_strike":      obj.pe_high_vol_strike,
-        "pe_vol_status":           obj.pe_vol_status,
-        "pe_2nd_high_vol_strike":  obj.pe_2nd_high_vol_strike,
-        "pe_high_oi_strike":       obj.pe_high_oi_strike,
-        "pe_oi_status":            obj.pe_oi_status,
-        "pe_2nd_high_oi_strike":   obj.pe_2nd_high_oi_strike,
-    }
-
-
-# ─────────────────────────────────────────────────────
-# API View
-# ─────────────────────────────────────────────────────
-@require_GET
-def resistance_live_api(request):
-    symbol = request.GET.get("symbol", "NIFTY").upper()
-    limit  = min(int(request.GET.get("limit", 50)), 200)
-    today  = today_ist()
-
-    qs = (LiveSRData.objects
-          .filter(Time__date=today, Symbol=symbol)
-          .order_by("Time"))
-
-    res_calc, sup_calc = _get_calculators(symbol, today)
-    res_calc.reset()
-    sup_calc.reset()
-
-    all_rows  = list(qs)
-    processed = []
-
-    for obj in all_rows:
-        rd = _row_to_dict(obj)
-        resistance, res_source = res_calc.calculate(rd)
-        support,    sup_source = sup_calc.calculate(rd)
-
-        processed.append({
-            "time":   to_ist(obj.Time),
-            "spot":   obj.Spot_Price,
-            "expiry": obj.Expiry_Date or "",
-            # CE
-            "ce_vol_strike": obj.ce_high_vol_strike,
-            "ce_vol_status": obj.ce_vol_status or "",
-            "ce_vol_2nd":    obj.ce_2nd_high_vol_strike,
-            "ce_oi_strike":  obj.ce_high_oi_strike,
-            "ce_oi_status":  obj.ce_oi_status or "",
-            "ce_oi_2nd":     obj.ce_2nd_high_oi_strike,
-            # PE
-            "pe_vol_strike": obj.pe_high_vol_strike,
-            "pe_vol_status": obj.pe_vol_status or "",
-            "pe_vol_2nd":    obj.pe_2nd_high_vol_strike,
-            "pe_oi_strike":  obj.pe_high_oi_strike,
-            "pe_oi_status":  obj.pe_oi_status or "",
-            "pe_oi_2nd":     obj.pe_2nd_high_oi_strike,
-            # Calculated
-            "resistance":  resistance,
-            "res_source":  res_source,
-            "support":     support,
-            "sup_source":  sup_source,
-        })
-
-    result = list(reversed(processed[-limit:]))
-
-    return JsonResponse({
-        "symbol":      symbol,
-        "date":        str(today),
-        "total_rows":  len(all_rows),
-        "rows":        result,
-        "latest":      result[0] if result else None,
-        "server_time": now_ist_str(),
-    })
-
-# ─────────────────────────────────────────────────────
-# Dashboard View
-# ─────────────────────────────────────────────────────
-def resistance_dashboard(request):
-    return render(request, "mystock/resistance_dashboard.html")
-
-
-
-
 import requests
 from datetime import date, timedelta
 
@@ -1457,20 +1001,49 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         if not sr or not sr.resistance_strike or not sr.supprt_strike:
             return []
 
+        import re as _re
+
+        # ── Status parse करना ──
+        # Supported formats:
+        #   "Support (Vol) WTB 22500"      → wtb_strike = 22500
+        #   "Resistance WTT 23300"         → wtt_strike = 23300
+        #   "Resistance (Vol) strong 23000"→ ce_strong=True, wtt_strike=23000
+        #   "Support (OI) strong 22500"   → pe_strong=True, wtb_strike=22500
+        def parse_status(status_str):
+            """Returns (strike, is_strong)"""
+            if not status_str:
+                return None, False
+            s = str(status_str)
+            # strong + strike
+            m = _re.search(r'strong\s+(\d+)', s, _re.IGNORECASE)
+            if m:
+                return float(m.group(1)), True
+            # WTB/WTT + strike
+            m = _re.search(r'(?:WTB|WTT)\s+(\d+)', s, _re.IGNORECASE)
+            if m:
+                return float(m.group(1)), False
+            return None, False
+
+        wtb_strike, pe_strong = parse_status(sr.supprt_status)
+        wtt_strike, ce_strong = parse_status(sr.resistance_status)
+
+        # Default range — full SR range
         low  = min(sr.supprt_strike,    sr.resistance_strike)
         high = max(sr.resistance_strike, sr.supprt_strike)
 
         # ── Step 2: OptionChain — हर Strike की latest row ──
-        # latest_time से exact filter नहीं करते — हर strike की
-        # latest entry अलग अलग समय की हो सकती है
+        # Strong case में extra strikes चाहिए (एक ऊपर/नीचे)
+        # इसलिए पहले step निकालो फिर range expand करो
         from django.db.models import Max
 
+        # Step निकालने के लिए थोड़ा wider range से fetch करो
+        EXPAND = 200  # 4 strikes buffer (50*4)
         oc_qs = OptionChain.objects.filter(
             Symbol__iexact=symbol,
             Time__date__gte=from_date,
             Time__date__lte=to_date,
-            Strike_Price__gte=low,
-            Strike_Price__lte=high,
+            Strike_Price__gte=low  - EXPAND,
+            Strike_Price__lte=high + EXPAND,
         )
 
         if not oc_qs.exists():
@@ -1495,36 +1068,63 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         # Strike_Price से sort करो
         rows.sort(key=lambda r: r.Strike_Price)
 
+        # ── Step size निकालो (जैसे NIFTY=50, BANKNIFTY=100) ──
+        # ── Step size निकालो (जैसे NIFTY=50, BANKNIFTY=100) ──
+        all_strikes = sorted(set(r.Strike_Price for r in rows))
+        step = 50  # default
+        if len(all_strikes) >= 2:
+            diffs = [all_strikes[i+1] - all_strikes[i]
+                     for i in range(len(all_strikes)-1)]
+            step = min(diffs)  # सबसे छोटा gap = strike step
+
+        # ==========================================
+        # ── नया PE range लॉजिक (नीचे की लिमिट) ──
+        # ==========================================
+        pe_strikes = [sr.supprt_strike]
+        if wtb_strike:
+            pe_strikes.append(wtb_strike)
+            
+        pe_low = min(pe_strikes)
+        pe_high = max(pe_strikes)
+        
+        if pe_strong:
+            pe_low -= step
+
+        # ==========================================
+        # ── नया CE range लॉजिक (ऊपर की लिमिट) ──
+        # ==========================================
+        ce_strikes = [sr.resistance_strike]
+        if wtt_strike:
+            ce_strikes.append(wtt_strike)
+            
+        ce_low = min(ce_strikes)
+        ce_high = max(ce_strikes)
+        
+        if ce_strong:
+            ce_high += step
+
+        # ==========================================
+        # ── नई ग्लोबल रेंज (सब कुछ कवर करने के लिए) ──
+        # ==========================================
+        # यह सबसे नीचे के सपोर्ट और सबसे ऊपर के रेजिस्टेंस को मिलाकर एक पूरी रेंज बना लेगा
+        global_low = min(pe_low, ce_low)
+        global_high = max(pe_high, ce_high)
+
         # ── Step 3: Lines बनाओ ──
-        # Logic:
-        #   Reversal price > Spot_Price → CE (Resistance) — लाल
-        #   Reversal price < Spot_Price → PE (Support)    — हरा
-        spot  = sr.Spot_Price or 0
-        lines = []
-        seen  = set()   # price duplicate skip
+        seen_ce = set()
+        seen_pe = set()
+        lines   = []
 
         for row in rows:
             strike = row.Strike_Price
+            spot = row.Spot_Price  # लाइव मार्केट प्राइस
 
-            # ── Reversl_Ce check ──
-            if row.Reversl_Ce and row.Reversl_Ce not in seen:
-                price = row.Reversl_Ce
-                seen.add(price)
-
-                if price >= spot:
-                    # Market से ऊपर → CE Resistance (लाल)
-                    is_top = (strike == sr.resistance_strike)
-                    lines.append({
-                        "price":  price,
-                        "strike": strike,
-                        "type":   "CE",
-                        "color":  "#f85149",
-                        "width":  2 if is_top else 1,
-                        "dash":   0 if is_top else 2,
-                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
-                    })
-                else:
-                    # Market से नीचे → PE Support (हरा)
+            if global_low <= strike <= global_high:
+                
+                # ── नियम 1: अगर रिवर्सल वैल्यू मार्केट (Spot) से छोटी है → Support (PE - हरी लाइन) ──
+                if row.Reversl_Pe and row.Reversl_Pe < spot and row.Reversl_Pe not in seen_pe:
+                    price = row.Reversl_Pe
+                    seen_pe.add(price)
                     is_bottom = (strike == sr.supprt_strike)
                     lines.append({
                         "price":  price,
@@ -1532,17 +1132,14 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
                         "type":   "PE",
                         "color":  "#3fb950",
                         "width":  2 if is_bottom else 1,
-                        "dash":   0 if is_bottom else 2,
-                        "label":  f"S {strike:.0f}" if is_bottom else f"PE {strike:.0f}",
+                        "dash":   0, # 0 = सीधी (Solid) लाइन
+                        "label":  f"P {strike:.0f}",
                     })
-
-            # ── Reversl_Pe check ──
-            if row.Reversl_Pe and row.Reversl_Pe not in seen:
-                price = row.Reversl_Pe
-                seen.add(price)
-
-                if price >= spot:
-                    # Market से ऊपर → CE Resistance (लाल)
+                        
+                # ── नियम 2: अगर रिवर्सल वैल्यू मार्केट (Spot) से बड़ी (या बराबर) है → Resistance (CE - लाल लाइन) ──
+                if row.Reversl_Ce and row.Reversl_Ce >= spot and row.Reversl_Ce not in seen_ce:
+                    price = row.Reversl_Ce
+                    seen_ce.add(price)
                     is_top = (strike == sr.resistance_strike)
                     lines.append({
                         "price":  price,
@@ -1550,20 +1147,8 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
                         "type":   "CE",
                         "color":  "#f85149",
                         "width":  2 if is_top else 1,
-                        "dash":   0 if is_top else 2,
+                        "dash":   0, # 0 = सीधी (Solid) लाइन
                         "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
-                    })
-                else:
-                    # Market से नीचे → PE Support (हरा)
-                    is_bottom = (strike == sr.supprt_strike)
-                    lines.append({
-                        "price":  price,
-                        "strike": strike,
-                        "type":   "PE",
-                        "color":  "#3fb950",
-                        "width":  2 if is_bottom else 1,
-                        "dash":   0 if is_bottom else 2,
-                        "label":  f"S {strike:.0f}" if is_bottom else f"PE {strike:.0f}",
                     })
 
         # Price के हिसाब से sort (ऊपर से नीचे)
@@ -1641,6 +1226,7 @@ def parse_candles(api_response: dict):
 # ─────────────────────────────────────────────
 # View 1: Chart Page (HTML render)
 # ─────────────────────────────────────────────
+@xframe_options_exempt
 def chart_view(request):
     today     = date.today()
     symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
@@ -1748,10 +1334,578 @@ def symbol_search(request):
 
 
 
- 
+from django.views.decorators.clickjacking import xframe_options_exempt
+
+@xframe_options_exempt
+def dashboard_chart_view(request):
+    today     = date.today()
+    symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
+    unit      = request.GET.get("unit",      "minutes")
+    interval  = request.GET.get("interval",  "5")
+    from_date = request.GET.get("from_date", today.isoformat()) 
+    to_date   = request.GET.get("to_date",   today.isoformat())  
+
+    candles = []
+    error = None
+    instrument_key = get_instrument_key(symbol)
+
+    if not instrument_key:
+        error = f"'{symbol}' symbol DB में नहीं मिला।"
+    else:
+        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+        if not result["success"]:
+            error = result["error"]
+        else:
+            candles = parse_candles(result["data"])
+
+    reversal_lines = get_reversal_lines(symbol, from_date, to_date)
+
+    context = {
+        "candles":        candles,
+        "reversal_lines": reversal_lines,
+        "error":          error,
+        "symbol":         symbol,
+        "unit":           unit,
+        "interval":       interval,
+        "from_date":      from_date,
+        "to_date":        to_date,
+    }
+    return render(request, "mystock/dashboard_chart.html", context)
 
 
 
 
 
+
+"""
+views.py  — Resistance / Support Live Dashboard API
+====================================================
+URLs:
+    path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
+    path('resistance/',     views.resistance_dashboard, name='resistance_dashboard'),
+"""
+
+from datetime import datetime, timedelta, timezone as dt_timezone
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
+from django.shortcuts import render
+from .models import LiveSRData
+
+
+# ─────────────────────────────────────────────────────
+# IST Helper
+# ─────────────────────────────────────────────────────
+IST = dt_timezone(timedelta(hours=5, minutes=30))
+
+def to_ist(dt_obj) -> str:
+    if dt_obj is None:
+        return "—"
+    if dt_obj.tzinfo is None:
+        dt_obj = dt_obj.replace(tzinfo=dt_timezone.utc)
+    return dt_obj.astimezone(IST).strftime("%H:%M:%S")
+
+def today_ist():
+    return datetime.now(IST).date()
+
+def now_ist_str() -> str:
+    return datetime.now(IST).strftime("%H:%M:%S")
+
+
+# ─────────────────────────────────────────────────────
+# Constants
+# ─────────────────────────────────────────────────────
+WTT    = "WTT"
+WTB    = "WTB"
+STRONG = "STRONG"
+
+
+# ─────────────────────────────────────────────────────
+# State Machine:
+#
+#  NORMAL    → WTT/WTB found (p2nd exists) → SHIFTING  (emit "WTT/WTB p2nd")
+#  NORMAL    → WTT/WTB found (no p2nd)     → NORMAL    (emit "WTT/WTB pS")
+#  NORMAL    → STR/STRONG                  → NORMAL    (emit "strong pS")
+#
+#  SHIFTING  → pS == shift_strike, WTT/WTB → IN_SHIFTED (emit "Shifted WTT/WTB")
+#  SHIFTING  → pS == shift_strike, STR     → NORMAL     (emit "Shifted strong")
+#  SHIFTING  → pS != shift_strike, WTT/WTB, p2nd exists → SHIFTING (new shift)
+#  SHIFTING  → pS != shift_strike, WTT/WTB, no p2nd     → NORMAL   (emit "WTT/WTB pS")
+#  SHIFTING  → pS != shift_strike, STR                  → NORMAL   (emit "Shifted strong")
+#
+#  IN_SHIFTED → same strike, WTT/WTB, p2nd same   → IN_SHIFTED (emit "Shifted WTT/WTB")
+#  IN_SHIFTED → same strike, WTT/WTB, p2nd changed → SHIFTING   (emit "WTT/WTB new_p2nd")
+#  IN_SHIFTED → same strike, STR                   → NORMAL     (emit "strong pS")
+#  IN_SHIFTED → strike changed, WTT/WTB, p2nd      → SHIFTING   (emit "WTT/WTB p2nd")
+#  IN_SHIFTED → strike changed, WTT/WTB, no p2nd   → NORMAL     (emit "WTT/WTB pS")
+#  IN_SHIFTED → strike changed, STR                → NORMAL     (emit "strong pS")
+# ─────────────────────────────────────────────────────
+
+def _fmt(v):
+    """Float → int string if whole number, else float string"""
+    if v is None:
+        return "—"
+    return str(int(v)) if v == int(v) else str(v)
+
+
+class ResistanceCalculator:
+    """
+    CE side — lower strike = primary (closer resistance above spot)
+    Rule:
+      ce_high_oi_strike < ce_high_vol_strike  → OI is primary
+      ce_high_oi_strike > ce_high_vol_strike  → Vol is primary
+    Both-WTT threshold : दोनों WTT
+    Any-WTB threshold  : कोई एक WTB (या दोनों)
+    """
+
+    def __init__(self): self.reset()
+
+    def reset(self):
+        self._shifting     = False
+        self._shift_strike = None
+        self._shift_wt     = None
+        self._in_shifted   = False
+        self._shifted_wt   = None
+        self._prev_p2nd    = None
+        self._prev_label   = None
+
+    def calculate(self, row_dict):
+        label, source = self._compute(row_dict)
+        self._prev_label = label
+        return label, source
+
+    # ── Source label ────────────────────────────────
+    def _src(self, ptype, pS):
+        return f"Resistance ({ptype}){_fmt(pS)}"
+
+    # ── Enter SHIFTING ──────────────────────────────
+    def _do_shift(self, shift_to, wt, src):
+        self._shifting     = True
+        self._in_shifted   = False
+        self._shift_strike = shift_to
+        self._shift_wt     = wt
+        self._prev_p2nd    = None
+        return f"Resistance {wt} {_fmt(shift_to)}", src
+
+    # ── Reset all states ────────────────────────────
+    def _reset(self):
+        self._shifting     = False
+        self._shift_strike = None
+        self._shift_wt     = None
+        self._in_shifted   = False
+        self._shifted_wt   = None
+        self._prev_p2nd    = None
+
+    # ── Core compute ────────────────────────────────
+    def _compute(self, r):
+        vs    = r.get("ce_high_vol_strike")
+        os_   = r.get("ce_high_oi_strike")
+        vStat = (r.get("ce_vol_status") or "").upper()
+        oStat = (r.get("ce_oi_status")  or "").upper()
+
+        # ════════════════════════════════════════
+        # CASE 1: Same Strike (Both)
+        # ════════════════════════════════════════
+        if vs is not None and os_ is not None and vs == os_:
+            pS     = vs
+            src    = self._src("Both", pS)
+
+            # दोनों WTT → WTT shift
+            if vStat == WTT and oStat == WTT:
+                target = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
+                self._reset()
+                if target:
+                    return self._do_shift(target, WTT, src)
+                return f"Resistance WTT {_fmt(pS)}", src
+
+            # कोई एक (या दोनों) WTB → WTB shift
+            if vStat == WTB or oStat == WTB:
+                # जो WTB है, टारगेट उसी का लेना है
+                if vStat == WTB and oStat == WTB:
+                    target = r.get("ce_2nd_high_vol_strike") or r.get("ce_2nd_high_oi_strike")
+                elif vStat == WTB:
+                    target = r.get("ce_2nd_high_vol_strike")
+                else:
+                    target = r.get("ce_2nd_high_oi_strike")
+                    
+                self._reset()
+                if target:
+                    return self._do_shift(target, WTB, src)
+                return f"Resistance WTB {_fmt(pS)}", src
+
+            # STR / neutral
+            self._reset()
+            return "Resistance Both strong", src
+
+        # ════════════════════════════════════════
+        # CASE 2: Different Strikes
+        # CE में lower strike = primary (closer to spot)
+        # ════════════════════════════════════════
+        if vs is not None and os_ is not None:
+            if vs < os_:
+                # Vol is lower → Vol primary
+                pS, pStat, p2nd, pType = vs,  vStat, r.get("ce_2nd_high_vol_strike"), "Vol"
+            else:
+                # OI is lower → OI primary
+                pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"),  "OI"
+        elif vs is not None:
+            pS, pStat, p2nd, pType = vs,  vStat, r.get("ce_2nd_high_vol_strike"), "Vol"
+        else:
+            pS, pStat, p2nd, pType = os_, oStat, r.get("ce_2nd_high_oi_strike"),  "OI"
+
+        src = self._src(pType, pS)
+
+        # ── IN_SHIFTED state ─────────────────────
+        if self._in_shifted:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    # BUG 4 FIX: p2nd != prev_p2nd (None→X, X→None, X→Y सभी catch)
+                    if p2nd != self._prev_p2nd:
+                        self._in_shifted = False
+                        if p2nd is not None:
+                            # नई 2nd strike → fresh shift
+                            return self._do_shift(p2nd, pStat, src)
+                        else:
+                            # 2nd strike गायब → plain WTT/WTB
+                            self._reset()
+                            return f"Resistance {pStat} {_fmt(pS)}", src
+                    # Same 2nd → continue Shifted
+                    self._shifted_wt = pStat
+                    self._prev_p2nd  = p2nd
+                    # return f"Resistance Shifted {pStat} {_fmt(pS)}", src
+                    return f"Resistance Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
+                else:
+                    # STR at shifted strike → strong
+                    self._reset()
+                    return f"Resistance strong {_fmt(pS)}", src
+            else:
+                # Strike बदल गई
+                self._in_shifted = False
+                if pStat in (WTT, WTB):
+                    if p2nd:
+                        return self._do_shift(p2nd, pStat, src)
+                    # BUG 5 FIX: no p2nd → plain WTT/WTB
+                    self._reset()
+                    return f"Resistance {pStat} {_fmt(pS)}", src
+                self._reset()
+                return f"Resistance strong {_fmt(pS)}", src
+
+        # ── SHIFTING state ───────────────────────
+        if self._shifting:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    # Shift strike high बन गई → IN_SHIFTED
+                    self._shifting   = False
+                    self._in_shifted = True
+                    self._shifted_wt = pStat
+                    self._prev_p2nd  = p2nd
+                    # return f"Resistance Shifted {pStat} {_fmt(pS)}", src
+                    return f"Resistance Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
+                else:
+                    # STR at shift strike → Shifted strong
+                    self._reset()
+                    # return "Resistance Shifted strong", src
+                    return f"Resistance strong {_fmt(pS)}", src
+            else:
+                # अलग strike
+                if pStat in (WTT, WTB) and p2nd:
+                    # New shift
+                    return self._do_shift(p2nd, pStat, src)
+                if pStat in (WTT, WTB) and not p2nd:
+                    # BUG 5 FIX: WTT/WTB लेकिन p2nd नहीं → plain WTT/WTB
+                    self._reset()
+                    return f"Resistance {pStat} {_fmt(pS)}", src
+                # STR / no 2nd → Shifted strong
+                self._reset()
+                # return "Resistance Shifted strong", src
+                return f"Resistance strong {_fmt(pS)}", src
+
+        # ── NORMAL state ─────────────────────────
+        if pStat == WTT:
+            if p2nd:
+                return self._do_shift(p2nd, WTT, src)
+            # BUG 2 FIX: WTT लेकिन p2nd नहीं → WTT दिखाओ, "strong" नहीं
+            return f"Resistance WTT {_fmt(pS)}", src
+
+        if pStat == WTB:
+            if p2nd:
+                return self._do_shift(p2nd, WTB, src)
+            # BUG 2 FIX
+            return f"Resistance WTB {_fmt(pS)}", src
+
+        self._reset()
+        return f"Resistance strong {_fmt(pS)}", src
+
+
+# ─────────────────────────────────────────────────────
+# Support Calculator (PE)
+# PE में higher strike = primary (closer support below spot)
+#
+# *** BUG 1 FIX — Both-case WTT/WTB logic Resistance से अलग है: ***
+#   Support Both: दोनों WTB → WTB shift
+#                 कोई एक WTT → WTT shift   ← Resistance का उल्टा!
+# ─────────────────────────────────────────────────────
+class SupportCalculator:
+    def __init__(self): self.reset()
+
+    def reset(self):
+        self._shifting     = False
+        self._shift_strike = None
+        self._shift_wt     = None
+        self._in_shifted   = False
+        self._shifted_wt   = None
+        self._prev_p2nd    = None
+        self._prev_label   = None
+
+    def calculate(self, row_dict):
+        label, source = self._compute(row_dict)
+        self._prev_label = label
+        return label, source
+
+    def _src(self, ptype, pS):
+        return f"Support ({ptype}){_fmt(pS)}"
+
+    def _do_shift(self, shift_to, wt, src):
+        self._shifting     = True
+        self._in_shifted   = False
+        self._shift_strike = shift_to
+        self._shift_wt     = wt
+        self._prev_p2nd    = None
+        return f"Support {wt} {_fmt(shift_to)}", src
+
+    def _reset(self):
+        self._shifting     = False
+        self._shift_strike = None
+        self._shift_wt     = None
+        self._in_shifted   = False
+        self._shifted_wt   = None
+        self._prev_p2nd    = None
+
+    def _compute(self, r):
+        vs    = r.get("pe_high_vol_strike")
+        os_   = r.get("pe_high_oi_strike")
+        vStat = (r.get("pe_vol_status") or "").upper()
+        oStat = (r.get("pe_oi_status")  or "").upper()
+
+        # ════════════════════════════════════════
+        # CASE 1: Same Strike (Both)
+        # ════════════════════════════════════════
+        if vs is not None and os_ is not None and vs == os_:
+            pS     = vs
+            src    = self._src("Both", pS)
+
+            # दोनों WTB → WTB shift
+            if vStat == WTB and oStat == WTB:
+                target = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
+                self._reset()
+                if target:
+                    return self._do_shift(target, WTB, src)
+                return f"Support WTB {_fmt(pS)}", src
+
+            # कोई एक (या दोनों) WTT → WTT shift
+            if vStat == WTT or oStat == WTT:
+                # जो WTT है, टारगेट उसी का लेना है
+                if vStat == WTT and oStat == WTT:
+                    target = r.get("pe_2nd_high_vol_strike") or r.get("pe_2nd_high_oi_strike")
+                elif vStat == WTT:
+                    target = r.get("pe_2nd_high_vol_strike")
+                else:
+                    target = r.get("pe_2nd_high_oi_strike")
+                    
+                self._reset()
+                if target:
+                    return self._do_shift(target, WTT, src)
+                return f"Support WTT {_fmt(pS)}", src
+
+            # STR / neutral
+            self._reset()
+            return "Support Both strong", src
+
+        # ════════════════════════════════════════
+        # CASE 2: Different Strikes
+        # PE में higher strike = primary (closer to spot from below)
+        # ════════════════════════════════════════
+        if vs is not None and os_ is not None:
+            if vs > os_:
+                pS, pStat, p2nd, pType = vs,  vStat, r.get("pe_2nd_high_vol_strike"), "Vol"
+            else:
+                pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"),  "OI"
+        elif vs is not None:
+            pS, pStat, p2nd, pType = vs,  vStat, r.get("pe_2nd_high_vol_strike"), "Vol"
+        else:
+            pS, pStat, p2nd, pType = os_, oStat, r.get("pe_2nd_high_oi_strike"),  "OI"
+
+        src = self._src(pType, pS)
+
+        # ── IN_SHIFTED state ─────────────────────
+        if self._in_shifted:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    # BUG 4 FIX: p2nd का कोई भी change catch करो
+                    if p2nd != self._prev_p2nd:
+                        self._in_shifted = False
+                        if p2nd is not None:
+                            return self._do_shift(p2nd, pStat, src)
+                        else:
+                            self._reset()
+                            return f"Support {pStat} {_fmt(pS)}", src
+                    self._shifted_wt = pStat
+                    self._prev_p2nd  = p2nd
+                    # return f"Support Shifted {pStat} {_fmt(pS)}", src
+                    return f"Support Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
+                else:
+                    self._reset()
+                    return f"Support strong {_fmt(pS)}", src
+            else:
+                self._in_shifted = False
+                if pStat in (WTT, WTB):
+                    if p2nd:
+                        return self._do_shift(p2nd, pStat, src)
+                    # BUG 5 FIX
+                    self._reset()
+                    return f"Support {pStat} {_fmt(pS)}", src
+                self._reset()
+                return f"Support strong {_fmt(pS)}", src
+
+        # ── SHIFTING state ───────────────────────
+        if self._shifting:
+            if pS == self._shift_strike:
+                if pStat in (WTT, WTB):
+                    self._shifting   = False
+                    self._in_shifted = True
+                    self._shifted_wt = pStat
+                    self._prev_p2nd  = p2nd
+                    # return f"Support Shifted {pStat} {_fmt(pS)}", src
+                    return f"Support Shifted {pStat} {_fmt(p2nd if p2nd else pS)}", src
+                else:
+                    self._reset()
+                    # return "Support Shifted strong", src
+                    return f"Support strong {_fmt(pS)}", src
+            else:
+                if pStat in (WTT, WTB) and p2nd:
+                    return self._do_shift(p2nd, pStat, src)
+                if pStat in (WTT, WTB) and not p2nd:
+                    # BUG 5 FIX
+                    self._reset()
+                    return f"Support {pStat} {_fmt(pS)}", src
+                self._reset()
+                # return "Support Shifted strong", src
+                return f"Support strong {_fmt(pS)}", src
+
+        # ── NORMAL state ─────────────────────────
+        if pStat == WTT:
+            if p2nd:
+                return self._do_shift(p2nd, WTT, src)
+            # BUG 2 FIX
+            return f"Support WTT {_fmt(pS)}", src
+
+        if pStat == WTB:
+            if p2nd:
+                return self._do_shift(p2nd, WTB, src)
+            # BUG 2 FIX
+            return f"Support WTB {_fmt(pS)}", src
+
+        self._reset()
+        return f"Support strong {_fmt(pS)}", src
+
+
+# ─────────────────────────────────────────────────────
+# Per-symbol calculator cache
+# ─────────────────────────────────────────────────────
+_CALC_CACHE = {}
+
+def _get_calculators(symbol: str, today):
+    if symbol in _CALC_CACHE:
+        cached_date, res_calc, sup_calc = _CALC_CACHE[symbol]
+        if cached_date == today:
+            return res_calc, sup_calc
+    res_calc = ResistanceCalculator()
+    sup_calc = SupportCalculator()
+    _CALC_CACHE[symbol] = (today, res_calc, sup_calc)
+    return res_calc, sup_calc
+
+
+def _row_to_dict(obj):
+    return {
+        "ce_high_vol_strike":      obj.ce_high_vol_strike,
+        "ce_vol_status":           obj.ce_vol_status,
+        "ce_2nd_high_vol_strike":  obj.ce_2nd_high_vol_strike,
+        "ce_high_oi_strike":       obj.ce_high_oi_strike,
+        "ce_oi_status":            obj.ce_oi_status,
+        "ce_2nd_high_oi_strike":   obj.ce_2nd_high_oi_strike,
+        "pe_high_vol_strike":      obj.pe_high_vol_strike,
+        "pe_vol_status":           obj.pe_vol_status,
+        "pe_2nd_high_vol_strike":  obj.pe_2nd_high_vol_strike,
+        "pe_high_oi_strike":       obj.pe_high_oi_strike,
+        "pe_oi_status":            obj.pe_oi_status,
+        "pe_2nd_high_oi_strike":   obj.pe_2nd_high_oi_strike,
+    }
+
+
+# ─────────────────────────────────────────────────────
+# API View
+# ─────────────────────────────────────────────────────
+@require_GET
+def resistance_live_api(request):
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    limit  = min(int(request.GET.get("limit", 50)), 200)
+    today  = today_ist()
+
+    qs = (LiveSRData.objects
+          .filter(Time__date=today, Symbol=symbol)
+          .order_by("Time"))
+
+    res_calc, sup_calc = _get_calculators(symbol, today)
+    res_calc.reset()
+    sup_calc.reset()
+
+    all_rows  = list(qs)
+    processed = []
+
+    for obj in all_rows:
+        rd = _row_to_dict(obj)
+        resistance, res_source = res_calc.calculate(rd)
+        support,    sup_source = sup_calc.calculate(rd)
+
+        processed.append({
+            "time":   to_ist(obj.Time),
+            "spot":   obj.Spot_Price,
+            "expiry": obj.Expiry_Date or "",
+            # CE
+            "ce_vol_strike": obj.ce_high_vol_strike,
+            "ce_vol_status": obj.ce_vol_status or "",
+            "ce_vol_2nd":    obj.ce_2nd_high_vol_strike,
+            "ce_oi_strike":  obj.ce_high_oi_strike,
+            "ce_oi_status":  obj.ce_oi_status or "",
+            "ce_oi_2nd":     obj.ce_2nd_high_oi_strike,
+            # PE
+            "pe_vol_strike": obj.pe_high_vol_strike,
+            "pe_vol_status": obj.pe_vol_status or "",
+            "pe_vol_2nd":    obj.pe_2nd_high_vol_strike,
+            "pe_oi_strike":  obj.pe_high_oi_strike,
+            "pe_oi_status":  obj.pe_oi_status or "",
+            "pe_oi_2nd":     obj.pe_2nd_high_oi_strike,
+            # Calculated
+            "resistance":  resistance,
+            "res_source":  res_source,
+            "support":     support,
+            "sup_source":  sup_source,
+        })
+
+    result = list(reversed(processed[-limit:]))
+
+    return JsonResponse({
+        "symbol":      symbol,
+        "date":        str(today),
+        "total_rows":  len(all_rows),
+        "rows":        result,
+        "latest":      result[0] if result else None,
+        "server_time": now_ist_str(),
+    })
+
+
+# ─────────────────────────────────────────────────────
+# Dashboard View
+# ─────────────────────────────────────────────────────
+def resistance_dashboard(request):
+    return render(request, "mystock/resistance_dashboard.html")
 
