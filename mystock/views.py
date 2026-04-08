@@ -984,7 +984,7 @@ def get_instrument_key(symbol: str):
 # Helper: OptionChain से Reversal lines fetch
 # सिर्फ Support–Resistance के बीच की strikes
 # ─────────────────────────────────────────────
-def get_reversal_lines(symbol: str, from_date: str, to_date: str):
+def get_reversal_lines1(symbol: str, from_date: str, to_date: str):
     """
     1. LiveSRData से latest resistance_strike और supprt_strike लो
     2. OptionChain से उन strikes की rows लो जो उस range में हों
@@ -1158,6 +1158,344 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
     except Exception:
         return []
 
+
+from django.core.cache import cache
+
+def get_reversal_lines2(symbol: str, from_date: str, to_date: str):
+    # --- OPTIMIZATION 1: Cache (मेमोरी में सेव करना) ---
+    cache_key = f"rev_lines_history_{symbol}_{from_date}_{to_date}"
+    cached_data = cache.get(cache_key)
+    
+    if cached_data:
+        return cached_data # अगर डेटा पहले से रेडी है, तो तुरंत भेज दें
+
+    try:
+        import math
+        import re as _re
+
+        sr = LiveSRData.objects.filter(
+            Symbol__iexact=symbol,
+            Time__date__gte=from_date,
+            Time__date__lte=to_date,
+        ).order_by('-Time').first()
+
+        if not sr or not sr.resistance_strike or not sr.supprt_strike:
+            return []
+
+        def parse_status(status_str):
+            if not status_str: return None, False
+            s = str(status_str)
+            m = _re.search(r'strong\s+(\d+)', s, _re.IGNORECASE)
+            if m: return float(m.group(1)), True
+            m = _re.search(r'(?:WTB|WTT)\s+(\d+)', s, _re.IGNORECASE)
+            if m: return float(m.group(1)), False
+            return None, False
+
+        wtb_strike, pe_strong = parse_status(sr.supprt_status)
+        wtt_strike, ce_strong = parse_status(sr.resistance_status)
+
+        low  = min(sr.supprt_strike, sr.resistance_strike)
+        high = max(sr.resistance_strike, sr.supprt_strike)
+
+        EXPAND = 200
+        
+        # --- OPTIMIZATION 2: .values() का इस्तेमाल (10x Faster) ---
+        oc_qs = OptionChain.objects.filter(
+            Symbol__iexact=symbol,
+            Time__date__gte=from_date,
+            Time__date__lte=to_date,
+            Strike_Price__gte=low  - EXPAND,
+            Strike_Price__lte=high + EXPAND,
+        ).values('Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('Time')
+
+        if not oc_qs:
+            return []
+
+        history_data = {}
+        latest_rows = {}
+        
+        def is_valid(val):
+            return val is not None and not math.isnan(val) and not math.isinf(val)
+
+        # यहाँ row अब एक डिक्शनरी है, ऑब्जेक्ट नहीं
+        for row in oc_qs:
+            strike = row['Strike_Price']
+            if strike not in history_data:
+                history_data[strike] = {'CE': [], 'PE': []}
+
+            time_str = row['Time'].isoformat()
+            
+            if is_valid(row['Reversl_Ce']):
+                history_data[strike]['CE'].append({'time': time_str, 'value': float(row['Reversl_Ce'])})
+            if is_valid(row['Reversl_Pe']):
+                history_data[strike]['PE'].append({'time': time_str, 'value': float(row['Reversl_Pe'])})
+
+            latest_rows[strike] = row
+
+        rows = list(latest_rows.values())
+        rows.sort(key=lambda r: r['Strike_Price'])
+
+        all_strikes = sorted(set(r['Strike_Price'] for r in rows))
+        step = 50
+        if len(all_strikes) >= 2:
+            diffs = [all_strikes[i+1] - all_strikes[i] for i in range(len(all_strikes)-1)]
+            step = min(diffs) if min(diffs) > 0 else 50
+
+        pe_strikes = [sr.supprt_strike]
+        if wtb_strike: pe_strikes.append(wtb_strike)
+        pe_low = min(pe_strikes)
+        pe_high = max(pe_strikes)
+        if pe_strong: pe_low -= step
+
+        ce_strikes = [sr.resistance_strike]
+        if wtt_strike: ce_strikes.append(wtt_strike)
+        ce_low = min(ce_strikes)
+        ce_high = max(ce_strikes)
+        if ce_strong: ce_high += step
+
+        global_low = min(pe_low, ce_low)
+        global_high = max(pe_high, ce_high)
+
+        seen_ce = set()
+        seen_pe = set()
+        lines   = []
+
+        for row in rows:
+            strike = row['Strike_Price']
+            spot = row['Spot_Price']
+
+            if global_low <= strike <= global_high and is_valid(spot):
+                if is_valid(row['Reversl_Pe']) and row['Reversl_Pe'] < spot and row['Reversl_Pe'] not in seen_pe:
+                    seen_pe.add(row['Reversl_Pe'])
+                    is_bottom = (strike == sr.supprt_strike)
+                    lines.append({
+                        "price":  float(row['Reversl_Pe']),
+                        "strike": float(strike),
+                        "type":   "PE",
+                        "color":  "#3fb950",
+                        "width":  2 if is_bottom else 1,
+                        "dash":   0,
+                        "label":  f"P {strike:.0f}",
+                        "history": history_data[strike]['PE']
+                    })
+
+                if is_valid(row['Reversl_Ce']) and row['Reversl_Ce'] >= spot and row['Reversl_Ce'] not in seen_ce:
+                    seen_ce.add(row['Reversl_Ce'])
+                    is_top = (strike == sr.resistance_strike)
+                    lines.append({
+                        "price":  float(row['Reversl_Ce']),
+                        "strike": float(strike),
+                        "type":   "CE",
+                        "color":  "#f85149",
+                        "width":  2 if is_top else 1,
+                        "dash":   0,
+                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
+                        "history": history_data[strike]['CE']
+                    })
+
+        lines.sort(key=lambda x: x["price"], reverse=True)
+        
+        # 30 सेकंड के लिए डेटा सेव कर लें ताकि बार-बार लोड न पड़े
+        cache.set(cache_key, lines, timeout=60)
+        
+        return lines
+
+    except Exception as e:
+        print(f"Reversal lines error: {e}")
+        return []
+
+
+from django.core.cache import cache
+
+def get_reversal_lines(symbol: str, from_date: str, to_date: str):
+    # --- OPTIMIZATION 1: Cache (मेमोरी में सेव करना) ---
+    cache_key = f"rev_lines_history_{symbol}_{from_date}_{to_date}"
+    cached_data = cache.get(cache_key)
+    
+    if cached_data:
+        return cached_data
+
+    try:
+        import math
+        import re as _re
+
+        sr = LiveSRData.objects.filter(
+            Symbol__iexact=symbol,
+            Time__date__gte=from_date,
+            Time__date__lte=to_date,
+        ).order_by('-Time').first()
+
+        if not sr or not sr.resistance_strike or not sr.supprt_strike:
+            return []
+
+        low  = min(sr.supprt_strike, sr.resistance_strike)
+        high = max(sr.resistance_strike, sr.supprt_strike)
+
+        # WTT/WTB काफी दूर हो सकते हैं, इसलिए EXPAND को 1000 कर दिया है 
+        # ताकि दूर वाली स्ट्राइक्स का डेटा भी आसानी से आ जाए
+        EXPAND = 1000 
+        
+        # --- OPTIMIZATION 2: .values() का इस्तेमाल (10x Faster) ---
+        oc_qs = OptionChain.objects.filter(
+            Symbol__iexact=symbol,
+            Time__date__gte=from_date,
+            Time__date__lte=to_date,
+            Strike_Price__gte=low  - EXPAND,
+            Strike_Price__lte=high + EXPAND,
+        ).values('Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('Time')
+
+        if not oc_qs:
+            return []
+
+        history_data = {}
+        latest_rows = {}
+        
+        def is_valid(val):
+            return val is not None and not math.isnan(val) and not math.isinf(val)
+
+        for row in oc_qs:
+            strike = row['Strike_Price']
+            if strike not in history_data:
+                history_data[strike] = {'CE': [], 'PE': []}
+
+            time_str = row['Time'].isoformat()
+            
+            if is_valid(row['Reversl_Ce']):
+                history_data[strike]['CE'].append({'time': time_str, 'value': float(row['Reversl_Ce'])})
+            if is_valid(row['Reversl_Pe']):
+                history_data[strike]['PE'].append({'time': time_str, 'value': float(row['Reversl_Pe'])})
+
+            latest_rows[strike] = row
+
+        rows = list(latest_rows.values())
+        rows.sort(key=lambda r: r['Strike_Price'])
+
+        # Step साइज़ निकालना (जैसे निफ्टी में 50, बैंक निफ्टी में 100)
+        all_strikes = sorted(set(r['Strike_Price'] for r in rows))
+        step = 50
+        if len(all_strikes) >= 2:
+            diffs = [all_strikes[i+1] - all_strikes[i] for i in range(len(all_strikes)-1)]
+            step = min(diffs) if min(diffs) > 0 else 50
+
+        # ==============================================================
+        # 🚀 आपके नए नियम (NEW RULES IMPLEMENTATION)
+        # ==============================================================
+        
+        # ─── 1. CALL SIDE (RESISTANCE) ───
+        res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
+        res_base = sr.resistance_strike
+        
+        # Target Strike खोजना (जहाँ WTT/WTB जा रहा है)
+        m_res = _re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
+        res_target = float(m_res.group(1)) if m_res else res_base
+
+        effective_res_strike = res_base # Default
+        
+        if "SHIFTED WTT" in res_status:
+            effective_res_strike = res_base           # Resistance स्ट्राइक का रिवर्सल
+        elif "SHIFTED WTB" in res_status:
+            effective_res_strike = res_base + step    # Resistance स्ट्राइक से बड़ी स्ट्राइक का रिवर्सल
+        elif "WTT" in res_status:
+            effective_res_strike = res_target + step  # WTT स्ट्राइक से बड़ी स्ट्राइक का रिवर्सल
+        elif "WTB" in res_status:
+            effective_res_strike = res_target + step  # WTB स्ट्राइक से बड़ी स्ट्राइक का रिवर्सल
+        elif "STRONG" in res_status: 
+            effective_res_strike = res_base + step    # Strong/Both Strong: Resistance स्ट्राइक से बड़ी स्ट्राइक
+        else:
+            effective_res_strike = res_base + step    # सुरक्षा के लिए डिफ़ॉल्ट बड़ी स्ट्राइक
+
+
+        # ─── 2. PUT SIDE (SUPPORT) ───
+        sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
+        sup_base = sr.supprt_strike
+        
+        # Target Strike खोजना (जहाँ WTT/WTB जा रहा है)
+        m_sup = _re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
+        sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
+        effective_sup_strike = sup_base # Default
+        
+        if "SHIFTED WTT" in sup_status:
+            effective_sup_strike = sup_base           # Support स्ट्राइक का रिवर्सल
+        elif "SHIFTED WTB" in sup_status:
+            effective_sup_strike = sup_base - step    # Support स्ट्राइक से छोटी स्ट्राइक का रिवर्सल
+        elif "WTT" in sup_status:
+            effective_sup_strike = sup_target - step  # WTT स्ट्राइक से छोटी स्ट्राइक का रिवर्सल
+        elif "WTB" in sup_status:
+            effective_sup_strike = sup_target - step  # WTB स्ट्राइक से छोटी स्ट्राइक का रिवर्सल
+        elif "STRONG" in sup_status:
+            effective_sup_strike = sup_base - step    # Strong/Both Strong: Support स्ट्राइक से छोटी स्ट्राइक
+        else:
+            effective_sup_strike = sup_base - step    # सुरक्षा के लिए डिफ़ॉल्ट छोटी स्ट्राइक
+
+        # ==============================================================
+
+        # बाउंड्री सेट करना (चार्ट में कहाँ से कहाँ तक की लाइनें दिखेंगी)
+        ce_strikes_list = [effective_res_strike, res_base, res_target]
+        pe_strikes_list = [effective_sup_strike, sup_base, sup_target]
+        
+        global_low = min(pe_strikes_list + ce_strikes_list) - step
+        global_high = max(pe_strikes_list + ce_strikes_list) + step
+
+        seen_ce = set()
+        seen_pe = set()
+        lines   = []
+
+        for row in rows:
+            strike = row['Strike_Price']
+            spot = row['Spot_Price']
+
+            if global_low <= strike <= global_high and is_valid(spot):
+                
+                # ─── PUT SIDE (SUPPORT) ───
+                if is_valid(row['Reversl_Pe']) and row['Reversl_Pe'] < spot and row['Reversl_Pe'] not in seen_pe:
+                    seen_pe.add(row['Reversl_Pe'])
+                    is_bottom = (strike == effective_sup_strike)
+                    
+                    # 🎨 मेन सपोर्ट के लिए ब्लू (#00bfff) और बाकी के लिए ग्रीन (#3fb950)
+                    line_color = "#00bfff" if is_bottom else "#3fb950" 
+                    
+                    lines.append({
+                        "price":  float(row['Reversl_Pe']),
+                        "strike": float(strike),
+                        "type":   "PE",
+                        "color":  line_color,
+                        "width":  4 if is_bottom else 1,
+                        "dash":   0,
+                        "label":  f"S {strike:.0f}" if is_bottom else f"P {strike:.0f}",
+                        "history": history_data[strike]['PE']
+                    })
+
+                # ─── CALL SIDE (RESISTANCE) ───
+                if is_valid(row['Reversl_Ce']) and row['Reversl_Ce'] >= spot and row['Reversl_Ce'] not in seen_ce:
+                    seen_ce.add(row['Reversl_Ce'])
+                    is_top = (strike == effective_res_strike)
+                    
+                    # 🎨 मेन रेजिस्टेंस के लिए ऑरेंज (#ff8c00) और बाकी के लिए रेड (#f85149)
+                    line_color = "#ff8c00" if is_top else "#f85149"
+                    
+                    lines.append({
+                        "price":  float(row['Reversl_Ce']),
+                        "strike": float(strike),
+                        "type":   "CE",
+                        "color":  line_color,
+                        "width":  4 if is_top else 1,
+                        "dash":   0,
+                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
+                        "history": history_data[strike]['CE']
+                    })
+
+        lines.sort(key=lambda x: x["price"], reverse=True)
+        
+        # 60 सेकंड के लिए कैश सेव करें
+        cache.set(cache_key, lines, timeout=60)
+        
+        return lines
+
+    except Exception as e:
+        print(f"Reversal lines error: {e}")
+        return []
+    
 
 # ─────────────────────────────────────────────
 # Helper: Upstox API से candle data fetch
