@@ -10,60 +10,22 @@
     :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --accent: #58a6ff; --green: #3fb950; --red: #f85149; --text: #e6edf3; --muted: #8b949e; --font: 'Inter', sans-serif; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     
-    
-    /* Minimal Controls */
-    .controls-bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 15px; background: var(--surface); border-bottom: 1px solid var(--border); }
+    .controls-bar { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; padding: 8px 15px; background: var(--surface); border-bottom: 1px solid var(--border); }
     .symbol-title { font-weight: bold; color: var(--accent); font-size: 15px; }
     .controls-right { display: flex; gap: 8px; align-items: center; }
     
-    select, button { background: var(--bg); border: 1px solid var(--border); color: var(--text); font-size: 12px; padding: 4px 8px; border-radius: 4px; cursor: pointer; outline: none; }
+    select, button { background: var(--bg); border: 1px solid var(--border); color: var(--text); font-size: 12px; padding: 4px 8px; border-radius: 4px; cursor: pointer; outline: none; transition: 0.2s;}
     button:hover { opacity: 0.8; }
     .btn-active { border-color: var(--green); color: var(--green); background: #3fb95011; }
     
-   
-    
     #loading, #message { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 10; background: rgba(0,0,0,0.8); padding: 5px 15px; border-radius: 20px; font-size: 12px; display: none; }
     #message { color: var(--red); }
-    #countdown-bar { height: 2px; width: 100%; background: var(--border); display: none; }
+    #countdown-bar { flex-shrink: 0; height: 2px; width: 100%; background: var(--border); display: none; }
     #countdown-fill { height: 100%; background: var(--green); width: 100%; transition: width linear; }
 
-    /* नया फ्लेक्स लेआउट जो हाइट को फिक्स रखेगा */
-    body { 
-        background: var(--bg); 
-        color: var(--text); 
-        font-family: var(--font); 
-        overflow: hidden; 
-        margin: 0;
-        height: 100vh; /* पूरी स्क्रीन की हाइट */
-        display: flex; 
-        flex-direction: column; /* ऊपर से नीचे का अलाइनमेंट */
-    }
-    
-    .controls-bar { 
-        flex-shrink: 0; /* इसे सिकुड़ने से रोकेगा */
-        display: flex; justify-content: space-between; align-items: center; 
-        padding: 8px 15px; background: var(--surface); border-bottom: 1px solid var(--border); 
-    }
-    
-    #countdown-bar { 
-        flex-shrink: 0; /* इसे सिकुड़ने से रोकेगा */
-        height: 2px; width: 100%; background: var(--border); display: none; 
-    }
-    
-    #chart-wrap { 
-        position: relative; 
-        width: 100%; 
-        flex-grow: 1; /* बची हुई पूरी जगह चार्ट को दे देगा */
-        overflow: hidden;
-    }
-    
-    #chart { 
-        position: absolute; /* कंटेनर के अंदर पूरी तरह फिट होने के लिए */
-        width: 100%; 
-        height: 100%; 
-        top: 0; 
-        left: 0; 
-    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+    #chart-wrap { position: relative; width: 100%; flex-grow: 1; overflow: hidden; }
+    #chart { position: absolute; width: 100%; height: 100%; top: 0; left: 0; }
   </style>
 </head>
 <body>
@@ -71,7 +33,9 @@
 <input type="hidden" id="ctrl-symbol" value="{{ symbol }}">
 <input type="hidden" id="ctrl-from" value="{{ from_date }}">
 <input type="hidden" id="ctrl-to" value="{{ to_date }}">
-<input type="hidden" id="refresh-interval" value="60"> <div class="controls-bar">
+<input type="hidden" id="refresh-interval" value="60"> 
+
+<div class="controls-bar">
     <div class="symbol-title">{{ symbol }}</div>
     <div class="controls-right">
         <select id="ctrl-unit" onchange="updateIntervalOptions(); loadChart();">
@@ -84,12 +48,12 @@
             <option value="{{ interval|default:'5' }}" selected>{{ interval|default:'5' }}</option>
         </select>
         
-        <button id="auto-refresh-btn" onclick="toggleAutoRefresh()" title="Auto Refresh ON/OFF">
+        <button id="auto-refresh-btn" onclick="toggleAutoRefresh()" title="Auto Refresh">
             <span id="ar-icon">⏸</span> Auto
         </button>
         
-        <button id="reversal-toggle-btn" class="btn-active" onclick="toggleReversalLines()" title="Reversal Lines ON/OFF">
-            <span id="rv-label">📉 Rev ON</span>
+        <button id="reversal-toggle-btn" class="btn-active" onclick="toggleReversalLines()" title="Change Reversal Mode">
+            <span id="rv-label">📉 Rev: Moving</span>
         </button>
     </div>
 </div>
@@ -103,22 +67,34 @@
 </div>
 
 <script>
-  const initialCandles = {{ candles|safe|default:"[]" }};
-  const initialReversals = {{ reversal_lines|safe|default:"[]" }};
-  let lastReversals = initialReversals.filter(r => r && r.price > 0);
   let mainChart = null;
-  let reversalVisible = true;
+  let reversalMode = 1; // 1 = मूविंग, 2 = सीधी, 0 = ऑफ
   let savedRange = null;
+  let lastCandles = [];
+  let lastReversals = [];
 
   function buildCharts(candles, reversals = []) {
-    window._lastCandles = candles;
-    if (mainChart) { mainChart.remove(); mainChart = null; }
-    document.getElementById("chart").innerHTML = "";
+    lastCandles = candles;
+    lastReversals = reversals;
+    const chartContainer = document.getElementById("chart");
 
-    if (!candles || candles.length === 0) { document.getElementById("message").style.display = "block"; document.getElementById("message").innerText = "No Data"; return; }
+    if (mainChart) { mainChart.remove(); mainChart = null; }
+    chartContainer.innerHTML = "";
+
+    if (!candles || candles.length === 0) { 
+        document.getElementById("message").style.display = "block"; 
+        document.getElementById("message").innerText = "No Data Available"; 
+        return; 
+    }
     document.getElementById("message").style.display = "none";
 
-    mainChart = LightweightCharts.createChart(document.getElementById("chart"), {
+    // 🛡️ चार्ट का साइज़ ज़बरदस्ती सेट करना
+    const cWidth = chartContainer.clientWidth || window.innerWidth || 800;
+    const cHeight = chartContainer.clientHeight || window.innerHeight || 400;
+
+    mainChart = LightweightCharts.createChart(chartContainer, {
+        width: cWidth,
+        height: cHeight,
         layout: { background: { color: "#0d1117" }, textColor: "#8b949e" },
         grid: { vertLines: { color: "#21262d" }, horzLines: { color: "#21262d" } },
         crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
@@ -126,42 +102,42 @@
         timeScale: { borderColor: "#30363d", timeVisible: true },
     });
 
-    const candleSeries = mainChart.addCandlestickSeries({ upColor: "#3fb950", downColor: "#f85149", borderUpColor: "#3fb950", borderDownColor: "#f85149", wickUpColor: "#3fb950", wickDownColor: "#f85149" });
+    // 🛡️ Resize Observer: स्क्रीन हिलते ही चार्ट को एकदम सही साइज़ में फिट करेगा
+    new ResizeObserver(entries => {
+        if(entries.length === 0 || !mainChart) return;
+        const newRect = entries[0].contentRect;
+        if(newRect.width > 0 && newRect.height > 0) {
+            mainChart.applyOptions({ width: newRect.width, height: newRect.height });
+        }
+    }).observe(chartContainer);
+
+    const candleSeries = mainChart.addCandlestickSeries({ 
+        upColor: "#3fb950", downColor: "#f85149", 
+        borderUpColor: "#3fb950", borderDownColor: "#f85149", 
+        wickUpColor: "#3fb950", wickDownColor: "#f85149",
+    });
 
     const IST_OFFSET = 19800;
-    const cdData = candles.map(c => ({ time: Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET, open: c.open, high: c.high, low: c.low, close: c.close }));
+    let cdData = [];
+    let seenTimes = new Set();
+    
+    candles.forEach(c => {
+        let t = Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET;
+        if (!seenTimes.has(t)) {
+            seenTimes.add(t);
+            cdData.push({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
+        }
+    });
+    cdData.sort((a, b) => a.time - b.time);
     candleSeries.setData(cdData);
 
-    
     // ── Reversal Lines draw करना ──
     if (window._reversalSeries) {
         window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
     }
     window._reversalSeries = [];
 
-    const validReversals = reversalVisible ? reversals.filter(r => r && r.price > 0) : [];
-
-    // ==========================================
-    // ── नया लॉजिक: लाइन को 9:15 से 15:30 तक फिक्स करना ──
-    // ==========================================
-    let lineStartTime = 0;
-    let lineEndTime = 0;
-
-    if (candles && candles.length > 0) {
-        // आखिरी कैंडल से आज की तारीख (Date) निकालें
-        let lastCandleDate = new Date(candles[candles.length - 1].time);
-        
-        // सुबह 09:15:00 का टाइम सेट करें
-        let startD = new Date(lastCandleDate);
-        startD.setHours(9, 15, 0, 0);
-        lineStartTime = Math.floor(startD.getTime() / 1000) + 19800; // 19800 = IST OFFSET
-
-        // दोपहर 15:30:00 का टाइम सेट करें
-        let endD = new Date(lastCandleDate);
-        endD.setHours(15, 30, 0, 0);
-        lineEndTime = Math.floor(endD.getTime() / 1000) + 19800;
-    }
-    // ==========================================
+    const validReversals = reversalMode !== 0 ? reversals.filter(r => r && r.price > 0) : [];
 
     validReversals.forEach(rev => {
         try {
@@ -174,12 +150,33 @@
                 title: rev.label || '' 
             });
             
-            if (cdData && cdData.length > 0) {
-                ls.setData([
-                    { time: lineStartTime, value: Number(rev.price) }, 
-                    { time: lineEndTime, value: Number(rev.price) }
-                ]);
+            let lineData = [];
+
+            if (reversalMode === 1 && rev.history && rev.history.length > 0) {
+                let hData = rev.history.map(h => ({
+                    time: Math.floor(new Date(h.time).getTime() / 1000) + IST_OFFSET,
+                    value: Number(h.value)
+                })).sort((a,b) => a.time - b.time);
+
+                cdData.forEach(c => {
+                    let val = rev.price; 
+                    let found = false;
+                    for(let i = hData.length - 1; i >= 0; i--) {
+                        if (hData[i].time <= c.time) {
+                            val = hData[i].value;
+                            found = true; break;
+                        }
+                    }
+                    if (!found && hData.length > 0) val = hData[0].value;
+                    lineData.push({ time: c.time, value: val });
+                });
+            } else if (reversalMode === 2 || reversalMode === 1) { 
+                cdData.forEach(c => {
+                    lineData.push({ time: c.time, value: Number(rev.price) });
+                });
             }
+
+            if(lineData.length > 0) { ls.setData(lineData); }
             window._reversalSeries.push(ls);
         } catch (e) {
             console.warn("Reversal line error:", e.message);
@@ -188,19 +185,59 @@
 
     if (savedRange) mainChart.timeScale().setVisibleLogicalRange(savedRange);
     else mainChart.timeScale().fitContent();
-    mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => { if (range) savedRange = range; });
-  }
-
-  function loadChart() {
-    const sym = document.getElementById("ctrl-symbol").value, unit = document.getElementById("ctrl-unit").value, intv = document.getElementById("ctrl-interval").value, frm = document.getElementById("ctrl-from").value, to = document.getElementById("ctrl-to").value;
-    document.getElementById("loading").style.display = "block";
-    fetch(`/api/candle/?symbol=${sym}&unit=${unit}&interval=${intv}&from_date=${frm}&to_date=${to}`).then(r => r.json()).then(d => {
-        document.getElementById("loading").style.display = "none";
-        if (!d.error) { lastReversals = (d.reversal_lines||[]).filter(r=>r.price>0); buildCharts(d.candles, lastReversals); }
+    
+    mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => { 
+        if (range) savedRange = range; 
     });
   }
 
-  // Auto Refresh Logic
+  function toggleReversalLines() {
+      reversalMode = (reversalMode + 1) % 3; 
+      const btn = document.getElementById("reversal-toggle-btn");
+      const label = document.getElementById("rv-label");
+      
+      if (reversalMode === 1) {
+          btn.classList.add("btn-active");
+          btn.style.borderColor = "var(--green)";
+          btn.style.color = "var(--green)";
+          label.innerText = "📉 Rev: Moving";
+      } else if (reversalMode === 2) {
+          btn.classList.add("btn-active");
+          btn.style.borderColor = "var(--accent)"; 
+          btn.style.color = "var(--accent)";
+          label.innerText = "➖ Rev: Straight";
+      } else {
+          btn.classList.remove("btn-active");
+          btn.style.borderColor = "var(--border)";
+          btn.style.color = "var(--text)";
+          label.innerText = "🚫 Rev: OFF";
+      }
+      buildCharts(lastCandles, lastReversals);
+  }
+
+  function loadChart() {
+    const sym = document.getElementById("ctrl-symbol").value, 
+          unit = document.getElementById("ctrl-unit").value, 
+          intv = document.getElementById("ctrl-interval").value, 
+          frm = document.getElementById("ctrl-from").value, 
+          to = document.getElementById("ctrl-to").value;
+          
+    document.getElementById("loading").style.display = "block";
+    
+    fetch(`/api/candle/?symbol=${sym}&unit=${unit}&interval=${intv}&from_date=${frm}&to_date=${to}`)
+      .then(r => r.json())
+      .then(d => {
+          document.getElementById("loading").style.display = "none";
+          if (!d.error) { 
+              let incomingReversals = (d.reversal_lines||[]).filter(r=>r.price>0); 
+              buildCharts(d.candles, incomingReversals); 
+          }
+      }).catch(err => {
+          document.getElementById("loading").style.display = "none";
+          console.error("Data Fetch Error:", err);
+      });
+  }
+
   let autoRefreshTimer = null, countdownTimer = null, isAutoRefresh = false;
   function toggleAutoRefresh() { isAutoRefresh ? stopAutoRefresh() : startAutoRefresh(); }
   function startAutoRefresh() {
@@ -221,48 +258,22 @@
     autoRefreshTimer = setTimeout(() => { loadChart(); scheduleNext(); }, sec * 1000);
   }
 
-  // Unit Options
-  // Unit Options
   const intOpts = { minutes: [1,2,3,5,10,15,30,60], hours: [1,2,4], days: [1] };
   function updateIntervalOptions() {
     const sel = document.getElementById("ctrl-interval");
     let prev = sel.value;
-    
-    // अगर कोई वैल्यू नहीं है और मिनट सेलेक्टेड है, तो 5 को डिफ़ॉल्ट मानें
-    if (!prev && document.getElementById("ctrl-unit").value === "minutes") {
-        prev = "5";
-    }
-
+    if (!prev && document.getElementById("ctrl-unit").value === "minutes") prev = "5";
     sel.innerHTML = "";
     intOpts[document.getElementById("ctrl-unit").value].forEach(v => { 
-        const o = document.createElement("option"); 
-        o.value = v; 
-        o.textContent = v; 
-        if(String(v) === String(prev)) o.selected = true; 
-        sel.appendChild(o); 
+        const o = document.createElement("option"); o.value = v; o.textContent = v; 
+        if(String(v) === String(prev)) o.selected = true; sel.appendChild(o); 
     });
-    
     if(!sel.value) sel.selectedIndex = 0;
   }
   
-  function toggleReversalLines() {
-      reversalVisible = !reversalVisible;
-      const btn = document.getElementById("reversal-toggle-btn");
-      if(reversalVisible){ btn.classList.add("btn-active"); document.getElementById("rv-label").innerText="📉 Rev ON"; buildCharts(window._lastCandles||[], lastReversals); }
-      else { btn.classList.remove("btn-active"); document.getElementById("rv-label").innerText="📉 Rev OFF"; window._reversalSeries.forEach(s=>mainChart.removeSeries(s)); window._reversalSeries=[]; }
-  }
-
-  updateIntervalOptions(); buildCharts(initialCandles, initialReversals);
-  
-  window.addEventListener("resize", () => { 
-      if(mainChart) {
-          mainChart.applyOptions({ 
-              width: document.getElementById("chart-wrap").clientWidth, 
-              height: document.getElementById("chart-wrap").clientHeight 
-          }); 
-      }
-  });
-  
+  // 🛡️ पेज लोड होते ही API से फ्रेश डेटा लाएं (ताकि क्रैश का कोई चांस न रहे)
+  updateIntervalOptions(); 
+  loadChart(); 
 </script>
 </body>
 </html>
