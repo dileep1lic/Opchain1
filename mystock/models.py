@@ -43,6 +43,12 @@ class OptionChain(models.Model):
 
     def __str__(self):
         return f"{self.Symbol} | {self.Strike_Price} | {self.Time}"
+    class Meta:
+        indexes = [
+            models.Index(fields=['Symbol', 'Time']),
+            models.Index(fields=['Symbol', 'Strike_Price', 'Time']),
+            models.Index(fields=['Symbol', 'Time', 'Strike_Price']),
+    ]
 
 
 class SupportResistance(models.Model):
