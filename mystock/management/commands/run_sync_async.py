@@ -17,7 +17,8 @@ from .async_live import (
     save_live_sr_async,
     save_temp_async_wrapper,
     update_instrument_store_bulk,
-    get_instrument_from_db
+    get_instrument_from_db,
+    run_live_paper_trading
 )
 from .symbol import symbols as all_symbols
 from mystock.models import OptionChain, SyncControl, SupportResistance, InstrumentStore, TempOptionChain, LiveSRData
@@ -232,6 +233,7 @@ class Command(BaseCommand):
                         
                         # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
                         await save_live_sr_async(df, fixes_sym)
+                        await sync_to_async(run_live_paper_trading)(df=df, symbol=fixes_sym, target=50.0, sl=50.0) # लाइव पेपर ट्रेडिंग भी ट्रिगर करें
                 except Exception as e:
                     logger.error(f"NIFTY Loop Error: {e}")
             else:
