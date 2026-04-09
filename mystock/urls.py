@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import views, backtest_view
 from . import replay_views
 
 
@@ -40,4 +40,15 @@ urlpatterns = [
     path("api/symbols/",   views.symbol_search, name="symbol_search"),# Autocomplete
 
     path('dashboard-chart/', views.dashboard_chart_view, name='dashboard_chart'),
+
+    # बैकटेस्ट के लिए URL:
+    path('backtesta/', views.run_backtest_view, name='run_backtest'),
+
+    path('backtestc/', views.backtest_view, name='run_backtest'),
+
+    path('backtest/', backtest_view.backtest_view, name='backtest'),
+
+    # लाइव पेपर ट्रेड्स देखने के लिए नया URL:
+    path('live-trades/', views.live_trades_view, name='live_trades'),
+    
 ]
