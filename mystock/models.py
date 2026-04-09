@@ -220,3 +220,22 @@ class LiveSRData(models.Model):
     
 
     
+class PaperTrade(models.Model):
+    symbol = models.CharField(max_length=20)
+    trade_date = models.DateField(default=timezone.now)
+    trade_type = models.CharField(max_length=10) # 'CALL' या 'PUT'
+    
+    # ── Entry Details ──
+    entry_time = models.DateTimeField(default=timezone.now)
+    entry_spot = models.FloatField()
+    trigger_level = models.CharField(max_length=10) # 'R' या 'S'
+    trigger_price = models.FloatField()
+    
+    # ── Exit Details ──
+    exit_time = models.DateTimeField(null=True, blank=True)
+    exit_spot = models.FloatField(null=True, blank=True)
+    result = models.CharField(max_length=20, default="OPEN") # OPEN, TARGET, SL
+    pnl = models.FloatField(default=0.0)
+
+    def __str__(self):
+        return f"{self.symbol} | {self.trade_type} | {self.result} | PNL: {self.pnl}"
