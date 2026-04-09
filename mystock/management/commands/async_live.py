@@ -8,7 +8,7 @@ from mystock.credentials import access_token  # सीधे क्रेडे�
 from .symbol import symbols as SYMBOLS        # सिंबल लिस्ट के लिए
 from asgiref.sync import sync_to_async
 import numpy as np
-from mystock.models import SupportResistance, ExpiryCache, InstrumentStore , TempOptionChain, LiveSRData
+from mystock.models import SupportResistance, ExpiryCache, InstrumentStore , TempOptionChain, LiveSRData, PaperTrade, OptionChain
 import requests
 from datetime import timedelta, datetime
 import os
@@ -1208,3 +1208,107 @@ def save_live_sr_async(df, symbol: str) -> bool:
 #       await save_sr_async_wrapper(df, symbol)    # SupportResistance
 #       await save_temp_async_wrapper(df, symbol)  # TempOptionChain
 # ================================================================
+
+
+
+def run_live_paper_trading(df, symbol="NIFTY", target=50.0, sl=50.0):
+    today = timezone.now().date()
+    
+    # 1. स्पॉट प्राइस सीधे API के ताज़ा डेटा (df) से निकालें (No Database Call!)
+    spot = float(df["Spot_Price"].iloc[0])
+    current_time = df["Time"].iloc[0]
+
+    # 2. पुरानी ओपन ट्रेड डेटाबेस से लाएं (यह ज़रूरी है ताकि ट्रेड याद रहे)
+    open_trade = PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="OPEN").first()
+
+    # ==========================================
+    # ── 1. EXIT LOGIC (अगर ट्रेड चालू है तो टार्गेट/SL चेक करो) ──
+    # ==========================================
+    if open_trade:
+        entry = open_trade.entry_spot
+        ttype = open_trade.trade_type
+
+        hit_target = False
+        hit_sl = False
+
+        if ttype == 'PUT':
+            if spot <= (entry - target): hit_target = True
+            elif spot >= (entry + sl): hit_sl = True
+        elif ttype == 'CALL':
+            if spot >= (entry + target): hit_target = True
+            elif spot <= (entry - sl): hit_sl = True
+
+        if hit_target or hit_sl:
+            open_trade.exit_spot = spot
+            open_trade.exit_time = current_time
+            open_trade.result = "TARGET" if hit_target else "SL"
+            open_trade.pnl = target if hit_target else -sl
+            open_trade.save()
+            print(f"[{current_time}] 🟢 TRADE CLOSED | {ttype} | Result: {open_trade.result} | PNL: {open_trade.pnl}")
+            return "Trade Closed"
+
+        return "Trade is Running"
+
+    # ==========================================
+    # ── 2. ENTRY LOGIC (अगर कोई ट्रेड नहीं है, तो नया ढूंढो) ──
+    # ==========================================
+    sr = LiveSRData.objects.filter(Symbol__iexact=symbol, Time__date=today).order_by('-Time').first()
+    if not sr or not sr.resistance_strike or not sr.supprt_strike:
+        return "No SR Data"
+
+    # Step साइज़ निकालना (Default 50)
+    step = 50 
+
+    # --- Effective Resistance (R) ---
+    res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
+    res_base = float(sr.resistance_strike)
+    m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
+    res_target = float(m_res.group(1)) if m_res else res_base
+
+    if "SHIFTED WTT" in res_status: eff_res = res_base
+    elif "SHIFTED WTB" in res_status: eff_res = res_base + step
+    elif "WTT" in res_status: eff_res = res_target + step
+    elif "WTB" in res_status: eff_res = res_target + step
+    elif "STRONG" in res_status: eff_res = res_base + step
+    else: eff_res = res_base + step
+
+    # --- Effective Support (S) ---
+    sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
+    sup_base = float(sr.supprt_strike)
+    m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
+    sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
+    if "SHIFTED WTT" in sup_status: eff_sup = sup_base
+    elif "SHIFTED WTB" in sup_status: eff_sup = sup_base - step
+    elif "WTT" in sup_status: eff_sup = sup_target - step
+    elif "WTB" in sup_status: eff_sup = sup_target - step
+    elif "STRONG" in sup_status: eff_sup = sup_base - step
+    else: eff_sup = sup_base - step
+
+    # अब इन Effective Strikes की Reversal Value लाएं
+    r_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_res).order_by('-Time').first()
+    s_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_sup).order_by('-Time').first()
+
+    r_level = float(r_row.Reversl_Ce) if r_row and r_row.Reversl_Ce else None
+    s_level = float(s_row.Reversl_Pe) if s_row and s_row.Reversl_Pe else None
+
+    # --- BUY CONDITIONS ---
+    if r_level and spot >= r_level:
+        # BUY PUT
+        PaperTrade.objects.create(
+            symbol=symbol, trade_type='PUT', entry_time=current_time, entry_spot=spot,
+            trigger_level='R', trigger_price=r_level
+        )
+        print(f"[{current_time}] 🔴 NEW ENTRY: BUY PUT @ {spot} (R={r_level})")
+        return "Put Trade Opened"
+
+    elif s_level and spot <= s_level:
+        # BUY CALL
+        PaperTrade.objects.create(
+            symbol=symbol, trade_type='CALL', entry_time=current_time, entry_spot=spot,
+            trigger_level='S', trigger_price=s_level
+        )
+        print(f"[{current_time}] 🟢 NEW ENTRY: BUY CALL @ {spot} (S={s_level})")
+        return "Call Trade Opened"
+
+    return "No Entry Triggered"
