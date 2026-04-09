@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Live Paper Trades</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060a0f; --surface: #0d1520; --border: #1a2d45;
+    --accent: #00d4ff; --green: #00ff88; --red: #ff3d5a;
+    --orange: #ff8c00; --muted: #4a6480; --text: #c8dff0;
+    --mono: 'Share Tech Mono', monospace; --sans: 'Exo 2', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); padding: 30px; }
+  
+  .container { max-width: 1000px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 15px; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 25px; }
+  .header h1 { font-weight: 900; font-size: 24px; color: #fff; }
+  .header p { color: var(--muted); font-family: var(--mono); font-size: 13px; }
+
+  /* Stats Bar */
+  .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 15px; text-align: center; }
+  .stat-card .s-val { font-family: var(--mono); font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+  .stat-card .s-lbl { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .val-green { color: var(--green); } .val-red { color: var(--red); } .val-blue { color: var(--accent); }
+
+  /* Trade Cards */
+  .trade-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 15px; overflow: hidden; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+  .trade-type { font-family: var(--mono); font-size: 14px; font-weight: bold; padding: 4px 10px; border-radius: 4px; }
+  .type-put { background: rgba(255,140,0,0.15); color: var(--orange); border: 1px solid rgba(255,140,0,0.3); }
+  .type-call { background: rgba(0,191,255,0.15); color: #00bfff; border: 1px solid rgba(0,191,255,0.3); }
+  
+  .status-badge { font-family: var(--mono); font-size: 12px; font-weight: bold; padding: 4px 10px; border-radius: 4px; }
+  .status-open { background: rgba(255,215,0,0.1); color: #ffd700; border: 1px solid rgba(255,215,0,0.3); }
+  .status-target { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.3); }
+  .status-sl { background: rgba(255,61,90,0.1); color: var(--red); border: 1px solid rgba(255,61,90,0.3); }
+
+  .card-body { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 15px 20px; }
+  .detail-box { display: flex; flex-direction: column; gap: 5px; }
+  .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; font-family: var(--mono); }
+  .val { font-size: 15px; font-family: var(--mono); color: #fff; }
+
+  .empty { text-align: center; padding: 50px; color: var(--muted); font-family: var(--mono); font-size: 16px; border: 1px dashed var(--border); border-radius: 10px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div style="font-size: 30px;">🤖</div>
+    <div>
+      <h1>Live Auto-Trading Bot</h1>
+      <p>Symbol: {{ symbol }} | Date: {{ today_date }}</p>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="s-val val-blue">{{ total_trades }}</div>
+      <div class="s-lbl">Total Trades</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-val val-green">{{ wins }}</div>
+      <div class="s-lbl">Targets Hit</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-val val-red">{{ losses }}</div>
+      <div class="s-lbl">SL Hit</div>
+    </div>
+    <div class="stat-card">
+      <div class="s-val {% if net_pnl >= 0 %}val-green{% else %}val-red{% endif %}">
+        {% if net_pnl > 0 %}+{% endif %}{{ net_pnl }}
+      </div>
+      <div class="s-lbl">Net P&L (Pts)</div>
+    </div>
+  </div>
+
+  <h2>Trade Log</h2><br>
+
+  {% if trades %}
+    {% for trade in trades %}
+      <div class="trade-card" style="border-left: 4px solid {% if trade.trade_type == 'PUT' %}var(--orange){% else %}#00bfff{% endif %};">
+        <div class="card-header">
+          <div style="display: flex; gap: 15px; align-items: center;">
+            <span class="trade-type {% if trade.trade_type == 'PUT' %}type-put{% else %}type-call{% endif %}">
+              {{ trade.trade_type }} BUY
+            </span>
+            <span style="color: var(--muted); font-family: var(--mono); font-size: 13px;">
+              Trigger: {{ trade.trigger_level }} ({{ trade.trigger_price|floatformat:2 }})
+            </span>
+          </div>
+          <span class="status-badge 
+            {% if trade.result == 'OPEN' %}status-open
+            {% elif trade.result == 'TARGET' %}status-target
+            {% else %}status-sl{% endif %}">
+            {{ trade.result }}
+          </span>
+        </div>
+        
+        <div class="card-body">
+          <div class="detail-box">
+            <span class="lbl">Entry Time</span>
+            <span class="val">{{ trade.entry_time|date:"H:i:s" }}</span>
+          </div>
+          <div class="detail-box">
+            <span class="lbl">Entry Spot</span>
+            <span class="val">{{ trade.entry_spot|floatformat:2 }}</span>
+          </div>
+          <div class="detail-box">
+            <span class="lbl">Exit Time</span>
+            <span class="val">{% if trade.exit_time %}{{ trade.exit_time|date:"H:i:s" }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="detail-box">
+            <span class="lbl">Exit Spot / P&L</span>
+            <span class="val">
+              {% if trade.exit_spot %}{{ trade.exit_spot|floatformat:2 }}{% else %}—{% endif %}
+              &nbsp;|&nbsp;
+              <strong class="{% if trade.pnl > 0 %}val-green{% elif trade.pnl < 0 %}val-red{% else %}val-blue{% endif %}">
+                {% if trade.pnl > 0 %}+{% endif %}{{ trade.pnl|floatformat:2 }}
+              </strong>
+            </span>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty">
+      <div style="font-size: 40px; margin-bottom: 10px;">⏳</div>
+      आज अभी तक कोई ट्रेड ट्रिगर नहीं हुआ है।<br>बॉट मार्केट पर नज़र रख रहा है...
+    </div>
+  {% endif %}
+
+</div>
+
+</body>
+</html>
