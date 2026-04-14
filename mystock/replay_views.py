@@ -1,18 +1,25 @@
 from django.shortcuts import render
 from django.http import JsonResponse
-from django.db.models.functions import TruncSecond
-from django.db.models import Min
+from django.db.models.functions import TruncSecond, TruncDate
 from .models import OptionChain
 import datetime
+from collections import defaultdict
 
 IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 UTC = datetime.timezone.utc
 
-STRIKES_EACH_SIDE = 15   # ← Yahan badlo agar aur strikes chahiye
+STRIKES_EACH_SIDE = 15
 
-
-def to_ist_str(dt):
-    return dt.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S')
+TICK_FIELDS = [
+    'Strike_Price', 'Spot_Price',
+    'CE_LTP', 'CE_CLTP', 'CE_Volume', 'CE_Volume_percent',
+    'CE_OI', 'CE_OI_percent', 'CE_COI', 'CE_COI_percent',
+    'CE_IV', 'CE_RANGE', 'CE_Delta', 'Reversl_Ce',
+    'Reversl_Pe',
+    'PE_LTP', 'PE_CLTP', 'PE_Volume', 'PE_Volume_percent',
+    'PE_OI', 'PE_OI_percent', 'PE_COI', 'PE_COI_percent',
+    'PE_IV', 'PE_RANGE', 'PE_Delta',
+]
 
 
 def ist_str_to_utc(ts_str):
@@ -20,19 +27,33 @@ def ist_str_to_utc(ts_str):
     return naive.replace(tzinfo=IST).astimezone(UTC)
 
 
+def _day_range_utc(date_obj):
+    start = datetime.datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0, 0, tzinfo=IST)
+    end   = datetime.datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, 59, tzinfo=IST)
+    return start.astimezone(UTC), end.astimezone(UTC)
+
+
+def _fmt(val):
+    if val is None:
+        return ''
+    return round(val, 2) if isinstance(val, float) else val
+
+
 def market_replay_view(request):
-    symbols      = list(OptionChain.objects.values_list('Symbol', flat=True).distinct().order_by('Symbol'))
-    expiry_dates = OptionChain.objects.values_list('Expiry_Date', flat=True).distinct().order_by('Expiry_Date')
-    expiry_list  = [d.strftime('%Y-%m-%d') for d in expiry_dates if d]
+    symbols     = list(OptionChain.objects.values_list('Symbol', flat=True).distinct().order_by('Symbol'))
+    expiry_list = list(OptionChain.objects.values_list('Expiry_Date', flat=True).distinct().order_by('Expiry_Date'))
+    expiry_list = [d.strftime('%Y-%m-%d') for d in expiry_list if d]
     return render(request, 'mystock/market_replay.html', {
         'symbols': symbols, 'expiry_dates': expiry_list,
     })
 
 
 # ─────────────────────────────────────────────────────────────
-#  1. TIMESTAMPS
+#  BULK LOAD — EK CALL MEIN POORE DIN KA DATA
+#  Yeh naya endpoint hai jo timestamps + sab tick data ek saath
+#  bhejta hai. JS ko ab har tick pe alag request nahi bhejni.
 # ─────────────────────────────────────────────────────────────
-def get_replay_timestamps(request):
+def get_replay_bulk(request):
     symbol      = request.GET.get('symbol', '').strip()
     expiry_date = request.GET.get('expiry_date', '').strip()
     replay_date = request.GET.get('replay_date', '').strip()
@@ -45,132 +66,99 @@ def get_replay_timestamps(request):
     except ValueError:
         return JsonResponse({'error': 'replay_date format galat'}, status=400)
 
-    qs = OptionChain.objects.filter(Symbol=symbol, Time__date=date_obj)
-    if expiry_date:
-        qs = qs.filter(Expiry_Date=expiry_date)
+    day_start, day_end = _day_range_utc(date_obj)
 
-    ts_qs = (
-        qs.annotate(ts_sec=TruncSecond('Time'))
-          .values('ts_sec')
-          .distinct()
-          .order_by('ts_sec')
-          .values_list('ts_sec', flat=True)
+    # ✅ EK HI QUERY — poore din ka data
+    qs = (
+        OptionChain.objects
+        .filter(Symbol=symbol, Time__gte=day_start, Time__lte=day_end)
+        .order_by('Time', 'Strike_Price')
+        .values('Time', *TICK_FIELDS)
     )
-
-    ts_list = [t.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') for t in ts_qs]
-    return JsonResponse({'timestamps': ts_list, 'total_ticks': len(ts_list)})
-
-
-# ─────────────────────────────────────────────────────────────
-#  2. SINGLE TICK  — Spot ke aaspaas 15+15 strikes
-# ─────────────────────────────────────────────────────────────
-def get_replay_tick(request):
-    symbol      = request.GET.get('symbol', '').strip()
-    expiry_date = request.GET.get('expiry_date', '').strip()
-    timestamp   = request.GET.get('timestamp', '').strip()
-
-    if not (symbol and timestamp):
-        return JsonResponse({'error': 'symbol aur timestamp zaroori hain'}, status=400)
-
-    try:
-        utc_dt     = ist_str_to_utc(timestamp)
-        utc_dt_end = utc_dt + datetime.timedelta(seconds=1)
-    except ValueError:
-        return JsonResponse({'error': 'timestamp format galat'}, status=400)
-
-    qs = OptionChain.objects.filter(Symbol=symbol, Time__gte=utc_dt, Time__lt=utc_dt_end)
     if expiry_date:
         qs = qs.filter(Expiry_Date=expiry_date)
-    qs = qs.order_by('Strike_Price')
 
-    def fmt(val):
-        if val is None:
-            return ''
-        return round(val, 2) if isinstance(val, float) else val
+    # ── Group by second (IST) ──
+    ticks_raw   = defaultdict(dict)   # ts_key → {strike: row}
+    spot_by_ts  = {}
+    order       = []                  # timestamp order preserve karo
 
-    # ── Step 1: Duplicate strikes hatao, spot_price lo ──
-    all_objs     = []
-    spot_price   = None
-    seen_strikes = set()
-
-    for obj in qs:
-        sp = round(obj.Strike_Price, 1) if obj.Strike_Price else None
-        if sp in seen_strikes:
+    for row in qs:
+        ts_key = row['Time'].astimezone(IST).strftime('%Y-%m-%d %H:%M:%S')
+        sp = round(row['Strike_Price'], 1) if row['Strike_Price'] else None
+        if sp is None:
             continue
-        seen_strikes.add(sp)
-        if spot_price is None and obj.Spot_Price:
-            spot_price = obj.Spot_Price
-        all_objs.append(obj)
 
-    # ── Step 2: Spot ke nearest strike dhundo ──
-    # Phir usse 15 neeche aur 15 upar ki strikes rakhlo
-    if spot_price and all_objs:
-        all_strikes = sorted([round(o.Strike_Price, 1) for o in all_objs])
-        nearest_idx = min(range(len(all_strikes)),
-                          key=lambda i: abs(all_strikes[i] - spot_price))
+        if ts_key not in ticks_raw:
+            ticks_raw[ts_key] = {}
+            order.append(ts_key)
+        if sp not in ticks_raw[ts_key]:          # duplicate strike skip
+            ticks_raw[ts_key][sp] = row
+        if ts_key not in spot_by_ts and row['Spot_Price']:
+            spot_by_ts[ts_key] = row['Spot_Price']
 
-        start_i  = max(0, nearest_idx - STRIKES_EACH_SIDE)
-        end_i    = min(len(all_strikes) - 1, nearest_idx + STRIKES_EACH_SIDE)
-        allowed  = set(all_strikes[start_i : end_i + 1])
+    if not order:
+        return JsonResponse({'timestamps': [], 'total_ticks': 0, 'ticks': {}})
 
-        show_objs = [o for o in all_objs if round(o.Strike_Price, 1) in allowed]
-    else:
-        show_objs = all_objs   # fallback: sab dikhao
+    # ── Har tick ke liye nearest ±15 strikes window ──
+    result = {}
+    for ts_key in order:
+        seen        = ticks_raw[ts_key]
+        spot        = spot_by_ts.get(ts_key)
+        all_strikes = sorted(seen.keys())
 
-    # ── Step 3: Response build karo ──
-    rows = []
-    for obj in show_objs:
-        rows.append({
-            'Strike_Price'      : fmt(obj.Strike_Price),
-            'CE_LTP'            : fmt(obj.CE_LTP),
-            'CE_CLTP'           : fmt(obj.CE_CLTP),
-            'CE_Volume'         : fmt(obj.CE_Volume),
-            'CE_Volume_percent' : fmt(obj.CE_Volume_percent),
-            'CE_OI'             : fmt(obj.CE_OI),
-            'CE_OI_percent'     : fmt(obj.CE_OI_percent),
-            'CE_COI'            : fmt(obj.CE_COI),
-            'CE_COI_percent'    : fmt(obj.CE_COI_percent),
-            'CE_IV'             : fmt(obj.CE_IV),
-            'CE_RANGE'          : fmt(obj.CE_RANGE),
-            'CE_Delta'          : fmt(obj.CE_Delta),
-            'Reversl_Ce'        : fmt(obj.Reversl_Ce),
-            'Reversl_Pe'        : fmt(obj.Reversl_Pe),
-            'PE_LTP'            : fmt(obj.PE_LTP),
-            'PE_CLTP'           : fmt(obj.PE_CLTP),
-            'PE_Volume'         : fmt(obj.PE_Volume),
-            'PE_Volume_percent' : fmt(obj.PE_Volume_percent),
-            'PE_OI'             : fmt(obj.PE_OI),
-            'PE_OI_percent'     : fmt(obj.PE_OI_percent),
-            'PE_COI'            : fmt(obj.PE_COI),
-            'PE_COI_percent'    : fmt(obj.PE_COI_percent),
-            'PE_IV'             : fmt(obj.PE_IV),
-            'PE_RANGE'          : fmt(obj.PE_RANGE),
-            'PE_Delta'          : fmt(obj.PE_Delta),
-        })
+        if spot and all_strikes:
+            nearest_idx = min(range(len(all_strikes)),
+                              key=lambda i: abs(all_strikes[i] - spot))
+            s = max(0, nearest_idx - STRIKES_EACH_SIDE)
+            e = min(len(all_strikes) - 1, nearest_idx + STRIKES_EACH_SIDE)
+            show = all_strikes[s: e + 1]
+        else:
+            show = all_strikes
+
+        result[ts_key] = {
+            'spot_price': spot,
+            'rows': [
+                {k: _fmt(seen[sp][k]) for k in TICK_FIELDS if k != 'Spot_Price'}
+                for sp in show
+            ],
+        }
 
     return JsonResponse({
-        'rows'      : rows,
-        'spot_price': spot_price,
-        'timestamp' : timestamp,
-        'total_rows': len(rows),
+        'timestamps' : order,
+        'total_ticks': len(order),
+        'ticks'      : result,
     })
 
 
 # ─────────────────────────────────────────────────────────────
-#  3. AVAILABLE DATES
+#  DATES (unchanged logic, DB-level grouping)
 # ─────────────────────────────────────────────────────────────
 def get_replay_dates(request):
     symbol = request.GET.get('symbol', '').strip()
+    import pytz
+    ist_tz = pytz.timezone('Asia/Kolkata')
     qs = OptionChain.objects.all()
     if symbol:
         qs = qs.filter(Symbol=symbol)
+    dates = (
+        qs.annotate(d=TruncDate('Time', tzinfo=ist_tz))
+          .values_list('d', flat=True)
+          .distinct()
+          .order_by('d')
+    )
+    return JsonResponse({'dates': [d.isoformat() for d in dates if d]})
 
-    times = qs.values_list('Time', flat=True).distinct().order_by('Time')
-    seen, date_list = set(), []
-    for t in times:
-        d = t.astimezone(IST).date().isoformat()
-        if d not in seen:
-            seen.add(d)
-            date_list.append(d)
 
-    return JsonResponse({'dates': date_list})
+# ─────────────────────────────────────────────────────────────
+#  SYMBOL CHANGE ke liye (dates fetch)
+# ─────────────────────────────────────────────────────────────
+def get_replay_timestamps(request):
+    """Backward compat — ab get_replay_bulk use hota hai."""
+    return get_replay_bulk(request)
+
+
+
+def get_replay_tick(request):
+    """Backward compat — bulk mein sab aata hai."""
+    return JsonResponse({'rows': [], 'spot_price': None, 'timestamp': ''})
