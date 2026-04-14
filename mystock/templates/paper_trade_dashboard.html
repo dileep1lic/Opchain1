@@ -200,6 +200,7 @@
 </div>
 
 <!-- Spot Bar -->
+<div id="errBox" style="display:none;margin-bottom:12px;padding:10px 16px;background:#3f1f1f;border:1px solid #7f1f1f;border-radius:10px;font-size:12px;color:#f87171;line-height:1.6"></div>
 <div class="spot-bar">
   <div>
     <div class="spot-lbl">CURRENT SPOT</div>
@@ -234,23 +235,9 @@
 
 <script>
 let sym = 'NIFTY';
-let lastTriggers = {};
 
-function fmt(v) { return v != null ? parseFloat(v).toFixed(2) : '—'; }
-function fmtI(v) { return v != null ? Math.round(v) : '—'; }
-
-async function refresh() {
-  try {
-    const dash = await fetch(`/paper/api/dashboard-data/?symbol=${sym}`).then(r=>r.json());
-    await fetch(`/paper/api/check-enter/?symbol=${sym}`);
-    await fetch(`/paper/api/monitor/?symbol=${sym}`);
-    lastTriggers = dash.triggers || {};
-    updateUI(dash);
-    document.getElementById('liveDot').style.background = '#22c55e';
-  } catch(e) {
-    document.getElementById('liveDot').style.background = '#ef4444';
-  }
-}
+function fmt(v) { return (v != null && isFinite(v)) ? parseFloat(v).toFixed(2) : '—'; }
+function fmtI(v) { return (v != null && isFinite(v)) ? Math.round(v) : '—'; }
 
 function updateUI(d) {
   const t = d.triggers || {};
@@ -258,60 +245,60 @@ function updateUI(d) {
   document.getElementById('srvTime').textContent = d.server_time || '--';
 
   // R Card
-  document.getElementById('rStrikeVal').textContent   = fmtI(t.r_strike);
-  document.getElementById('rStatus').textContent      = t.r_status || '—';
-  document.getElementById('rReversalVal').textContent = fmt(t.r_trigger);
-  document.getElementById('rTarget').textContent      = t.r_trigger ? fmt(t.r_trigger - 50) : '—';
-  document.getElementById('rSL').textContent          = t.r_trigger ? fmt(t.r_trigger + 50) : '—';
+  document.getElementById('rStrikeVal').textContent    = fmtI(t.r_strike);
+  document.getElementById('rStatus').textContent       = t.r_status || '—';
+  document.getElementById('rReversalVal').textContent  = fmt(t.r_trigger);
+  document.getElementById('rTarget').textContent       = (t.r_trigger && isFinite(t.r_trigger)) ? fmt(t.r_trigger - 50) : '—';
+  document.getElementById('rSL').textContent           = (t.r_trigger && isFinite(t.r_trigger)) ? fmt(t.r_trigger + 50) : '—';
 
-  if (spot && t.r_trigger) {
+  if (spot && t.r_trigger && isFinite(t.r_trigger)) {
     const diff = (spot - t.r_trigger);
-    document.getElementById('rDist').textContent     = `${diff > 0 ? '+' : ''}${diff.toFixed(1)} pts`;
-    document.getElementById('rDistSpot').textContent = `Spot ${fmt(spot)}`;
-    document.getElementById('rDistTrig').textContent = `Trigger ${fmt(t.r_trigger)}`;
+    document.getElementById('rDist').textContent     = (diff > 0 ? '+' : '') + diff.toFixed(1) + ' pts';
+    document.getElementById('rDistSpot').textContent = 'Spot ' + fmt(spot);
+    document.getElementById('rDistTrig').textContent = 'Trigger ' + fmt(t.r_trigger);
     document.getElementById('rDistBar').style.width  = Math.min(100, (Math.abs(diff)/400)*100).toFixed(0) + '%';
   }
 
   // S Card
-  document.getElementById('sStrikeVal').textContent   = fmtI(t.s_strike);
-  document.getElementById('sStatus').textContent      = t.s_status || '—';
-  document.getElementById('sReversalVal').textContent = fmt(t.s_trigger);
-  document.getElementById('sTarget').textContent      = t.s_trigger ? fmt(t.s_trigger + 50) : '—';
-  document.getElementById('sSL').textContent          = t.s_trigger ? fmt(t.s_trigger - 50) : '—';
+  document.getElementById('sStrikeVal').textContent    = fmtI(t.s_strike);
+  document.getElementById('sStatus').textContent       = t.s_status || '—';
+  document.getElementById('sReversalVal').textContent  = fmt(t.s_trigger);
+  document.getElementById('sTarget').textContent       = (t.s_trigger && isFinite(t.s_trigger)) ? fmt(t.s_trigger + 50) : '—';
+  document.getElementById('sSL').textContent           = (t.s_trigger && isFinite(t.s_trigger)) ? fmt(t.s_trigger - 50) : '—';
 
-  if (spot && t.s_trigger) {
+  if (spot && t.s_trigger && isFinite(t.s_trigger)) {
     const diff = (spot - t.s_trigger);
-    document.getElementById('sDist').textContent     = `${diff > 0 ? '+' : ''}${diff.toFixed(1)} pts`;
-    document.getElementById('sDistTrig').textContent = `Trigger ${fmt(t.s_trigger)}`;
-    document.getElementById('sDistSpot').textContent = `Spot ${fmt(spot)}`;
+    document.getElementById('sDist').textContent     = (diff > 0 ? '+' : '') + diff.toFixed(1) + ' pts';
+    document.getElementById('sDistTrig').textContent = 'Trigger ' + fmt(t.s_trigger);
+    document.getElementById('sDistSpot').textContent = 'Spot ' + fmt(spot);
     document.getElementById('sDistBar').style.width  = Math.min(100, (Math.abs(diff)/400)*100).toFixed(0) + '%';
   }
 
   // Spot Bar
   if (spot) {
     document.getElementById('spotVal').textContent  = fmt(spot);
-    document.getElementById('dataTime').textContent = `Data: ${t.data_time ? t.data_time.slice(11,19) : '—'}`;
+    document.getElementById('dataTime').textContent = 'Data: ' + (t.data_time ? t.data_time.slice(11,19) : '—');
 
     const nearEl = document.getElementById('spotNear');
-    const nr = t.r_trigger && Math.abs(spot - t.r_trigger) <= 25;
-    const ns = t.s_trigger && Math.abs(spot - t.s_trigger) <= 25;
-    if (nr || ns) { nearEl.style.display='inline'; nearEl.textContent = nr ? 'R के पास!' : 'S के पास!'; }
-    else { nearEl.style.display='none'; }
+    const nr = t.r_trigger && isFinite(t.r_trigger) && Math.abs(spot - t.r_trigger) <= 25;
+    const ns = t.s_trigger && isFinite(t.s_trigger) && Math.abs(spot - t.s_trigger) <= 25;
+    if (nr || ns) { nearEl.style.display = 'inline'; nearEl.textContent = nr ? 'R के पास!' : 'S के पास!'; }
+    else { nearEl.style.display = 'none'; }
 
-    if (t.s_trigger && t.r_trigger && t.r_trigger !== t.s_trigger) {
-      const pct = Math.max(0, Math.min(100, ((spot - t.s_trigger)/(t.r_trigger - t.s_trigger))*100));
+    if (t.s_trigger && t.r_trigger && isFinite(t.s_trigger) && isFinite(t.r_trigger) && t.r_trigger !== t.s_trigger) {
+      const pct = Math.max(0, Math.min(100, ((spot - t.s_trigger) / (t.r_trigger - t.s_trigger)) * 100));
       document.getElementById('progFill').style.width      = pct.toFixed(1) + '%';
       document.getElementById('progFill').style.background = pct > 70 ? '#f87171' : pct < 30 ? '#4ade80' : '#f59e0b';
     }
-    document.getElementById('progS').textContent = `S ${fmt(t.s_trigger)}`;
-    document.getElementById('progR').textContent = `R ${fmt(t.r_trigger)}`;
+    document.getElementById('progS').textContent = 'S ' + fmt(t.s_trigger);
+    document.getElementById('progR').textContent = 'R ' + fmt(t.r_trigger);
   }
 
   // Trades Table
   const trades = d.trades || [];
   const total  = d.total_pnl || 0;
   const pel = document.getElementById('totalPnl');
-  pel.textContent = `Total PnL: ${total >= 0 ? '+' : ''}${total} pts`;
+  pel.textContent = 'Total PnL: ' + (total >= 0 ? '+' : '') + total + ' pts';
   pel.className   = 'pnl-badge ' + (total > 0 ? 'pnl-pos' : total < 0 ? 'pnl-neg' : 'pnl-zero');
 
   const wrap = document.getElementById('tradesWrap');
@@ -320,43 +307,67 @@ function updateUI(d) {
     return;
   }
 
-  let html = `<table><thead><tr>
-    <th>Type</th><th>Entry Time</th>
-    <th>Strike</th><th>Reversal (Trade यहाँ)</th>
-    <th>Entry Spot</th><th>Target</th><th>SL</th>
-    <th>Exit</th><th>Result</th><th>PnL</th>
-  </tr></thead><tbody>`;
+  let html = '<table><thead><tr>' +
+    '<th>Type</th><th>Entry Time</th>' +
+    '<th>Strike</th><th>Reversal (Trade यहाँ)</th>' +
+    '<th>Entry Spot</th><th>Target</th><th>SL</th>' +
+    '<th>Exit</th><th>Result</th><th>PnL</th>' +
+    '</tr></thead><tbody>';
 
   for (const tr of trades) {
-    const isC  = tr.type === 'CALL';
+    const isC   = tr.type === 'CALL';
     const btype = isC ? 'bc' : 'bp';
     const bres  = tr.result === 'OPEN' ? 'bo' : tr.result === 'TARGET' ? 'bt' : 'bs';
     const pc    = tr.pnl >= 0 ? 'pp' : 'pn';
     const rvc   = isC ? 'tr-rev-s' : 'tr-rev-r';
-    const strikePx = tr.trigger_level === 'R' ? fmtI(t.r_strike) : fmtI(t.s_strike);
+    const strikeKey = tr.trigger_level === 'R' ? t.r_strike : t.s_strike;
 
-    html += `<tr>
-      <td><span class="badge ${btype}">${tr.type}</span></td>
-      <td>${tr.entry_time}</td>
-      <td>
-        <div class="tr-strike">${tr.trigger_level} Strike</div>
-        <div style="font-size:14px;font-weight:700;color:#f8fafc">${strikePx}</div>
-      </td>
-      <td>
-        <div class="tr-strike">Reversl_${isC ? 'Pe' : 'Ce'}</div>
-        <div class="${rvc}">${fmt(tr.trigger_price)} <span class="tr-arrow">← entry</span></div>
-      </td>
-      <td>${fmt(tr.entry_spot)}</td>
-      <td style="color:#4ade80">${fmt(tr.target)}</td>
-      <td style="color:#f87171">${fmt(tr.sl)}</td>
-      <td>${tr.exit_spot ? fmt(tr.exit_spot) : '—'}</td>
-      <td><span class="badge ${bres}">${tr.result}</span></td>
-      <td class="${pc}">${tr.result === 'OPEN' ? '~' : ''}${tr.pnl >= 0 ? '+' : ''}${tr.pnl} pts</td>
-    </tr>`;
+    html += '<tr>' +
+      '<td><span class="badge ' + btype + '">' + tr.type + '</span></td>' +
+      '<td>' + tr.entry_time + '</td>' +
+      '<td><div class="tr-strike">' + tr.trigger_level + ' Strike</div>' +
+           '<div style="font-size:14px;font-weight:700;color:#f8fafc">' + fmtI(strikeKey) + '</div></td>' +
+      '<td><div class="tr-strike">Reversl_' + (isC ? 'Pe' : 'Ce') + '</div>' +
+           '<div class="' + rvc + '">' + fmt(tr.trigger_price) + ' <span class="tr-arrow">← entry</span></div></td>' +
+      '<td>' + fmt(tr.entry_spot) + '</td>' +
+      '<td style="color:#4ade80">' + fmt(tr.target) + '</td>' +
+      '<td style="color:#f87171">' + fmt(tr.sl) + '</td>' +
+      '<td>' + (tr.exit_spot != null ? fmt(tr.exit_spot) : '—') + '</td>' +
+      '<td><span class="badge ' + bres + '">' + tr.result + '</span></td>' +
+      '<td class="' + pc + '">' + (tr.result === 'OPEN' ? '~' : '') + (tr.pnl >= 0 ? '+' : '') + tr.pnl + ' pts</td>' +
+      '</tr>';
   }
 
   html += '</tbody></table>';
   wrap.innerHTML = html;
+}
+
+async function refresh() {
+  const eb = document.getElementById('errBox');
+  try {
+    const resp = await fetch('/paper/api/dashboard-data/?symbol=' + sym);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error('HTTP ' + resp.status + ' — ' + txt.slice(0, 200));
+    }
+    const dash = await resp.json();
+    await fetch('/paper/api/check-enter/?symbol=' + sym).catch(() => {});
+    await fetch('/paper/api/monitor/?symbol=' + sym).catch(() => {});
+    if (dash.triggers && dash.triggers.error) {
+      eb.style.display = 'block';
+      eb.innerHTML = '<strong>Trigger Error:</strong> ' + dash.triggers.error +
+        '<br><a href="/paper/api/debug/?symbol=' + sym + '" target="_blank" style="color:#fca5a5;text-decoration:underline">Debug JSON देखें →</a>';
+    } else {
+      eb.style.display = 'none';
+    }
+    updateUI(dash);
+    document.getElementById('liveDot').style.background = '#22c55e';
+  } catch(e) {
+    document.getElementById('liveDot').style.background = '#ef4444';
+    eb.style.display = 'block';
+    eb.innerHTML = '<strong>API Error:</strong> ' + e.message +
+      '<br><a href="/paper/api/debug/?symbol=' + sym + '" target="_blank" style="color:#fca5a5;text-decoration:underline">Debug JSON देखें →</a>';
+  }
 }
 
 refresh();
