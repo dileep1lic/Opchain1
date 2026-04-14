@@ -403,7 +403,7 @@
             <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
         </div>
         
-        <a href="{% url 'resistance_dashboard' %}" target="_blank" style="text-decoration: none;">
+        <!-- <a href="{% url 'resistance_dashboard' %}" target="_blank" style="text-decoration: none;">
         <div class="stat-item sr-badge sr-res" style="cursor: pointer;" onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1)'">
             <span class="label sr-label-res">Resistance (CE) ↗</span>
             <span id="header-res" class="value" style="color: var(--accent-green); font-size: 14px;">
@@ -413,11 +413,6 @@
         </div>
         </a>
 
-        
-
-    </div>
-
-    <div class="controls-group">
         <a href="{% url 'resistance_dashboard' %}" target="_blank" style="text-decoration: none;">
         <div class="stat-item sr-badge sr-sup" style="cursor: pointer;" onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1)'">
             <span class="label sr-label-sup">Support (PE) ↗</span>
@@ -426,7 +421,11 @@
                 <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.supprt_status|default:"Waiting..." }}]</span>
             </span>
         </div>
-        </a>
+        </a> -->
+
+    </div>
+
+    <div class="controls-group">
         
         <div class="dropdown">
             <button class="dropbtn" style="border-color: var(--accent-blue);">
@@ -454,6 +453,7 @@
                 <span style="font-size: 10px;">▼</span>
             </button>
             <div class="dropdown-content">
+                <a href="{% url 'resistance_dashboard' %}" target="_blank"><span>📊 SR Dashboard</span> <span style="color: #64b5f6;">PANEL ↗</span></a>
                 <a href="{% url 'search_dashboard' %}" target="_blank"><span>Search</span> <span style="color: #64b5f6;">OPEN ↗</span></a>
                 <a href="{% url 'stock_dashboard' %}" target="_blank"><span>Market</span> <span style="color: #64b5f6;">ALL ↗</span></a>
                 <a href="{% url 'chart' %}" target="_blank"><span>Chart View</span> <span style="color: #64b5f6;">NIFTY ↗</span></a>
@@ -464,8 +464,11 @@
                 <a href="{% url 'live_trades' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank">
                     <span>🤖 Live Paper Trades</span> <span style="color: #64b5f6;">BOT ↗</span>
                 </a>
-                <a href="{% url 'paper_trade_dashboard' %}" target="_blank">
-                    <span>🤖 Live Paper Trades</span> <span style="color: #64b5f6;">BOT ↗</span>
+                <a href="{% url 'trade_journal' %}" target="_blank">
+                    <span>📓 Trade Journal</span> <span style="color: #64b5f6;">OPEN ↗</span>
+                </a>
+                <a href="{% url 'admin_panel' %}" target="_blank" style="color: #ce93d8;">
+                    <span>⚙️ Admin Panel</span> <span>CTRL ↗</span>
                 </a>
                 
             </div>
@@ -759,17 +762,21 @@ document.addEventListener('mouseup', function() { isLtpDragging = false; }, true
 document.addEventListener('mousemove', function(e) { if (isLtpDragging) { ltpModalContent.style.left = (e.clientX + ltpOffset[0]) + 'px'; ltpModalContent.style.top = (e.clientY + ltpOffset[1]) + 'px'; } }, true);
 
 
-// JavaScript
-function toggleChart() {
-  const chartContainer = document.getElementById('chart-container');
-  chartContainer.classList.toggle('hidden');
-}
-
 // ==========================================
 // --- CHART RESIZE & TOGGLE LOGIC ---
 // ==========================================
 
 let chartVisible = true;
+let originalChartUrl = ""; // असली URL सेव करने के लिए
+
+// पेज लोड होने पर चार्ट का ओरिजिनल URL सेव कर लें
+window.addEventListener('DOMContentLoaded', () => {
+    const iframe = document.getElementById('mainChartFrame');
+    if(iframe) {
+        originalChartUrl = iframe.src;
+    }
+    // loadColumnPreferences नीचे page init में call होगा — duplicate नहीं
+});
 
 // 1. Chart ON/OFF Function
 function toggleChart() {
@@ -778,6 +785,7 @@ function toggleChart() {
     const tableContainer = document.getElementById('table-container');
     const btn = document.getElementById('chartToggleBtn');
     const btnText = document.getElementById('chartToggleText');
+    const iframeChart = document.getElementById('mainChartFrame'); // Iframe सेलेक्ट किया
 
     chartVisible = !chartVisible;
     
@@ -788,12 +796,22 @@ function toggleChart() {
         chartContainer.style.width = '40%';
         btn.style.borderColor = 'var(--accent-green)';
         btnText.innerHTML = '📈 Chart: ON';
+        
+        // चार्ट वापस दिखने पर URL फिर से सेट करें ताकि डेटा लोड हो
+        if (iframeChart && originalChartUrl) {
+            iframeChart.src = originalChartUrl;
+        }
     } else {
         chartContainer.style.display = 'none';
         resizer.style.display = 'none';
         tableContainer.style.width = '100%'; // चार्ट छुपने पर टेबल फुल स्क्रीन
         btn.style.borderColor = 'var(--text-secondary)';
         btnText.innerHTML = '📉 Chart: OFF';
+        
+        // चार्ट छुपने पर src हटा दें ताकि बैकग्राउंड में डेटा लोड होना बंद हो जाए
+        if (iframeChart) {
+            iframeChart.src = "";
+        }
     }
     
     // लेआउट बदलने के बाद Table Headers को फिक्स करना
@@ -845,14 +863,19 @@ document.addEventListener('mouseup', function(e) {
     }
 });
 
-setInterval(refreshData, 5000);
-window.onload = function() { 
-    scrollToSpot(); 
-    addSRLabelsToLine(); 
-};
+// ── Page Init — एक ही जगह सब कुछ ──────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+    const iframe = document.getElementById('mainChartFrame');
+    if (iframe) originalChartUrl = iframe.src;
+    loadColumnPreferences();
+});
 
-// Start layout calculations immediately
-window.addEventListener('DOMContentLoaded', loadColumnPreferences);
+window.addEventListener('load', () => {
+    scrollToSpot();
+    addSRLabelsToLine();
+});
+
+setInterval(refreshData, 5000);
 
 </script>
 
