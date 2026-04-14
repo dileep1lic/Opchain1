@@ -1,0 +1,590 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Control Panel</title>
+<style>
+  :root {
+    --bg: #0d0f14; --surface: #13161e; --card: #1a1d27; --border: #252836;
+    --text: #e8eaf0; --muted: #6b7090;
+    --green: #00d4a0; --green-bg: rgba(0,212,160,0.1); --green-border: rgba(0,212,160,0.3);
+    --red: #ff5e72;   --red-bg: rgba(255,94,114,0.1);  --red-border: rgba(255,94,114,0.3);
+    --amber: #f5a623; --amber-bg: rgba(245,166,35,0.1);
+    --blue: #4a9eff;  --blue-bg: rgba(74,158,255,0.1);
+    --accent: #7c6fff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 24px; }
+
+  /* ── Header ── */
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+  .header-left h1 { font-size: 18px; font-weight: 700; }
+  .header-left span { font-size: 11px; color: var(--muted); }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .clock { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
+  .market-badge { font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; }
+  .market-open  { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .market-close { background: var(--red-bg);   color: var(--red);   border: 1px solid var(--red-border); }
+  .nav-links { display: flex; gap: 8px; flex-wrap: wrap; }
+  .nav-link { font-size: 12px; padding: 6px 14px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); text-decoration: none; transition: 0.2s; }
+  .nav-link:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Logout Button ── */
+  .logout-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 6px 14px; border-radius: 20px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s ease; display: flex; align-items: center; gap: 6px; }
+  .logout-btn:hover { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+  
+  /* ── Section Title ── */
+  .section-title { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; padding-left: 4px; }
+
+  /* ── Loop Control Cards ── */
+  .loops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 28px; }
+
+  .loop-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; transition: border-color 0.3s; }
+  .loop-card.active  { border-color: var(--green-border); }
+  .loop-card.paused  { border-color: var(--red-border); }
+
+  .loop-card-top { padding: 16px 20px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .loop-icon { font-size: 24px; width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .loop-icon.green { background: var(--green-bg); }
+  .loop-icon.red   { background: var(--red-bg); }
+  .loop-icon.blue  { background: var(--blue-bg); }
+  .loop-name { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+  .loop-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .dot-on  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 1.5s infinite; }
+  .dot-off { background: var(--muted); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .loop-card-bottom { padding: 12px 20px; background: var(--card); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .status-text { font-size: 11px; font-weight: 700; }
+  .status-text.on  { color: var(--green); }
+  .status-text.off { color: var(--red); }
+
+  /* ── Toggle Switch ── */
+  .toggle-wrap { display: flex; align-items: center; gap: 10px; }
+  .toggle { position: relative; width: 48px; height: 26px; cursor: pointer; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #2d3142; border-radius: 26px; transition: 0.3s; }
+  .slider:before { content: ''; position: absolute; width: 20px; height: 20px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
+  input:checked + .slider { background: var(--green); }
+  input:checked + .slider:before { transform: translateX(22px); }
+  .toggle-label { font-size: 12px; font-weight: 600; min-width: 40px; }
+
+  /* ── Quick Actions ── */
+  .actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .action-btn { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; color: var(--text); font-size: 13px; font-weight: 600; text-decoration: none; transition: 0.2s; }
+  .action-btn:hover { border-color: var(--accent); background: var(--card); }
+  .action-btn .aicon { font-size: 20px; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .action-btn .atext { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  /* ── Stats Row ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 28px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .stat-val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* ── Log Feed ── */
+  .log-box { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .log-header { padding: 12px 18px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .log-header span { font-size: 12px; font-weight: 700; }
+  .log-clear { font-size: 11px; color: var(--muted); cursor: pointer; }
+  .log-clear:hover { color: var(--red); }
+  .log-feed { height: 180px; overflow-y: auto; padding: 12px 18px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.8; }
+  .log-entry { border-bottom: 1px solid rgba(255,255,255,0.03); padding: 2px 0; }
+  .log-time { color: var(--muted); margin-right: 8px; }
+  .log-ok   { color: var(--green); }
+  .log-warn { color: var(--amber); }
+  .log-err  { color: var(--red); }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 600; color: #fff; opacity: 0; transform: translateY(10px); transition: 0.3s; pointer-events: none; z-index: 999; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.ok  { background: #1a5e3a; border: 1px solid var(--green); }
+  #toast.err { background: #5e1a1a; border: 1px solid var(--red); }
+
+  /* ── Spinner ── */
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Config Inputs ── */
+  .config-input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); color: #fff; border-radius: 8px; font-size: 16px; font-weight: bold; outline: none; transition: 0.2s; font-family: tabular-nums; }
+  .config-input:focus { border-color: var(--green); box-shadow: 0 0 8px rgba(0, 212, 160, 0.2); }
+
+  /* ── SINGLE LINE MEGA TOOLBAR ── */
+  .mega-toolbar { display: flex; align-items: center; gap: 8px; background: var(--surface); padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; font-size: 11px; white-space: nowrap; overflow-x: auto; }
+  .mega-toolbar::-webkit-scrollbar { height: 0px; } /* Scrollbar छिपाने के लिए */
+  .mega-divider { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+  .mega-label { color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px; }
+  .mega-input { background: var(--bg); border: 1px solid var(--border); color: #fff; border-radius: 4px; padding: 0 6px; height: 26px; font-size: 11px; font-weight: 600; outline: none; transition: 0.2s; }
+  .mega-input:focus { border-color: var(--accent); }
+  .mega-btn { height: 26px; padding: 0 10px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid transparent; display: flex; align-items: center; gap: 4px; transition: 0.2s; }
+  .mega-btn:hover { opacity: 0.8; }
+
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<div class="header">
+  <div class="header-left">
+    <h1>⚙️ Admin Control Panel</h1>
+    <span>System Controls &amp; Live Monitor</span>
+  </div>
+  <div class="header-right" style="flex-wrap:wrap; gap:12px;">
+    <div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div style="font-size:10px;color:var(--muted);text-align:center;" id="dateStr">—</div>
+    </div>
+    <span class="market-badge market-close" id="marketBadge">Market Closed</span>
+    <form method="post" action="{% url 'logout' %}" style="margin:0;">
+      {% csrf_token %}
+      <button type="submit" class="logout-btn">
+        🚪 Logout
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ── NAVIGATION ── -->
+<div class="nav-links" style="margin-bottom:24px;">
+  <a href="{% url 'dashboard' %}"        class="nav-link">📊 Option Chain</a>
+  <a href="{% url 'stock_dashboard' %}"  class="nav-link">📈 All Stocks</a>
+  <a href="{% url 'live_trades' %}"      class="nav-link">🤖 Live Trades</a>
+  <a href="{% url 'trade_journal' %}"    class="nav-link">📓 Trade Journal</a>
+  <a href="{% url 'resistance_dashboard' %}" class="nav-link">🔥 Resistance</a>
+  <a href="{% url 'chart' %}"            class="nav-link">🕯️ Chart</a>
+  <a href="{% url 'market_replay' %}"    class="nav-link">⏮️ Replay</a>
+</div>
+
+<!-- ── LOOP CONTROLS ── -->
+<div class="section-title">🎛️ Loop Controllers</div>
+<div class="loops-grid" id="loopsGrid">
+
+  <!-- NIFTY Loop -->
+  <div class="loop-card" id="card-nifty_loop">
+    <div class="loop-card-top">
+      <div class="loop-icon green">📡</div>
+      <div style="flex:1">
+        <div class="loop-name">NIFTY Loop</div>
+        <div class="loop-desc">NIFTY का live option chain data fetch करता है। हर 5 सेकंड में DB में save होता है।</div>
+      </div>
+      <div class="status-dot" id="dot-nifty_loop"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-nifty_loop">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-nifty_loop" onchange="toggleLoop('nifty_loop', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-nifty_loop">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Others Loop -->
+  <div class="loop-card" id="card-others_loop">
+    <div class="loop-card-top">
+      <div class="loop-icon blue">🔄</div>
+      <div style="flex:1">
+        <div class="loop-name">Others Loop</div>
+        <div class="loop-desc">BANKNIFTY, FINNIFTY, SENSEX आदि सभी stocks का data batch में fetch करता है।</div>
+      </div>
+      <div class="status-dot" id="dot-others_loop"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-others_loop">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-others_loop" onchange="toggleLoop('others_loop', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-others_loop">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bot Loop -->
+  <div class="loop-card" id="card-bot_loop">
+    <div class="loop-card-top">
+      <div class="loop-icon red">🤖</div>
+      <div style="flex:1">
+        <div class="loop-name">Bot Loop (Paper Trade)</div>
+        <div class="loop-desc">R/S levels hit होने पर automatic paper trades execute करता है। बंद करने पर trade नहीं होगा।</div>
+      </div>
+      <div class="status-dot" id="dot-bot_loop"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-bot_loop">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-bot_loop" onchange="toggleLoop('bot_loop', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-bot_loop">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mega-toolbar">
+  
+  <span class="mega-label">🎯 Manual:</span>
+  <select id="man-type" class="mega-input" style="width: 75px; padding: 0 2px;">
+    <option value="CALL">🟢 CALL</option>
+    <option value="PUT">🔴 PUT</option>
+  </select>
+  <input type="number" id="man-price" class="mega-input" placeholder="Price" style="width: 70px;">
+  <button class="mega-btn" onclick="placeManualOrder()" style="background: var(--blue-bg); color: var(--blue);">
+    🚀 Add
+  </button>
+
+  <div class="mega-divider"></div>
+
+  <span class="mega-label">⚙️ Bot Parameters</span>
+  <span title="Target" style="font-size:12px;">🎯 Target</span>
+  <input type="number" id="cfg-target" class="mega-input" placeholder="TGT" style="width: 50px;">
+  
+  <span title="Stop Loss" style="font-size:12px; margin-left:4px;">🛑 Stop Loss</span>
+  <input type="number" id="cfg-sl" class="mega-input" placeholder="SL" style="width: 50px;">
+  
+  <span title="Buffer" style="font-size:12px; margin-left:4px;">🛡️ Buffer</span>
+  <input type="number" id="cfg-buffer" class="mega-input" placeholder="BUF" style="width: 45px;">
+  
+  <button class="mega-btn" onclick="saveBotSettings()" style="background: var(--green-bg); color: var(--green);">
+    💾 Save
+  </button>
+
+  <div style="flex-grow: 1;"></div> 
+
+  <button class="mega-btn" onclick="closeAllPositions()" style="background: var(--red-bg); color: var(--red); border-color: var(--red-border);">
+    🛑 Close All
+  </button>
+
+</div>
+
+
+
+<!-- ── STATS ── -->
+<div class="section-title">📊 Today's Quick Stats</div>
+<div class="stats-grid" id="statsGrid">
+  <div class="stat-card">
+    <div class="stat-label">Total Trades Today</div>
+    <div class="stat-val" id="st-total">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Wins ✅</div>
+    <div class="stat-val" style="color:var(--green)" id="st-wins">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Losses ❌</div>
+    <div class="stat-val" style="color:var(--red)" id="st-losses">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Net PnL (pts)</div>
+    <div class="stat-val" id="st-pnl">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Current Spot</div>
+    <div class="stat-val" id="st-spot" style="font-size:18px;">—</div>
+  </div>
+</div>
+
+<!-- ── QUICK ACTIONS ── -->
+<div class="section-title">⚡ Quick Actions</div>
+<div class="actions-grid" style="margin-bottom:28px;">
+
+  <a href="{% url 'update_expiries' %}" class="action-btn" onclick="return confirmAction('Expiry cache update होगा। Continue?')">
+    <div class="aicon" style="background:var(--amber-bg)">📅</div>
+    <div><div>Expiry Update</div><div class="atext">सभी symbols की expiry DB में refresh करें</div></div>
+  </a>
+
+  <div class="action-btn" onclick="pauseAllLoops()">
+    <div class="aicon" style="background:var(--red-bg)">⏸️</div>
+    <div><div>Pause All Loops</div><div class="atext">तीनों loops एक साथ बंद करें</div></div>
+  </div>
+
+  <div class="action-btn" onclick="startAllLoops()">
+    <div class="aicon" style="background:var(--green-bg)">▶️</div>
+    <div><div>Start All Loops</div><div class="atext">तीनों loops एक साथ चालू करें</div></div>
+  </div>
+
+  <a href="{% url 'live_trades' %}" class="action-btn">
+    <div class="aicon" style="background:var(--blue-bg)">📋</div>
+    <div><div>Live Trades</div><div class="atext">आज के paper trades देखें</div></div>
+  </a>
+
+  <a href="{% url 'resistance_dashboard' %}" class="action-btn">
+    <div class="aicon" style="background:var(--accent); opacity:0.8;">🔥</div>
+    <div><div>Resistance Board</div><div class="atext">Current R/S levels देखें</div></div>
+  </a>
+
+  <div class="action-btn" onclick="refreshStatus()">
+    <div class="aicon" style="background:var(--border)">🔄</div>
+    <div><div>Refresh Status</div><div class="atext">सभी loops का status reload करें</div></div>
+  </div>
+
+</div>
+
+<!-- ── ACTIVITY LOG ── -->
+<div class="section-title">🗒️ Activity Log</div>
+<div class="log-box">
+  <div class="log-header">
+    <span>Recent Actions</span>
+    <span class="log-clear" onclick="clearLog()">Clear</span>
+  </div>
+  <div class="log-feed" id="logFeed">
+    <div class="log-entry"><span class="log-time">--:--:--</span><span class="log-ok">Panel loaded. Fetching status...</span></div>
+  </div>
+</div>
+
+<!-- ── TOAST ── -->
+<div id="toast"></div>
+
+<script>
+const CSRF = '{{ csrf_token }}';
+const LOOPS = ['nifty_loop', 'others_loop', 'bot_loop'];
+
+// ── Clock ───────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2,'0');
+  const m = String(now.getMinutes()).padStart(2,'0');
+  const s = String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = `${h}:${m}:${s}`;
+
+  const days = ['रवि','सोम','मंगल','बुध','गुरु','शुक्र','शनि'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('dateStr').textContent =
+    `${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+
+  // Market hours: 9:15 – 15:30 IST (we assume IST = UTC+5:30)
+  const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const istMinutes = utcMinutes + 330;
+  const t = istMinutes % (24 * 60);
+  const isOpen = (t >= 9*60+15) && (t < 15*60+30) && now.getDay() >= 1 && now.getDay() <= 5;
+  const badge = document.getElementById('marketBadge');
+  badge.textContent = isOpen ? '🟢 Market Open' : '🔴 Market Closed';
+  badge.className = 'market-badge ' + (isOpen ? 'market-open' : 'market-close');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── Log ─────────────────────────────────────────────────
+function addLog(msg, type = 'ok') {
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const feed = document.getElementById('logFeed');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${ts}</span><span class="log-${type}">${msg}</span>`;
+  feed.prepend(entry);
+  // Max 50 lines
+  while (feed.children.length > 50) feed.removeChild(feed.lastChild);
+}
+function clearLog() {
+  document.getElementById('logFeed').innerHTML = '<div class="log-entry"><span class="log-time">--:--:--</span><span class="log-warn">Log cleared.</span></div>';
+}
+
+// ── Toast ────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, type = 'ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = '', 2500);
+}
+
+// ── Set loop UI ─────────────────────────────────────────
+function setLoopUI(name, isActive) {
+  const card = document.getElementById(`card-${name}`);
+  const dot  = document.getElementById(`dot-${name}`);
+  const txt  = document.getElementById(`txt-${name}`);
+  const tog  = document.getElementById(`tog-${name}`);
+  const lbl  = document.getElementById(`lbl-${name}`);
+
+  card.className = 'loop-card ' + (isActive ? 'active' : 'paused');
+  dot.className  = 'status-dot ' + (isActive ? 'dot-on' : 'dot-off');
+  txt.textContent = isActive ? '● Running' : '○ Paused';
+  txt.className   = 'status-text ' + (isActive ? 'on' : 'off');
+  tog.checked     = isActive;
+  lbl.textContent = isActive ? 'ON' : 'OFF';
+}
+
+// ── Fetch all loop statuses ──────────────────────────────
+let settingsLoaded = false;
+async function refreshStatus() {
+  try {
+    // GET /api/admin-status/ — नीचे view में define करेंगे
+    const resp = await fetch('/api/admin-status/');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+
+    LOOPS.forEach(name => {
+      const status = data.loops[name];
+      if (status !== undefined) setLoopUI(name, status);
+    });
+
+    // Stats
+    document.getElementById('st-total').textContent  = data.stats.total  ?? '—';
+    document.getElementById('st-wins').textContent   = data.stats.wins   ?? '—';
+    document.getElementById('st-losses').textContent = data.stats.losses ?? '—';
+    const pnl = data.stats.pnl;
+    const pnlEl = document.getElementById('st-pnl');
+    pnlEl.textContent = pnl != null ? (pnl >= 0 ? '+' : '') + pnl : '—';
+    pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
+    document.getElementById('st-spot').textContent = data.stats.spot ?? '—';
+
+    if (!settingsLoaded && data.settings) {
+        document.getElementById('cfg-target').value = data.settings.target;
+        document.getElementById('cfg-sl').value = data.settings.sl;
+        document.getElementById('cfg-buffer').value = data.settings.buffer;
+        settingsLoaded = true;
+    }
+
+  } catch(e) {
+    addLog('Status fetch failed: ' + e.message, 'err');
+  }
+}
+
+
+async function placeManualOrder() {
+    const type = document.getElementById('man-type').value;
+    const price = document.getElementById('man-price').value;
+    const symbol = document.getElementById('symSel')?.value || 'NIFTY'; // अगर सिंबल सेलेक्टर है
+
+    if(!price) {
+        showToast('कृपया लिमिट प्राइस डालें!', 'err');
+        return;
+    }
+
+    try {
+        const resp = await fetch('/paper/api/add-manual/', {
+            method: 'POST',
+            headers: { 
+                'X-CSRFToken': CSRF,
+                'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ symbol: symbol, type: type, price: price })
+        });
+        const res = await resp.json();
+        if(res.status === 'success') {
+            showToast(res.msg, 'ok');
+            addLog(`Manual Order -> ${type} @ ${price}`, 'ok');
+            document.getElementById('man-price').value = ''; // Clear input
+        } else {
+            showToast('Error: ' + res.msg, 'err');
+        }
+    } catch(e) {
+        showToast('API Connection Failed', 'err');
+    }
+}
+
+// 2. नया फंक्शन: सेटिंग्स सेव करने के लिए
+async function saveBotSettings() {
+    const target = document.getElementById('cfg-target').value;
+    const sl = document.getElementById('cfg-sl').value;
+    const buffer = document.getElementById('cfg-buffer').value;
+
+    try {
+        const resp = await fetch('/api/update-bot-settings/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target, sl, buffer })
+        });
+        const data = await resp.json();
+        if (data.status === 'success') {
+            showToast('Live Settings Updated!', 'ok');
+            addLog(`Bot Config -> TGT: ${target}, SL: ${sl}, BUF: ${buffer}`, 'ok');
+        } else {
+            showToast('Error saving settings', 'err');
+        }
+    } catch(e) {
+        showToast('API Connection Failed', 'err');
+    }
+}
+
+// ── Toggle individual loop ───────────────────────────────
+async function toggleLoop(name, checkbox) {
+  const wasChecked = !checkbox.checked; // optimistic revert on fail
+  checkbox.disabled = true;
+
+  try {
+    const resp = await fetch(`/toggle/${name}/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+
+    setLoopUI(name, data.is_active);
+    const state = data.is_active ? 'चालू ▶' : 'बंद ⏸';
+    addLog(`${name} → ${state}`, data.is_active ? 'ok' : 'warn');
+    showToast(`${name} ${state}`, data.is_active ? 'ok' : 'err');
+
+  } catch(e) {
+    checkbox.checked = wasChecked; // revert
+    addLog('Toggle failed: ' + e.message, 'err');
+    showToast('Error: ' + e.message, 'err');
+  } finally {
+    checkbox.disabled = false;
+  }
+}
+
+// ── Pause / Start all ────────────────────────────────────
+async function pauseAllLoops() {
+  if (!confirm('तीनों loops बंद करना चाहते हैं?')) return;
+  for (const name of LOOPS) {
+    const tog = document.getElementById(`tog-${name}`);
+    if (tog.checked) await toggleLoop(name, tog);
+  }
+  addLog('All loops paused ⏸', 'warn');
+}
+
+async function startAllLoops() {
+  for (const name of LOOPS) {
+    const tog = document.getElementById(`tog-${name}`);
+    if (!tog.checked) await toggleLoop(name, tog);
+  }
+  addLog('All loops started ▶', 'ok');
+}
+
+function confirmAction(msg) {
+  return confirm(msg);
+}
+
+async function closeAllPositions() {
+    if(!confirm("⚠️ क्या आप पक्का सारे OPEN trades को Current Spot Price पर Close करना चाहते हैं?")) return;
+    
+    // अगर आपके पेज पर symbol select dropdown नहीं है, तो NIFTY डिफ़ॉल्ट रहेगा
+    const symbol = document.getElementById('symSel')?.value || 'NIFTY'; 
+    
+    try {
+        const resp = await fetch('/api/close-all-trades/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: symbol })
+        });
+        const res = await resp.json();
+        if(res.status === 'success') {
+            showToast(res.msg, 'ok');
+            addLog('🛑 Forced Close: ' + res.msg, 'warn');
+            refreshStatus(); 
+        } else {
+            showToast('Error: ' + res.msg, 'err');
+        }
+    } catch(e) {
+        showToast('API Connection Failed', 'err');
+    }
+}
+
+// ── Init ─────────────────────────────────────────────────
+refreshStatus();
+setInterval(refreshStatus, 10000); // हर 10 सेकंड में auto-refresh
+</script>
+</body>
+</html>
