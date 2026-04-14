@@ -220,6 +220,7 @@ class LiveSRData(models.Model):
     pe_2nd_high_vol_strike = models.FloatField(null=True, blank=True)
     supprt_strike = models.FloatField(null=True, blank=True)
     supprt_status = models.CharField(max_length=100, null=True, blank=True)
+    
 
     def __str__(self):
         return f"{self.Symbol} - {self.Time.strftime('%H:%M:%S')}"
@@ -242,6 +243,18 @@ class PaperTrade(models.Model):
     exit_spot = models.FloatField(null=True, blank=True)
     result = models.CharField(max_length=20, default="OPEN") # OPEN, TARGET, SL
     pnl = models.FloatField(default=0.0)
+    entry_strike = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.symbol} | {self.trade_type} | {self.result} | PNL: {self.pnl}"
+
+
+class BotSettings(models.Model):
+    trading_enabled = models.BooleanField(default=True)
+    default_target = models.FloatField(default=50.0)
+    default_sl = models.FloatField(default=50.0)
+    reversal_buffer = models.FloatField(default=5.0)
+
+    class Meta:
+        verbose_name = "Bot Setting"
+        verbose_name_plural = "Bot Settings"
