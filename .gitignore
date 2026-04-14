@@ -26,6 +26,7 @@ staticfiles/
 .env
 local_settings.py
 secrets.json
+credentials1.py
 
 # IDEs / Editors (VS Code, PyCharm आदि की फाइलें)
 .vscode/
