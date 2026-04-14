@@ -5,6 +5,12 @@ from . import replay_views
 
 urlpatterns = [
     path('', views.option_chain_dashboard, name='dashboard'),
+    # Admin panel और API endpoints
+    path('admin-panel/', views.admin_panel_view,  name='admin_panel'),
+    path('api/admin-status/', views.admin_status_api, name='admin_status_api'),
+    path('api/update-bot-settings/', views.update_bot_settings_api, name='update_bot_settings_api'),
+    path('api/close-all-trades/', views.close_all_open_trades_api, name='close_all_open_trades_api'),
+
     # लूप्स को चालू/बंद करने वाला URL (जैसे: /toggle/nifty_loop/)
     path('toggle/<str:loop_name>/', views.toggle_sync, name='toggle_sync'),
     path('table-update-url/', views.table_update_api, name='table_update_api'),
@@ -26,6 +32,7 @@ urlpatterns = [
 
     path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
     path('resistance/', views.resistance_dashboard, name='resistance_dashboard'),
+    path('sr-data/', views.support_resistance_view, name='sr_data'),
 
     # ── Market Replay ────────────────────────────────────────
     path('replay/', replay_views.market_replay_view, name='market_replay'),
@@ -34,6 +41,7 @@ urlpatterns = [
     path('api/replay/dates/',      replay_views.get_replay_dates,      name='api_replay_dates'),
     path('api/replay/timestamps/', replay_views.get_replay_timestamps,  name='api_replay_timestamps'),
     path('api/replay/tick/',       replay_views.get_replay_tick,        name='api_replay_tick'),
+    path('api/replay/bulk/',       replay_views.get_replay_bulk, name='api_replay_bulk'),
 
     path("chart/",         views.chart_view,   name="chart"),        # मुख्य chart page
     path("api/candle/",    views.candle_api,    name="candle_api"),   # AJAX JSON data
@@ -50,5 +58,13 @@ urlpatterns = [
 
     # लाइव पेपर ट्रेड्स देखने के लिए नया URL:
     path('live-trades/', views.live_trades_view, name='live_trades'),
+    path('api/dashboard-data/', views.dashboard_data_api, name='dashboard_data_api'),
+    # 👇 यह Skip Trade URL जोड़ें
+    path('api/skip-trade/', views.skip_trade_api, name='skip_trade_api'),
+    # 👇 यह Add Manual Trade URL जोड़ें
+    path('api/add-manual/', views.add_manual_trade_api, name='add_manual_trade'),
+
+    # पुराने ट्रैड डेसबोर्ड के url 
+    path('trade-journal/', views.trade_dashboard, name='trade_journal'),
     
 ]
