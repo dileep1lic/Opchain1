@@ -468,12 +468,12 @@
 // ══════════════════════════════════════════════
 //  STATE
 // ══════════════════════════════════════════════
-let timestamps   = [];   // sabhi ticks ka list (strings)
-let currentTick  = 0;    // 0-indexed current position
-let playTimer    = null; // setInterval handle
+let timestamps   = [];
+let currentTick  = 0;
+let playTimer    = null;
 let isPlaying    = false;
-let cachedData   = {};   // timestamp → rows (cache)
-let currentRows  = [];   // current tick ki rows
+let currentRows  = [];
+let allTickData  = {};   // ✅ Poora din ka data — memory mein
 
 // ══════════════════════════════════════════════
 //  HELPERS
@@ -534,92 +534,75 @@ async function loadReplay() {
   const expiry = gs('sel-expiry');
   const date   = gs('sel-date');
 
-  if (!symbol || !date) {
-    alert('Symbol aur Date zaroori hain!');
-    return;
-  }
+  if (!symbol || !date) { alert('Symbol aur Date zaroori hain!'); return; }
 
   stopReplay();
   setStatus('loading', 'LOADING...');
   $('empty-state').style.display  = 'flex';
   $('replay-table').style.display = 'none';
   $('empty-state').querySelector('.empty-text').textContent = 'Data load ho raha hai...';
-  $('empty-state').querySelector('.empty-hint').textContent = 'Database se ticks aa rahe hain';
+  $('empty-state').querySelector('.empty-hint').textContent = 'Ek baar mein poora din load ho raha hai ⏳';
 
-  const params = new URLSearchParams({ symbol, expiry_date: expiry, replay_date: date });
-  const res = await fetch(`{% url 'api_replay_timestamps' %}?${params}`);
-  const json = await res.json();
+  try {
+    const params = new URLSearchParams({ symbol, expiry_date: expiry, replay_date: date });
 
-  if (!json.timestamps || !json.timestamps.length) {
-    setStatus('idle', 'NO DATA');
-    $('empty-state').querySelector('.empty-text').textContent = 'Is date ka data nahi mila!';
-    $('empty-state').querySelector('.empty-hint').textContent = 'Dusri date try karein';
-    return;
-  }
+    // ✅ EK HI REQUEST — poore din ka data
+    const res  = await fetch(`{% url 'api_replay_bulk' %}?${params}`);
+    const json = await res.json();
 
-  timestamps  = json.timestamps;
-  currentTick = 0;
-  cachedData  = {};
-
-  $('scrubber').max   = timestamps.length - 1;
-  $('scrubber').value = 0;
-  $('tc-tot').textContent = timestamps.length;
-  updateTimeline();
-  buildTableHead();
-
-  setStatus('paused', 'READY');
-
-  // First tick load karke show karo
-  await renderTick(0);
-}
-
-// ══════════════════════════════════════════════
-//  FETCH ONE TICK
-// ══════════════════════════════════════════════
-async function fetchTick(index) {
-  const ts = timestamps[index];
-  if (cachedData[ts]) return cachedData[ts];
-
-  const symbol = gs('sel-symbol');
-  const expiry = gs('sel-expiry');
-  const params = new URLSearchParams({ symbol, expiry_date: expiry, timestamp: ts });
-  const res = await fetch(`{% url 'api_replay_tick' %}?${params}`);
-  const json = await res.json();
-  cachedData[ts] = json;
-  return json;
-}
-
-// Pre-fetch next N ticks in background
-function prefetch(fromIndex, count = 5) {
-  for (let i = fromIndex; i < Math.min(fromIndex + count, timestamps.length); i++) {
-    if (!cachedData[timestamps[i]]) {
-      fetchTick(i); // background, no await
+    if (!json.timestamps || !json.timestamps.length) {
+      setStatus('idle', 'NO DATA');
+      $('empty-state').querySelector('.empty-text').textContent = 'Is date ka data nahi mila!';
+      $('empty-state').querySelector('.empty-hint').textContent = 'Dusri date try karein';
+      return;
     }
+
+    timestamps  = json.timestamps;
+    allTickData = json.ticks;   // ✅ poora data memory mein
+    currentTick = 0;
+
+    $('scrubber').max   = timestamps.length - 1;
+    $('scrubber').value = 0;
+    $('tc-tot').textContent = timestamps.length;
+    updateTimeline();
+    buildTableHead();
+    setStatus('paused', `READY — ${timestamps.length} ticks`);
+
+    // Pehla tick turant dikhao (no fetch needed)
+    renderTick(0);
+
+  } catch(e) {
+    setStatus('idle', 'ERROR');
+    $('empty-state').querySelector('.empty-text').textContent = 'Load failed: ' + e.message;
   }
 }
 
+// ✅ Ab koi fetch nahi — seedha memory se
+function getTickData(index) {
+  const ts = timestamps[index];
+  return allTickData[ts] || null;
+}
+
 // ══════════════════════════════════════════════
-//  RENDER TICK
+//  RENDER TICK — synchronous, no await needed
 // ══════════════════════════════════════════════
-async function renderTick(index) {
+function renderTick(index) {
   if (index < 0 || index >= timestamps.length) return;
 
-  const data = await fetchTick(index);
+  const data = getTickData(index);
+  currentTick = index;
+
   if (!data || !data.rows || !data.rows.length) {
     updateHeaderStats(null, timestamps[index]);
+    $('empty-state').style.display  = 'none';
+    $('replay-table').style.display = 'table';
     return;
   }
 
   currentRows = data.rows;
-  currentTick = index;
-
-  updateHeaderStats(data.spot_price, data.timestamp);
+  updateHeaderStats(data.spot_price, timestamps[index]);
   buildTableBody(data.rows, data.spot_price);
 
-  // Pre-fetch agle ticks
-  prefetch(index + 1, 8);
-
-  // Show table
   $('empty-state').style.display  = 'none';
   $('replay-table').style.display = 'table';
 }
@@ -816,7 +799,7 @@ function tick() {
     return;
   }
   currentTick++;
-  renderTick(currentTick);
+  renderTick(currentTick);  // ✅ synchronous — instant
   const delay = parseInt($('sel-speed').value) || 1500;
   playTimer = setTimeout(tick, delay);
 }
