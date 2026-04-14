@@ -1120,7 +1120,7 @@ from datetime import date, timedelta
 
 from django.shortcuts import render
 from django.http import JsonResponse
-from .credentials1 import access_token
+from .credentials import access_token
 from .models import InstrumentStore, OptionChain, LiveSRData  # अपने app का नाम use करें
 
 # ─────────────────────────────────────────────
