@@ -49,6 +49,7 @@ class Command(BaseCommand):
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
     is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(15, 30)
+    is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(14, 45)
 
     def handle(self, *args, **options):
         logger.info('🚀 Starting High-Speed Async Engine...') 
@@ -148,7 +149,7 @@ class Command(BaseCommand):
             # अगर आज सफाई नहीं हुई है, तो इसे चलाएं
             if cleanup_done_today != current_date:
                 try:
-                    print(f"🌅 Morning Maintenance starting... Deleting 1 days old data.")
+                    print(f"🌅 Morning Maintenance starting... Deleting 5 days old data.")
                     
                     # 3 दिन पुराना कटऑफ टाइम (timedelta में days=1 सेट किया है)
                     cutoff_time = current_now - timedelta(days=1)
@@ -233,7 +234,20 @@ class Command(BaseCommand):
                         
                         # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
                         await save_live_sr_async(df, fixes_sym)
-                        await sync_to_async(run_live_paper_trading)(df=df, symbol=fixes_sym, target=50.0, sl=50.0) # लाइव पेपर ट्रेडिंग भी ट्रिगर करें
+                        # await sync_to_async(run_live_paper_trading)(df=df, symbol=fixes_sym) # लाइव पेपर ट्रेडिंग भी ट्रिगर करें
+                        # bot को चलाने के लिए कंट्रोल चेक करें
+                        if self.is_trad_hours():
+                            ctrl, _ = await get_control_async(name="bot_loop")
+                            if ctrl.is_active:
+                                await sync_to_async(run_live_paper_trading)(df=df, symbol=fixes_sym) 
+                            else:
+                                # बॉट रुका हुआ है, लेकिन डेटाबेस में स्पॉट प्राइस और लेवल्स जा रहे हैं!
+                                print("🤖 Bot Loop is Paused. Data will be saved but no trades will be executed.")
+                                pass
+                        else:
+                            print("⏸️ Bot Loop Outside Trading Hours. No trades will be executed, but data will be saved.")
+                    else:
+                        print(f"⚠️ [NIFTY] No data returned for expiry {expiry}.")
                 except Exception as e:
                     logger.error(f"NIFTY Loop Error: {e}")
             else:
