@@ -18,9 +18,21 @@
 <table>
     <thead>
         <tr>
-            <th id="ce-header" colspan="{% if is_search_dashboard %}7{% else %}8{% endif %}" style="background:#003d14;">CALLS (CE)</th>
+            <th id="ce-header" colspan="{% if is_search_dashboard %}7{% else %}8{% endif %}" style="background:#003d14;">
+                <span class="label sr-label-res">Resistance (CE) ↗</span><br>
+            <span id="header-res" class="value" style="color: var(--accent-green); font-size: 14px;">
+                {{ sr_data.resistance_strike|floatformat:0|default:"-" }} 
+                <span style="font-size: 12px; opacity: 0.9; font-weight: normal;">[{{ sr_data.resistance_status|default:"Waiting..." }}]</span>
+            </span>
+            </th>
             <th class="col-strike" style="background:#000033;">STRIKE</th>
-            <th id="pe-header" colspan="{% if is_search_dashboard %}7{% else %}8{% endif %}" style="background:#c90303;">PUTS (PE)</th>
+            <th id="pe-header" colspan="{% if is_search_dashboard %}7{% else %}8{% endif %}" style="background:#5c0101;">
+                <span class="label sr-label-sup">Support (PE) ↗</span><br>
+            <span id="header-sup" class="value" style="color: var(--accent-red); font-size: 14px;">
+                {{ sr_data.supprt_strike|floatformat:0|default:"-" }} 
+                <span style="font-size: 12px; opacity: 0.9; font-weight: normal;">[{{ sr_data.supprt_status|default:"Waiting..." }}]</span>
+            </span>
+            </th>
         </tr>
         <tr>
             <th class="col-iv">IV(Δ)</th>
