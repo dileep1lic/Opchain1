@@ -3,138 +3,501 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>My Live Paper Trades</title>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<title>Paper Trade — R/S Live Monitor</title>
 <style>
-  :root {
-    --bg: #060a0f; --surface: #0d1520; --border: #1a2d45;
-    --accent: #00d4ff; --green: #00ff88; --red: #ff3d5a;
-    --orange: #ff8c00; --muted: #4a6480; --text: #c8dff0;
-    --mono: 'Share Tech Mono', monospace; --sans: 'Exo 2', sans-serif;
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 16px; }
+
+  /* ✅ Bug 1 Fix: header wrapper sahi kiya */
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 12px 20px; background: #1a1d27; border-radius: 12px; border: 1px solid #2d3142; flex-wrap: wrap; gap: 10px; }
+  .header h1 { font-size: 17px; font-weight: 600; color: #fff; }
+  .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  select, button { background: #252836; color: #e2e8f0; border: 1px solid #3d4262; border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; transition: all 0.2s; }
+  button:hover { opacity: 0.8; }
+  .live-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: pulse 1.5s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .trigger-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+
+  .tcard { background: #1a1d27; border-radius: 14px; border: 1px solid #2d3142; overflow: hidden; display: flex; flex-direction: column; }
+
+  .tcard-header { padding: 12px 16px; border-bottom: 1px solid #2d3142; display: flex; justify-content: space-between; align-items: center; }
+  .tcard-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+  .r .tcard-label { color: #f87171; }
+  .s .tcard-label { color: #4ade80; }
+  .tcard-action { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+  .r .tcard-action { background: #3f1f1f; color: #f87171; }
+  .s .tcard-action { background: #1a3a25; color: #4ade80; }
+
+  .strike-row { padding: 12px 16px; border-bottom: 1px solid #2d3142; display: flex; justify-content: space-between; align-items: flex-start; }
+  .field-lbl { font-size: 10px; color: #64748b; margin-bottom: 3px; letter-spacing: .5px; }
+  .strike-val { font-size: 22px; font-weight: 700; color: #f8fafc; }
+  .strike-sub { font-size: 10px; color: #475569; margin-top: 2px; }
+  .status-pill { font-size: 10px; padding: 4px 8px; background: #252836; border-radius: 6px; color: #94a3b8; max-width: 140px; text-align: right; line-height: 1.5; }
+
+  .reversal-box { padding: 14px 16px; background: #141720; border-bottom: 1px solid #2d3142; }
+  .reversal-tag { font-size: 10px; font-weight: 600; letter-spacing: .8px; margin-bottom: 6px; padding: 2px 8px; border-radius: 4px; display: inline-block; }
+  .r .reversal-tag { background: #3f1f1f; color: #f87171; }
+  .s .reversal-tag { background: #1a3a25; color: #4ade80; }
+  .reversal-val { font-size: 32px; font-weight: 700; line-height: 1; margin-bottom: 5px; }
+  .r .reversal-val { color: #f87171; }
+  .s .reversal-val { color: #4ade80; }
+  .reversal-hint { font-size: 12px; color: #64748b; }
+  .reversal-hint strong { color: #94a3b8; }
+
+  .tpsl-row { display: flex; border-bottom: 1px solid #2d3142; }
+  .tpsl-cell { flex: 1; padding: 10px 16px; }
+  .tpsl-cell:first-child { border-right: 1px solid #2d3142; }
+  .tp-val { font-size: 15px; font-weight: 600; color: #4ade80; }
+  .sl-val { font-size: 15px; font-weight: 600; color: #f87171; }
+
+  .dist-row { padding: 10px 16px; flex-grow: 1; }
+  .dist-bar { height: 5px; background: #252836; border-radius: 3px; margin: 5px 0 4px; overflow: hidden; }
+  .dist-fill-r { height: 100%; background: #f87171; border-radius: 3px; transition: width .5s; }
+  .dist-fill-s { height: 100%; background: #4ade80; border-radius: 3px; transition: width .5s; }
+  .dist-nums { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; }
+  .dist-pts { font-size: 12px; font-weight: 600; }
+  .r .dist-pts { color: #f87171; }
+  .s .dist-pts { color: #4ade80; }
+
+  .skip-box { padding: 10px 16px; border-top: 1px solid #2d3142; background: rgba(255,255,255,0.02); }
+  .skip-btn { width: 100%; background: rgba(239, 68, 68, 0.1); color: #fca5a5; border: 1px dashed rgba(239, 68, 68, 0.4); padding: 8px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+  .skip-btn:hover { background: #ef4444; color: #fff; border-style: solid; }
+
+  .spot-bar { background: #1a1d27; border-radius: 12px; padding: 14px 20px; margin-bottom: 16px; border: 1px solid #2d3142; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .spot-lbl { font-size: 10px; color: #64748b; margin-bottom: 3px; letter-spacing: .5px; }
+  .spot-val { font-size: 30px; font-weight: 700; color: #f8fafc; }
+  .spot-near { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: #2d2b1a; color: #facc15; margin-left: 8px; animation: pulse 1s infinite; }
+  .progress-wrap { flex: 1; min-width: 180px; }
+  .progress-track { 
+    height: 8px; 
+    background: #141720; 
+    border: 1px solid #2d3142; 
+    border-radius: 10px; 
+    margin: 12px 0; 
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: var(--sans); padding: 30px; }
-  
-  .container { max-width: 1000px; margin: 0 auto; }
-  .header { display: flex; align-items: center; gap: 15px; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 25px; }
-  .header h1 { font-weight: 900; font-size: 24px; color: #fff; }
-  .header p { color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .progress-fill { 
+    height: 100%; 
+    width: 100%; /* बार हमेशा पूरा भरा रहेगा */
+    border-radius: 10px; 
+    transition: background 0.3s ease-out; 
+  }
+  .progress-labels { display: flex; justify-content: space-between; font-size: 11px; }
+  .data-time { font-size: 11px; color: #475569; margin-top: 3px; }
 
-  /* Stats Bar */
-  .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 15px; text-align: center; }
-  .stat-card .s-val { font-family: var(--mono); font-size: 24px; font-weight: bold; margin-bottom: 5px; }
-  .stat-card .s-lbl { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
-  .val-green { color: var(--green); } .val-red { color: var(--red); } .val-blue { color: var(--accent); }
+  .trades-section { background: #1a1d27; border-radius: 14px; border: 1px solid #2d3142; overflow: hidden; }
+  .trades-hdr { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #2d3142; flex-wrap: wrap; gap: 8px; }
+  .trades-hdr h2 { font-size: 14px; font-weight: 600; }
+  .pnl-badge { font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 8px; }
+  .pnl-pos { background: #1a3a25; color: #4ade80; }
+  .pnl-neg { background: #3f1f1f; color: #f87171; }
+  .pnl-zero { background: #252836; color: #94a3b8; }
 
-  /* Trade Cards */
-  .trade-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 15px; overflow: hidden; }
-  .card-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
-  .trade-type { font-family: var(--mono); font-size: 14px; font-weight: bold; padding: 4px 10px; border-radius: 4px; }
-  .type-put { background: rgba(255,140,0,0.15); color: var(--orange); border: 1px solid rgba(255,140,0,0.3); }
-  .type-call { background: rgba(0,191,255,0.15); color: #00bfff; border: 1px solid rgba(0,191,255,0.3); }
-  
-  .status-badge { font-family: var(--mono); font-size: 12px; font-weight: bold; padding: 4px 10px; border-radius: 4px; }
-  .status-open { background: rgba(255,215,0,0.1); color: #ffd700; border: 1px solid rgba(255,215,0,0.3); }
-  .status-target { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.3); }
-  .status-sl { background: rgba(255,61,90,0.1); color: var(--red); border: 1px solid rgba(255,61,90,0.3); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 700px; }
+  th { padding: 8px 14px; color: #64748b; font-weight: 500; text-align: left; background: #141720; font-size: 10px; letter-spacing: .5px; white-space: nowrap; }
+  td { padding: 9px 14px; border-top: 1px solid #1e2235; vertical-align: middle; }
+  tr:hover td { background: #1e2235; }
 
-  .card-body { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 15px 20px; }
-  .detail-box { display: flex; flex-direction: column; gap: 5px; }
-  .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; font-family: var(--mono); }
-  .val { font-size: 15px; font-family: var(--mono); color: #fff; }
+  .badge { padding: 2px 7px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+  .bc { background: #1a3a25; color: #4ade80; }
+  .bp { background: #3f1f1f; color: #f87171; }
+  .bo { background: #2d2b1a; color: #facc15; }
+  .bt { background: #1a3a25; color: #4ade80; }
+  .bs { background: #3f1f1f; color: #f87171; }
+  .b-skip { background: #334155; color: #cbd5e1; border: 1px dashed #475569; }
 
-  .empty { text-align: center; padding: 50px; color: var(--muted); font-family: var(--mono); font-size: 16px; border: 1px dashed var(--border); border-radius: 10px; }
+  .pp { color: #4ade80; font-weight: 600; }
+  .pn { color: #f87171; font-weight: 600; }
+  .p-skip { color: #64748b; text-decoration: line-through; }
+  .empty { text-align: center; padding: 36px; color: #3d4262; font-size: 13px; }
+  .tr-strike { font-size: 10px; color: #64748b; }
+  .tr-rev-r { font-size: 13px; font-weight: 600; color: #f87171; }
+  .tr-rev-s { font-size: 13px; font-weight: 600; color: #4ade80; }
+  .tr-arrow { font-size: 10px; color: #475569; }
+  .exit-spot-text { font-size:14px; font-weight:600; color:#f8fafc; }
+  .exit-time-text { font-size:10px; color:#94a3b8; margin-top:3px; }
+
+  /* ✅ Date input style */
+  input[type="date"] { background: #252836; color: #e2e8f0; border: 1px solid #3d4262; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+
+  .btn-journal {
+    background: #252836;
+    color: #e2e8f0;
+    border: 1px solid #3d4262;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 13px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.btn-journal:hover {
+  background: #2d3142;
+  border-color: #475569;
+  opacity: 0.9;
+}
 </style>
 </head>
 <body>
 
-<div class="container">
-  <div class="header">
-    <div style="font-size: 30px;">🤖</div>
-    <div>
-      <h1>Live Auto-Trading Bot</h1>
-      <p>Symbol: {{ symbol }} | Date: {{ today_date }}</p>
+<!-- ✅ Bug 1 Fix: header div wrapper add kiya — title ab dikhega -->
+<div class="header">
+  <h1>📊 Paper Trade — R/S Live Monitor</h1>
+  <div class="header-right">
+    <div class="live-dot" id="liveDot"></div>
+    <span style="font-size:12px;color:#64748b;" id="srvTime">--:--:--</span>
+
+    <a href="{% url 'trade_journal' %}" class="btn-journal">
+      📓 Trade Journal
+    </a>
+
+    <input type="date" id="datePicker" onchange="refresh()" title="तारीख चुनें">
+
+    <!-- ✅ Bug 3 Fix: selected="{{ symbol }}" — dropdown sahi symbol dikhayega -->
+    <select id="symSel" onchange="sym=this.value; refresh()">
+      <option value="NIFTY"       {% if symbol == 'NIFTY' %}selected{% endif %}>NIFTY</option>
+      <option value="BANKNIFTY"   {% if symbol == 'BANKNIFTY' %}selected{% endif %}>BANKNIFTY</option>
+      <option value="FINNIFTY"    {% if symbol == 'FINNIFTY' %}selected{% endif %}>FINNIFTY</option>
+      <option value="MIDCAPNIFTY" {% if symbol == 'MIDCAPNIFTY' %}selected{% endif %}>MIDCAPNIFTY</option>
+      <option value="SENSEX"      {% if symbol == 'SENSEX' %}selected{% endif %}>SENSEX</option>
+    </select>
+
+    <button onclick="refresh()">↻ Refresh</button>
+  </div>
+</div>
+
+
+<div class="trigger-grid">
+
+  <!-- S — SUPPORT card (left) -->
+  <div class="tcard s">
+    <div class="tcard-header">
+      <span class="tcard-label">S — SUPPORT</span>
+      <span class="tcard-action">CALL Buy होगा</span>
+    </div>
+    <div class="strike-row">
+      <div>
+        <div class="field-lbl">STRIKE PRICE</div>
+        <div class="strike-val" id="sStrikeVal">—</div>
+        <!-- ✅ Improvement 1: hardcoded label hata diya -->
+        <div class="strike-sub">OI based effective strike</div>
+      </div>
+      <div class="status-pill" id="sStatus">Status: —</div>
+    </div>
+    <div class="reversal-box">
+      <div class="reversal-tag">TRADE TRIGGER — Reversl_Pe</div>
+      <div class="reversal-val" id="sReversalVal">—</div>
+      <div class="reversal-hint">Spot यहाँ आए → <strong>CALL Buy entry</strong></div>
+    </div>
+    <div class="tpsl-row">
+      <div class="tpsl-cell">
+        <div class="field-lbl">TARGET (+50 pts)</div>
+        <div class="tp-val" id="sTarget">—</div>
+      </div>
+      <div class="tpsl-cell">
+        <div class="field-lbl">STOP LOSS (−50 pts)</div>
+        <div class="sl-val" id="sSL">—</div>
+      </div>
+    </div>
+    <div class="dist-row">
+      <div class="field-lbl">SPOT से दूरी</div>
+      <div class="dist-pts s" id="sDist">— pts</div>
+      <div class="dist-bar"><div class="dist-fill-s" id="sDistBar" style="width:0%"></div></div>
+      <div class="dist-nums">
+        <span id="sDistTrig">Trigger —</span>
+        <span id="sDistSpot">Spot —</span>
+      </div>
+    </div>
+    <div class="skip-box">
+      <button class="skip-btn" id="skipSBtn" style="display:none;">🚫 यह ट्रेड नहीं लेना (Skip S)</button>
     </div>
   </div>
 
-  <div class="stats-bar">
-    <div class="stat-card">
-      <div class="s-val val-blue">{{ total_trades }}</div>
-      <div class="s-lbl">Total Trades</div>
+  <!-- R — RESISTANCE card (right) -->
+  <div class="tcard r">
+    <div class="tcard-header">
+      <span class="tcard-label">R — RESISTANCE</span>
+      <span class="tcard-action">PUT Buy होगा</span>
     </div>
-    <div class="stat-card">
-      <div class="s-val val-green">{{ wins }}</div>
-      <div class="s-lbl">Targets Hit</div>
-    </div>
-    <div class="stat-card">
-      <div class="s-val val-red">{{ losses }}</div>
-      <div class="s-lbl">SL Hit</div>
-    </div>
-    <div class="stat-card">
-      <div class="s-val {% if net_pnl >= 0 %}val-green{% else %}val-red{% endif %}">
-        {% if net_pnl > 0 %}+{% endif %}{{ net_pnl }}
+    <div class="strike-row">
+      <div>
+        <div class="field-lbl">STRIKE PRICE</div>
+        <div class="strike-val" id="rStrikeVal">—</div>
+        <!-- ✅ Improvement 1: hardcoded label hata diya -->
+        <div class="strike-sub">OI based effective strike</div>
       </div>
-      <div class="s-lbl">Net P&L (Pts)</div>
+      <div class="status-pill" id="rStatus">Status: —</div>
+    </div>
+    <div class="reversal-box">
+      <div class="reversal-tag">TRADE TRIGGER — Reversl_Ce</div>
+      <div class="reversal-val" id="rReversalVal">—</div>
+      <div class="reversal-hint">Spot यहाँ आए → <strong>PUT Buy entry</strong></div>
+    </div>
+    <div class="tpsl-row">
+      <div class="tpsl-cell">
+        <div class="field-lbl">TARGET (−50 pts)</div>
+        <div class="tp-val" id="rTarget">—</div>
+      </div>
+      <div class="tpsl-cell">
+        <div class="field-lbl">STOP LOSS (+50 pts)</div>
+        <div class="sl-val" id="rSL">—</div>
+      </div>
+    </div>
+    <div class="dist-row">
+      <div class="field-lbl">SPOT से दूरी</div>
+      <div class="dist-pts r" id="rDist">— pts</div>
+      <div class="dist-bar"><div class="dist-fill-r" id="rDistBar" style="width:0%"></div></div>
+      <div class="dist-nums">
+        <span id="rDistSpot">Spot —</span>
+        <span id="rDistTrig">Trigger —</span>
+      </div>
+    </div>
+    <div class="skip-box">
+      <button class="skip-btn" id="skipRBtn" style="display:none;">🚫 यह ट्रेड नहीं लेना (Skip R)</button>
     </div>
   </div>
-
-  <h2>Trade Log</h2><br>
-
-  {% if trades %}
-    {% for trade in trades %}
-      <div class="trade-card" style="border-left: 4px solid {% if trade.trade_type == 'PUT' %}var(--orange){% else %}#00bfff{% endif %};">
-        <div class="card-header">
-          <div style="display: flex; gap: 15px; align-items: center;">
-            <span class="trade-type {% if trade.trade_type == 'PUT' %}type-put{% else %}type-call{% endif %}">
-              {{ trade.trade_type }} BUY
-            </span>
-            <span style="color: var(--muted); font-family: var(--mono); font-size: 13px;">
-              Trigger: {{ trade.trigger_level }} ({{ trade.trigger_price|floatformat:2 }})
-            </span>
-          </div>
-          <span class="status-badge 
-            {% if trade.result == 'OPEN' %}status-open
-            {% elif trade.result == 'TARGET' %}status-target
-            {% else %}status-sl{% endif %}">
-            {{ trade.result }}
-          </span>
-        </div>
-        
-        <div class="card-body">
-          <div class="detail-box">
-            <span class="lbl">Entry Time</span>
-            <span class="val">{{ trade.entry_time|date:"H:i:s" }}</span>
-          </div>
-          <div class="detail-box">
-            <span class="lbl">Entry Spot</span>
-            <span class="val">{{ trade.entry_spot|floatformat:2 }}</span>
-          </div>
-          <div class="detail-box">
-            <span class="lbl">Exit Time</span>
-            <span class="val">{% if trade.exit_time %}{{ trade.exit_time|date:"H:i:s" }}{% else %}—{% endif %}</span>
-          </div>
-          <div class="detail-box">
-            <span class="lbl">Exit Spot / P&L</span>
-            <span class="val">
-              {% if trade.exit_spot %}{{ trade.exit_spot|floatformat:2 }}{% else %}—{% endif %}
-              &nbsp;|&nbsp;
-              <strong class="{% if trade.pnl > 0 %}val-green{% elif trade.pnl < 0 %}val-red{% else %}val-blue{% endif %}">
-                {% if trade.pnl > 0 %}+{% endif %}{{ trade.pnl|floatformat:2 }}
-              </strong>
-            </span>
-          </div>
-        </div>
-      </div>
-    {% endfor %}
-  {% else %}
-    <div class="empty">
-      <div style="font-size: 40px; margin-bottom: 10px;">⏳</div>
-      आज अभी तक कोई ट्रेड ट्रिगर नहीं हुआ है।<br>बॉट मार्केट पर नज़र रख रहा है...
-    </div>
-  {% endif %}
 
 </div>
 
+<!-- Error Box -->
+<div id="errBox" style="display:none;margin-bottom:12px;padding:10px 16px;background:#3f1f1f;border:1px solid #7f1f1f;border-radius:10px;font-size:12px;color:#f87171;line-height:1.6"></div>
+
+<!-- Spot Bar -->
+<div class="spot-bar">
+  <div>
+    <div class="spot-lbl">CURRENT SPOT</div>
+    <div>
+      <span class="spot-val" id="spotVal">—</span>
+      <span class="spot-near" id="spotNear" style="display:none">!</span>
+    </div>
+    <div class="data-time" id="dataTime">Data: —</div>
+  </div>
+  <div class="progress-wrap">
+    <div style="font-size:10px;color:#64748b;margin-bottom:2px">S Reversal ← Spot → R Reversal</div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progFill"></div>
+    </div>
+    <div class="progress-labels">
+      <span id="progS" style="color:#4ade80">S —</span>
+      <span id="progR" style="color:#f87171">R —</span>
+    </div>
+  </div>
+</div>
+
+<!-- Trades Table -->
+<div class="trades-section">
+  <div class="trades-hdr">
+    <h2>📋 आज के Trades</h2>
+    <div class="pnl-badge pnl-zero" id="totalPnl">Total PnL: 0 pts</div>
+  </div>
+  <div class="table-wrap">
+    <div id="tradesWrap">
+      <div class="empty">R या S touch होने पर trade यहाँ दिखेगा</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ✅ Bug 2 Fix: sym Django context {{ symbol }} से आएगा, hardcoded 'NIFTY' नहीं
+let sym = '{{ symbol }}';
+
+// ✅ Bug 3 Fix: dropdown और date picker page load पर initialize
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('symSel').value = sym;
+
+  // Date picker: URL में date हो तो वो दिखाओ, वरना आज की तारीख
+  const urlDate = new URLSearchParams(window.location.search).get('date');
+  const dp = document.getElementById('datePicker');
+  if (urlDate) {
+    dp.value = urlDate;
+  } else {
+    dp.value = '{{ selected_date }}'; // Django से आई तारीख
+  }
+});
+
+function fmt(v)  { return (v != null && isFinite(v)) ? parseFloat(v).toFixed(2) : '—'; }
+function fmtI(v) { return (v != null && isFinite(v)) ? Math.round(v) : '—'; }
+
+async function skipTrade(tradeType, price) {
+  if (!price || !isFinite(price)) return;
+  if (!confirm(`क्या आप वाकई ${tradeType} लेवल (${price}) का ट्रेड इग्नोर/स्किप करना चाहते हैं?`)) return;
+  try {
+    const resp = await fetch('/api/skip-trade/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+      body: JSON.stringify({ symbol: sym, type: tradeType, price: price })
+    });
+    if (resp.ok) refresh();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function updateUI(d) {
+  const t    = d.triggers || {};
+  const spot = t.spot;
+  document.getElementById('srvTime').textContent = d.server_time || '--';
+
+  // ── R Card ──────────────────────────────────────────────
+  document.getElementById('rStrikeVal').textContent   = fmtI(t.r_strike);
+  document.getElementById('rStatus').textContent      = t.r_status || '—';
+  document.getElementById('rReversalVal').textContent = fmt(t.r_trigger);
+  document.getElementById('rTarget').textContent      = (t.r_trigger && isFinite(t.r_trigger)) ? fmt(t.r_trigger - 50) : '—';
+  document.getElementById('rSL').textContent          = (t.r_trigger && isFinite(t.r_trigger)) ? fmt(t.r_trigger + 50) : '—';
+
+  const btnR = document.getElementById('skipRBtn');
+  if (t.r_trigger && isFinite(t.r_trigger)) {
+    btnR.style.display = 'block';
+    btnR.onclick = () => skipTrade('R', t.r_trigger);
+  } else { btnR.style.display = 'none'; }
+
+  if (spot && t.r_trigger && isFinite(t.r_trigger)) {
+    const diff = spot - t.r_trigger;
+    document.getElementById('rDist').textContent     = (diff > 0 ? '+' : '') + diff.toFixed(1) + ' pts';
+    document.getElementById('rDistSpot').textContent = 'Spot ' + fmt(spot);
+    document.getElementById('rDistTrig').textContent = 'Trigger ' + fmt(t.r_trigger);
+    document.getElementById('rDistBar').style.width  = Math.min(100, (Math.abs(diff) / 400) * 100).toFixed(0) + '%';
+  }
+
+  // ── S Card ──────────────────────────────────────────────
+  document.getElementById('sStrikeVal').textContent   = fmtI(t.s_strike);
+  document.getElementById('sStatus').textContent      = t.s_status || '—';
+  document.getElementById('sReversalVal').textContent = fmt(t.s_trigger);
+  document.getElementById('sTarget').textContent      = (t.s_trigger && isFinite(t.s_trigger)) ? fmt(t.s_trigger + 50) : '—';
+  document.getElementById('sSL').textContent          = (t.s_trigger && isFinite(t.s_trigger)) ? fmt(t.s_trigger - 50) : '—';
+
+  const btnS = document.getElementById('skipSBtn');
+  if (t.s_trigger && isFinite(t.s_trigger)) {
+    btnS.style.display = 'block';
+    btnS.onclick = () => skipTrade('S', t.s_trigger);
+  } else { btnS.style.display = 'none'; }
+
+  if (spot && t.s_trigger && isFinite(t.s_trigger)) {
+    const diff = spot - t.s_trigger;
+    document.getElementById('sDist').textContent     = (diff > 0 ? '+' : '') + diff.toFixed(1) + ' pts';
+    document.getElementById('sDistTrig').textContent = 'Trigger ' + fmt(t.s_trigger);
+    document.getElementById('sDistSpot').textContent = 'Spot ' + fmt(spot);
+    document.getElementById('sDistBar').style.width  = Math.min(100, (Math.abs(diff) / 400) * 100).toFixed(0) + '%';
+  }
+
+  // ── Spot Bar ────────────────────────────────────────────
+  if (spot) {
+    document.getElementById('spotVal').textContent  = fmt(spot);
+    document.getElementById('dataTime').textContent = 'Data: ' + (t.data_time ? t.data_time.slice(11, 19) : '—');
+
+    const nearEl = document.getElementById('spotNear');
+    const nr = t.r_trigger && isFinite(t.r_trigger) && Math.abs(spot - t.r_trigger) <= 25;
+    const ns = t.s_trigger && isFinite(t.s_trigger) && Math.abs(spot - t.s_trigger) <= 25;
+    if (nr || ns) { nearEl.style.display = 'inline'; nearEl.textContent = nr ? '⚡ R के पास!' : '⚡ S के पास!'; }
+    else { nearEl.style.display = 'none'; }
+
+    if (t.s_trigger && t.r_trigger && isFinite(t.s_trigger) && isFinite(t.r_trigger) && t.r_trigger !== t.s_trigger) {
+      const rawPct = ((spot - t.s_trigger) / (t.r_trigger - t.s_trigger)) * 100;
+      const pct = Math.max(1, Math.min(99, rawPct)); 
+
+      const fillEl = document.getElementById('progFill');
+      fillEl.style.width = '100%'; 
+      
+      // 🌟 ट्रेडिंग लॉजिक: S से Spot तक Red (Downside), और Spot से R तक Green (Upside Potential)
+      fillEl.style.background = `linear-gradient(90deg, 
+        #7f1d1d 0%, 
+        #ef4444 ${pct - 0.8}%, 
+        #ffffff ${pct}%, 
+        #22c55e ${pct + 0.8}%, 
+        #064e3b 100%
+      )`;
+      
+      // Spot (सफ़ेद लाइन) के पीछे एक हल्की चमक
+      fillEl.style.boxShadow = `0 0 10px rgba(255, 255, 255, 0.25)`; 
+    }
+    document.getElementById('progS').textContent = 'S ' + fmt(t.s_trigger);
+    document.getElementById('progR').textContent = 'R ' + fmt(t.r_trigger);
+  }
+
+  // ── Trades Table ─────────────────────────────────────────
+  const trades = d.trades || [];
+  const total  = d.total_pnl || 0;
+  const pel = document.getElementById('totalPnl');
+  pel.textContent = 'Total PnL: ' + (total >= 0 ? '+' : '') + total + ' pts';
+  pel.className   = 'pnl-badge ' + (total > 0 ? 'pnl-pos' : total < 0 ? 'pnl-neg' : 'pnl-zero');
+
+  const wrap = document.getElementById('tradesWrap');
+  if (!trades.length) {
+    wrap.innerHTML = '<div class="empty">R या S touch होने पर trade यहाँ दिखेगा</div>';
+    return;
+  }
+
+  let html = '<table><thead><tr>' +
+    '<th>Type</th><th>Entry Time</th>' +
+    '<th>Strike</th><th>Reversal (Entry यहाँ)</th>' +
+    '<th>Entry Spot</th><th>Target</th><th>SL</th>' +
+    '<th>Exit Spot & Time</th><th>Result</th><th>PnL</th>' +
+    '</tr></thead><tbody>';
+
+  for (const tr of trades) {
+    const isC    = tr.type === 'CALL';
+    const btype  = isC ? 'bc' : 'bp';
+    const isSkip = tr.result === 'SKIPPED';
+    const bres   = tr.result === 'OPEN' ? 'bo' : tr.result === 'TARGET' ? 'bt' : isSkip ? 'b-skip' : 'bs';
+    const pc     = isSkip ? 'p-skip' : (tr.pnl > 0 ? 'pp' : (tr.pnl < 0 ? 'pn' : ''));
+    const rvc    = isC ? 'tr-rev-s' : 'tr-rev-r';
+    const strikeKey = tr.entry_strike != null ? tr.entry_strike : (tr.trigger_level === 'R' ? t.r_strike : t.s_strike);
+
+    const exitSpotText = tr.exit_spot != null ? fmt(tr.exit_spot) : '—';
+    const exitTimeText = tr.exit_time !== '—' ? tr.exit_time : '';
+
+    html += '<tr>' +
+      '<td><span class="badge ' + btype + '">' + tr.type + '</span></td>' +
+      '<td>' + tr.entry_time + '</td>' +
+      '<td><div class="tr-strike">' + tr.trigger_level + ' Strike</div>' +
+           '<div style="font-size:14px;font-weight:700;color:#f8fafc">' + fmtI(strikeKey) + '</div></td>' +
+      '<td><div class="tr-strike">Reversl_' + (isC ? 'Pe' : 'Ce') + '</div>' +
+           '<div class="' + rvc + '">' + fmt(tr.trigger_price) + (isSkip ? '' : ' <span class="tr-arrow">← entry</span>') + '</div></td>' +
+      '<td>' + fmt(tr.entry_spot) + '</td>' +
+      '<td style="color:#4ade80">' + (isSkip ? '—' : fmt(tr.target)) + '</td>' +
+      '<td style="color:#f87171">' + (isSkip ? '—' : fmt(tr.sl)) + '</td>' +
+      '<td><div class="exit-spot-text">' + exitSpotText + '</div>' +
+          '<div class="exit-time-text">' + exitTimeText + '</div></td>' +
+      '<td><span class="badge ' + bres + '">' + tr.result + '</span></td>' +
+      '<td class="' + pc + '">' + (tr.result === 'OPEN' ? '~' : '') + (tr.pnl >= 0 && !isSkip ? '+' : '') + tr.pnl + ' pts</td>' +
+      '</tr>';
+  }
+
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+// ✅ Bug 4 Fix: API call में date parameter भी भेजो
+async function refresh() {
+  const eb = document.getElementById('errBox');
+  try {
+    const dateVal = document.getElementById('datePicker').value;
+    const url = `/api/dashboard-data/?symbol=${sym}` + (dateVal ? `&date=${dateVal}` : '');
+
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    const dash = await resp.json();
+    if (dash.triggers && dash.triggers.error) {
+      eb.style.display = 'block';
+      eb.innerHTML = '<strong>Status:</strong> ' + dash.triggers.error;
+    } else { eb.style.display = 'none'; }
+
+    updateUI(dash);
+    document.getElementById('liveDot').style.background = '#22c55e';
+  } catch(e) {
+    document.getElementById('liveDot').style.background = '#ef4444';
+    eb.style.display = 'block';
+    eb.innerHTML = '<strong>Connection Error:</strong> ' + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
 </body>
 </html>
