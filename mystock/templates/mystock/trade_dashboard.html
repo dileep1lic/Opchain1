@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paper Trade Journal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --surface: #13161e;
+    --card: #1a1d27;
+    --border: #252836;
+    --text: #e8eaf0;
+    --muted: #6b7090;
+    --green: #00d4a0;
+    --green-bg: rgba(0,212,160,0.08);
+    --red: #ff5e72;
+    --red-bg: rgba(255,94,114,0.08);
+    --amber: #f5a623;
+    --amber-bg: rgba(245,166,35,0.08);
+    --blue: #4a9eff;
+    --blue-bg: rgba(74,158,255,0.08);
+    --accent: #7c6fff;
+    --slate: #334155;
+    --slate-bg: rgba(51,65,85,0.3);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; }
+  body { max-width: 1280px; margin: 0 auto; padding: 0 24px 60px; }
+
+  header {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 20px;
+    padding: 28px 0; border-bottom: 1px solid var(--border); margin-bottom: 28px;
+  }
+  
+  /* Back Button CSS */
+  .btn-back {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 6px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+  }
+  .btn-back:hover {
+    color: var(--text);
+    border-color: var(--accent);
+    background: rgba(124, 111, 255, 0.1);
+  }
+
+  .logo h1 { font-size: 20px; font-weight: 700; }
+  .logo span { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+  .filter-form {
+    display: flex; align-items: center; gap: 12px; background: var(--surface);
+    padding: 10px 16px; border-radius: 12px; border: 1px solid var(--border); flex-wrap: wrap;
+    width: 100%;
+  }
+  .filter-input {
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 12px; border-radius: 8px; font-family: 'JetBrains Mono'; outline: none;
+  }
+  .filter-input:focus { border-color: var(--accent); }
+  .filter-label { font-size: 12px; color: var(--muted); font-weight: bold; margin-right: 4px; }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); }
+  .btn-submit { background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; margin-left: auto; }
+  .btn-submit:hover { opacity: 0.85; }
+
+  /* Stats Grid */
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 30px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; animation: fadeUp 0.4s ease both; }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 600; }
+
+  /* Table */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 13px; min-width: 800px; }
+  thead { background: var(--card); color: var(--muted); text-transform: uppercase; font-size: 10px; }
+  th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody tr { animation: fadeUp 0.3s ease both; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* Badges */
+  .badge { padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+  .badge-call   { background: var(--blue-bg);  color: var(--blue);  }
+  .badge-put    { background: var(--red-bg);   color: var(--red);   }
+  .badge-target { background: var(--green-bg); color: var(--green); }
+  .badge-sl     { background: var(--red-bg);   color: var(--red);   }
+  .badge-open   { background: var(--amber-bg); color: var(--amber); }
+  .badge-skip   { background: var(--slate-bg); color: var(--slate); border: 1px dashed #475569; }
+
+  .trig { padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+  .trig-r { color: var(--red);   background: var(--red-bg);   }
+  .trig-s { color: var(--green); background: var(--green-bg); }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .empty-state { text-align: center; padding: 48px; color: var(--muted); font-size: 14px; }
+  .pnl-cell { text-align: right; font-weight: bold; }
+  .text-muted { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+    <div class="logo">
+      <h1>📋 Paper Trade Journal</h1>
+      <span>कस्टम एनालिटिक्स डैशबोर्ड</span>
+    </div>
+
+    <button onclick="history.back()" class="btn-back">
+      <span>←</span> Back
+    </button>
+  </div>
+
+  <form method="GET" class="filter-form">
+    <div>
+      <label class="filter-label">Symbol:</label>
+      <select name="symbol" class="filter-input">
+        <option value="ALL" {% if selected_symbol == 'ALL' %}selected{% endif %}>सभी (All)</option>
+        {% for sym in unique_symbols %}
+          <option value="{{ sym }}" {% if selected_symbol == sym %}selected{% endif %}>{{ sym }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label class="filter-label">From:</label>
+      <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}" class="filter-input">
+    </div>
+
+    <div>
+      <label class="filter-label">To:</label>
+      <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}" class="filter-input">
+    </div>
+
+    <button type="submit" class="btn-submit">एनालाइज़ करें ↗</button>
+  </form>
+</header>
+
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-label">कुल ट्रेड्स</div>
+    <div class="stat-val">{{ total_trades }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Wins ✅</div>
+    <div class="stat-val" style="color: var(--green);">{{ wins }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Losses ❌</div>
+    <div class="stat-val" style="color: var(--red);">{{ losses }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Win Rate</div>
+    <div class="stat-val" style="color: var(--accent);">{{ win_rate }}%</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Net PnL (pts)</div>
+    <div class="stat-val" style="color: {% if total_pnl >= 0 %}var(--green){% else %}var(--red){% endif %};">
+      {% if total_pnl > 0 %}+{% endif %}{{ total_pnl }}
+    </div>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Symbol</th>
+        <th>Type</th>
+        <th>Entry Time</th>
+        <th>Entry Spot</th>
+        <th>Trig</th>
+        <th>Exit Time</th>
+        <th>Exit Spot</th>
+        <th>Result</th>
+        <th style="text-align:right">PnL (pts)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for trade in trades %}
+      <tr style="animation-delay: {{ forloop.counter }}00ms">
+        <td class="text-muted" style="font-size:11px;">{{ trade.trade_date|date:"d M Y" }}</td>
+        <td><strong>{{ trade.symbol }}</strong></td>
+        <td>
+          <span class="badge {% if trade.trade_type == 'CALL' %}badge-call{% else %}badge-put{% endif %}">
+            {{ trade.trade_type }}
+          </span>
+        </td>
+        <td>{{ trade.entry_time|date:"H:i:s" }}</td>
+        <td>{{ trade.entry_spot|floatformat:2 }}</td>
+        <td>
+          <span class="trig {% if trade.trigger_level == 'R' %}trig-r{% else %}trig-s{% endif %}">
+            {{ trade.trigger_level }}
+          </span>
+        </td>
+        <td>{% if trade.exit_time %}{{ trade.exit_time|date:"H:i:s" }}{% else %}—{% endif %}</td>
+        <td>{% if trade.exit_spot %}{{ trade.exit_spot|floatformat:2 }}{% else %}—{% endif %}</td>
+        <td>
+          <span class="badge
+            {% if trade.result == 'TARGET' %}badge-target
+            {% elif trade.result == 'SL' %}badge-sl
+            {% elif trade.result == 'OPEN' %}badge-open
+            {% elif trade.result == 'SKIPPED' %}badge-skip
+            {% else %}badge-open{% endif %}">
+            {{ trade.result }}
+          </span>
+        </td>
+        <td class="pnl-cell" style="color: {% if trade.pnl > 0 %}var(--green){% elif trade.pnl < 0 %}var(--red){% else %}var(--muted){% endif %};">
+          {% if trade.result == 'SKIPPED' %}
+            <span class="text-muted" style="text-decoration:line-through;">{{ trade.pnl|floatformat:2 }}</span>
+          {% else %}
+            {% if trade.pnl > 0 %}+{% endif %}{{ trade.pnl|floatformat:2 }}
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="10" class="empty-state">इस फ़िल्टर के लिए कोई डेटा नहीं मिला।</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>
