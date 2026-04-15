@@ -463,7 +463,7 @@ async function placeManualOrder() {
     }
 
     try {
-        const resp = await fetch('/paper/api/add-manual/', {
+        const resp = await fetch('/api/add-manual/', {
             method: 'POST',
             headers: { 
                 'X-CSRFToken': CSRF,
