@@ -20,7 +20,7 @@ import json
 from django.http import JsonResponse
 from django.db.models.functions import Abs
 from asgiref.sync import async_to_sync
-
+from .trade_logic import get_master_levels
 
 
 
@@ -123,9 +123,13 @@ def admin_status_api(request):
 
     today = timezone.now().date()
     stats_qs = PaperTrade.objects.filter(trade_date=today).exclude(result='SKIPPED').aggregate(
-        total=Count('id'), wins=Count('id', filter=Q(result='TARGET')),
-        losses=Count('id', filter=Q(result='SL')), pnl=Sum('pnl')
-    )
+            total=Count('id'), 
+            # TARGET हिट हो या MANUAL_EXIT में प्रॉफिट हो -> Win
+            wins=Count('id', filter=Q(result='TARGET') | (Q(result='MANUAL_EXIT', pnl__gt=0))),
+            # SL हिट हो या MANUAL_EXIT में लॉस हो -> Loss
+            losses=Count('id', filter=Q(result='SL') | (Q(result='MANUAL_EXIT', pnl__lt=0))),
+            pnl=Sum('pnl')
+        )
     latest_oc = OptionChain.objects.filter(Symbol='NIFTY', Time__date=today).order_by('-Time').first()
 
     # 👇 नया: डेटाबेस से लाइव सेटिंग्स निकालें
@@ -1366,19 +1370,40 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
 
         step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
 
-        def effective_strike(status_raw, base, is_resistance):
-            status = str(status_raw).upper() if status_raw else ""
-            m = _re.search(r'(?:WTB|WTT)\s+(\d+)', status)
-            target = float(m.group(1)) if m else base
-            if "SHIFTED WTT" in status: return base
-            if "SHIFTED WTB" in status: return base + step if is_resistance else base - step
-            if "WTT" in status or "WTB" in status:
-                return target + step if is_resistance else target - step
-            return base + step if is_resistance else base - step
+        # def effective_strike(status_raw, base, is_resistance):
+        #     status = str(status_raw).upper() if status_raw else ""
+        #     m = _re.search(r'(?:WTB|WTT)\s+(\d+)', status)
+        #     target = float(m.group(1)) if m else base
+        #     # if "SHIFTED WTT" in status: return base 
+        #     # if "SHIFTED WTB" in status: return base + step if is_resistance else base - step
+        #     # if "WTT" in status or "WTB" in status:
+        #     #     return target + step if is_resistance else target - step
+        #     # return base + step if is_resistance else base - step
 
-        eff_res = effective_strike(sr.resistance_status, float(sr.resistance_strike), True)
-        eff_sup = effective_strike(sr.supprt_status,     float(sr.supprt_strike),     False)
+        #     if is_resistance:
+        #         # Resistance (CE) Side
+        #         if "SHIFTED WTT" in status: return base + step
+        #         if "SHIFTED WTB" in status: return base + step
+        #         if "WTT" in status or "WTB" in status: return target + step
+        #         return base + step
+        #     else:
+        #         # Support (PE) Side - आपकी शर्त यहाँ लागू होती है
+        #         # यदि "Shifted WTT" है, तो base (Support Strike) से एक step नीचे की लाइन
+        #         if "SHIFTED WTT" in status: 
+        #             return base - step  # <--- यहाँ बदलाव किया गया है
+                    
+        #         if "SHIFTED WTB" in status: return base - step
+        #         if "WTT" in status or "WTB" in status: return target - step
+        #         return base - step
 
+        
+        # eff_res = effective_strike(sr.resistance_status, float(sr.resistance_strike), True)
+        # eff_sup = effective_strike(sr.supprt_status,     float(sr.supprt_strike),     False)
+
+        master_levels = get_master_levels(symbol, day_start.date())
+        eff_res = master_levels["R"]["strike"]
+        eff_sup = master_levels["S"]["strike"]
+        
         # ✅ Original range logic restore — nearby strikes ke liye
         ce_strikes_list = [eff_res, float(sr.resistance_strike)]
         pe_strikes_list = [eff_sup, float(sr.supprt_strike)]
@@ -2153,7 +2178,7 @@ def _row_to_dict(obj):
 def resistance_live_api(request):
     symbol = request.GET.get("symbol", "NIFTY").upper()
     limit  = min(int(request.GET.get("limit", 50)), 200)
-    today  = today_ist() -timedelta(days=1)
+    today  = today_ist() #-timedelta(days=1)
 
     qs = (LiveSRData.objects
           .filter(Time__date=today, Symbol=symbol)
@@ -2905,7 +2930,7 @@ from django.utils import timezone
 from django.utils.timezone import localtime
 import re
 
-def dashboard_data_api(request):
+def dashboard_data_api1(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
     date_str = request.GET.get('date') 
     
@@ -2917,31 +2942,62 @@ def dashboard_data_api(request):
     day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
     day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
 
-    # 1. 🚀 सबसे पहले Latest Spot Price निकालें (ताकि Live PnL कैलकुलेट हो सके)
+    # 1. Latest Spot Price
     latest_oc = OptionChain.objects.filter(
         Symbol=symbol, Time__gte=day_start, Time__lte=day_end
     ).only('Spot_Price', 'Time').order_by('-Time').first()
     current_spot = latest_oc.Spot_Price if latest_oc else None
 
-    # 2. उस तारीख के ट्रेड्स लाएं
+    # 2. Trades Query
     trades_qs = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date).order_by('-entry_time')
     
     total_pnl = 0.0
     trades_list = []
     
+    # सिंबल के हिसाब से स्टेप (Gap) तय करें
+    step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+
     for tr in trades_qs:
-        # 🚀 LIVE PNL CALCULATION LOGIC 🚀
         current_pnl = float(tr.pnl) if tr.pnl else 0.0
         
-        # अगर ट्रेड OPEN है और हमें करंट स्पॉट पता है, तो लाइव PnL निकालें
         if tr.result == 'OPEN' and current_spot:
             if tr.trade_type == 'PUT':
                 current_pnl = float(tr.entry_spot) - float(current_spot)
             elif tr.trade_type == 'CALL':
                 current_pnl = float(current_spot) - float(tr.entry_spot)
                 
-        # कुल PnL में लाइव प्रॉफिट/लॉस (MTM) भी जोड़ें
         total_pnl += current_pnl
+
+        # 👇 डायनामिक टारगेट और स्टॉपलॉस कैलकुलेशन (UI के लिए)
+        trade_target = 0
+        trade_sl = 0
+        
+        if tr.entry_strike:
+            if tr.trade_type == 'PUT':
+                # PUT के लिए: Target = (Strike - Step) का Reversal_Ce, SL = (Strike + Step) का Reversal_Ce
+                t_strike = tr.entry_strike - step
+                sl_strike = tr.entry_strike + step
+                
+                t_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=t_strike).order_by('-Time').first()
+                sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=sl_strike).order_by('-Time').first()
+                
+                trade_target = float(t_row.Reversl_Ce) if t_row and t_row.Reversl_Ce else (tr.entry_spot - 50)
+                trade_sl = float(sl_row.Reversl_Ce) if sl_row and sl_row.Reversl_Ce else (tr.entry_spot + 50)
+                
+            elif tr.trade_type == 'CALL':
+                # CALL के लिए: Target = (Strike + Step) का Reversal_Pe, SL = (Strike - Step) का Reversal_Pe
+                t_strike = tr.entry_strike + step
+                sl_strike = tr.entry_strike - step
+                
+                t_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=t_strike).order_by('-Time').first()
+                sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=sl_strike).order_by('-Time').first()
+                
+                trade_target = float(t_row.Reversl_Pe) if t_row and t_row.Reversl_Pe else (tr.entry_spot + 50)
+                trade_sl = float(sl_row.Reversl_Pe) if sl_row and sl_row.Reversl_Pe else (tr.entry_spot - 50)
+        else:
+            # अगर एंट्री स्ट्राइक नहीं है (पुराने डेटा के लिए), तो डिफॉल्ट 50 पॉइंट्स
+            trade_target = tr.entry_spot + 50 if tr.trade_type == 'CALL' else tr.entry_spot - 50
+            trade_sl = tr.entry_spot - 50 if tr.trade_type == 'CALL' else tr.entry_spot + 50
 
         trades_list.append({
             'type': tr.trade_type,
@@ -2952,9 +3008,9 @@ def dashboard_data_api(request):
             'exit_time': localtime(tr.exit_time).strftime('%H:%M:%S') if tr.exit_time else '—',
             'exit_spot': round(tr.exit_spot, 2) if tr.exit_spot else None,
             'result': tr.result,
-            'pnl': round(current_pnl, 2), # ✨ यहाँ Live PnL भेजा जा रहा है
-            'target': round(tr.entry_spot + 50, 2) if tr.trade_type == 'CALL' else round(tr.entry_spot - 50, 2),
-            'sl': round(tr.entry_spot - 50, 2) if tr.trade_type == 'CALL' else round(tr.entry_spot + 50, 2),
+            'pnl': round(current_pnl, 2),
+            'target': round(trade_target, 2), # ✨ डायनामिक टारगेट
+            'sl': round(trade_sl, 2),         # ✨ डायनामिक स्टॉपलॉस
             'entry_strike': tr.entry_strike
         })
 
@@ -2980,7 +3036,7 @@ def dashboard_data_api(request):
         m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
         res_target = float(m_res.group(1)) if m_res else res_base
 
-        if "SHIFTED WTT" in res_status: eff_r = res_base
+        if "SHIFTED WTT" in res_status: eff_r = res_base + step
         elif "SHIFTED WTB" in res_status: eff_r = res_base + step
         elif "WTT" in res_status: eff_r = res_target + step
         elif "WTB" in res_status: eff_r = res_target + step
@@ -2993,7 +3049,7 @@ def dashboard_data_api(request):
         m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
         sup_target = float(m_sup.group(1)) if m_sup else sup_base
 
-        if "SHIFTED WTT" in sup_status: eff_s = sup_base
+        if "SHIFTED WTT" in sup_status: eff_s = sup_base - step
         elif "SHIFTED WTB" in sup_status: eff_s = sup_base - step
         elif "WTT" in sup_status: eff_s = sup_target - step
         elif "WTB" in sup_status: eff_s = sup_target - step
@@ -3019,6 +3075,99 @@ def dashboard_data_api(request):
             's_trigger': s_trigger,
             's_strike': s_strike,
             's_status': sr.supprt_status if sr else '—',
+            'data_time': latest_oc.Time.isoformat() if latest_oc else None
+        },
+        'trades': trades_list
+    })
+
+def dashboard_data_api(request):
+    symbol = request.GET.get('symbol', 'NIFTY').upper()
+    date_str = request.GET.get('date') 
+    
+    if date_str:
+        selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
+    else:
+        selected_date = timezone.now().date()
+    
+    day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
+    day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
+
+    # 1. Latest Spot Price
+    latest_oc = OptionChain.objects.filter(
+        Symbol=symbol, Time__gte=day_start, Time__lte=day_end
+    ).only('Spot_Price', 'Time').order_by('-Time').first()
+    current_spot = latest_oc.Spot_Price if latest_oc else None
+
+    # ==========================================
+    # 2. MASTER LEVELS (सब कुछ एक जगह से)
+    # ==========================================
+    master_levels = get_master_levels(symbol, selected_date)
+
+    # 3. Trades Query
+    trades_qs = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date).order_by('-entry_time')
+    
+    total_pnl = 0.0
+    trades_list = []
+
+    for tr in trades_qs:
+        current_pnl = float(tr.pnl) if tr.pnl else 0.0
+        
+        if tr.result == 'OPEN' and current_spot:
+            if tr.trade_type == 'PUT':
+                current_pnl = float(tr.entry_spot) - float(current_spot)
+            elif tr.trade_type == 'CALL':
+                current_pnl = float(current_spot) - float(tr.entry_spot)
+                
+        total_pnl += current_pnl
+
+        # 👇 डायनामिक टारगेट और स्टॉपलॉस अब सीधे मास्टर लेवल से आएंगे (नो एक्स्ट्रा डेटाबेस क्वेरी)
+        trade_side = "R" if tr.trade_type == "PUT" else "S"
+        
+        if master_levels[trade_side]["target"] is not None:
+            trade_target = master_levels[trade_side]["target"]
+        else:
+            trade_target = (tr.entry_spot - 50) if tr.trade_type == 'PUT' else (tr.entry_spot + 50)
+            
+        if master_levels[trade_side]["sl"] is not None:
+            trade_sl = master_levels[trade_side]["sl"]
+        else:
+            trade_sl = (tr.entry_spot + 50) if tr.trade_type == 'PUT' else (tr.entry_spot - 50)
+
+        trades_list.append({
+            'type': tr.trade_type,
+            'entry_time': localtime(tr.entry_time).strftime('%H:%M:%S') if tr.entry_time else '—',
+            'trigger_level': tr.trigger_level,
+            'trigger_price': round(tr.trigger_price, 2) if tr.trigger_price else 0,
+            'entry_spot': round(tr.entry_spot, 2) if tr.entry_spot else 0,
+            'exit_time': localtime(tr.exit_time).strftime('%H:%M:%S') if tr.exit_time else '—',
+            'exit_spot': round(tr.exit_spot, 2) if tr.exit_spot else None,
+            'result': tr.result,
+            'pnl': round(current_pnl, 2),
+            'target': round(trade_target, 2), # ✨ डायनामिक टारगेट
+            'sl': round(trade_sl, 2),         # ✨ डायनामिक स्टॉपलॉस
+            'entry_strike': tr.entry_strike
+        })
+
+    # 4. Bot Status
+    try:
+        ctrl, created = SyncControl.objects.get_or_create(name="bot_loop") 
+        bot_active = ctrl.is_active
+    except Exception as e:
+        bot_active = False
+
+    # 5. JSON Response
+    return JsonResponse({
+        'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
+        'bot_active': bot_active,
+        'total_pnl': round(total_pnl, 2),
+        'triggers': {
+            'spot': current_spot,
+            'r_trigger': master_levels["R"]["entry"],
+            'r_strike': master_levels["R"]["strike"],
+            'r_status': master_levels["R"]["status"] or '—',
+            's_trigger': master_levels["S"]["entry"],
+            's_strike': master_levels["S"]["strike"],
+            's_status': master_levels["S"]["status"] or '—',
             'data_time': latest_oc.Time.isoformat() if latest_oc else None
         },
         'trades': trades_list
@@ -3091,8 +3240,10 @@ def trade_dashboard(request):
     stats = trades.aggregate(
         total_pnl  = Sum('pnl'),
         total      = Count('id'),
-        wins       = Count('id', filter=Q(result='TARGET')),
-        losses     = Count('id', filter=Q(result='SL')),
+        # wins       = Count('id', filter=Q(result='TARGET')),
+        # losses     = Count('id', filter=Q(result='SL')),
+        wins       = Count('id', filter=Q(result='TARGET') | (Q(result='MANUAL_EXIT', pnl__gt=0))),
+        losses     = Count('id', filter=Q(result='SL') | (Q(result='MANUAL_EXIT', pnl__lt=0))),
     )
 
     total_pnl    = round(stats['total_pnl'] or 0, 2)
@@ -3129,7 +3280,7 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 
 # यह API डैशबोर्ड से मैन्युअल ट्रेड (PENDING) जोड़ने के लिए है, ताकि आप चार्ट पर लाइन के हिसाब से तुरंत ट्रेड डाल सकें
-@login_required
+
 @csrf_exempt
 def add_manual_trade_api(request):
     """डैशबोर्ड से मैन्युअल लिमिट ऑर्डर (PENDING) जोड़ने के लिए"""
