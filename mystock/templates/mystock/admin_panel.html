@@ -114,19 +114,7 @@
   .config-input:focus { border-color: var(--green); box-shadow: 0 0 8px rgba(0, 212, 160, 0.2); }
 
   /* ── SINGLE LINE MEGA TOOLBAR ── */
-  /* .mega-toolbar { display: flex; align-items: center; gap: 8px; background: var(--surface); padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; font-size: 11px; white-space: nowrap; overflow-x: auto; } */
-  .mega-toolbar { 
-    display: flex; 
-    align-items: center; 
-    gap: 12px; /* आइटम्स के बीच थोड़ी जगह */
-    flex-wrap: wrap; /* ✅ यह आइटम को अगली लाइन में भेज देगा अगर जगह कम होगी */
-    background: var(--surface); 
-    padding: 10px 14px; 
-    border: 1px solid var(--border); 
-    border-radius: 8px; 
-    margin-bottom: 20px; 
-    font-size: 11px; 
-}
+  .mega-toolbar { display: flex; align-items: center; gap: 8px; background: var(--surface); padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; font-size: 11px; white-space: nowrap; overflow-x: auto; }
   .mega-toolbar::-webkit-scrollbar { height: 0px; } /* Scrollbar छिपाने के लिए */
   .mega-divider { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
   .mega-label { color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px; }
@@ -243,16 +231,6 @@
 </div>
 
 <div class="mega-toolbar">
-
-  <span class="mega-label">📊 Symbol:</span>
-  <select id="symSel" class="mega-input" style="width: 100px;">
-    <option value="NIFTY">NIFTY</option>
-    <option value="BANKNIFTY">BANKNIFTY</option>
-    <option value="FINNIFTY">FINNIFTY</option>
-    <option value="SENSEX">SENSEX</option>
-  </select>
-
-  <div class="mega-divider"></div>
   
   <span class="mega-label">🎯 Manual:</span>
   <select id="man-type" class="mega-input" style="width: 75px; padding: 0 2px;">
@@ -283,13 +261,20 @@
   <div class="mega-divider"></div>
 
   <span class="mega-label">🚫 Skip Trade:</span>
-  <select id="skip-type" class="mega-input" style="width: 55px; padding: 0 2px;">
-    <option value="S">S (Sup)</option>
-    <option value="R">R (Res)</option>
+  <select id="skip-sym" class="mega-input" style="width: 95px; padding: 0 4px;" onchange="fetchTriggers()">
+    <option value="NIFTY">NIFTY</option>
+    <option value="BANKNIFTY">BANKNIFTY</option>
+    <option value="FINNIFTY">FINNIFTY</option>
+    <option value="MIDCAPNIFTY">MIDCAPNIFTY</option>
+    <option value="SENSEX">SENSEX</option>
   </select>
-  <input type="number" id="skip-price" class="mega-input" placeholder="Price" style="width: 70px;">
-  <button class="mega-btn" onclick="executeSkipTrade()" style="background: var(--red-bg); color: var(--red); border-color: var(--red-border);">
-    Skip
+  <button class="mega-btn" id="skipRBtn" onclick="skipTrade('R')"
+    style="background:rgba(255,94,114,0.12); color:#ff5e72; border:1px dashed rgba(255,94,114,0.5);">
+    🚫 Skip R <span id="skipRPrice" style="opacity:0.7;font-weight:400;"></span>
+  </button>
+  <button class="mega-btn" id="skipSBtn" onclick="skipTrade('S')"
+    style="background:rgba(255,94,114,0.12); color:#ff5e72; border:1px dashed rgba(255,94,114,0.5);">
+    🚫 Skip S <span id="skipSPrice" style="opacity:0.7;font-weight:400;"></span>
   </button>
 
   <div style="flex-grow: 1;"></div> 
@@ -615,40 +600,55 @@ async function closeAllPositions() {
         showToast('API Connection Failed', 'err');
     }
 }
-// ट्रेड इग्नोर/स्किप करना
-async function executeSkipTrade() {
-    const type = document.getElementById('skip-type').value;
-    const price = document.getElementById('skip-price').value;
-    const symbol = document.getElementById('symSel')?.value || 'NIFTY'; // Default NIFTY
 
-    if(!price) {
-        showToast('कृपया लेवल का प्राइस डालें!', 'err');
-        return;
-    }
+// ── Skip Trade ───────────────────────────────────────────
+let rTrigger = null, sTrigger = null;
 
-    if(!confirm(`क्या आप वाकई ${symbol} के ${type} लेवल (${price}) का ट्रेड इग्नोर/स्किप करना चाहते हैं?`)) return;
-
-    try {
-        const resp = await fetch('/api/skip-trade/', {
-            method: 'POST',
-            headers: { 
-                'X-CSRFToken': CSRF,
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({ symbol: symbol, type: type, price: price })
-        });
-        
-        if(resp.ok) {
-            showToast(`Skipped ${type} level @ ${price}`, 'ok');
-            addLog(`Trade Skipped -> ${type} Level at ${price}`, 'warn');
-            document.getElementById('skip-price').value = ''; // Input clear करें
-        } else {
-            showToast('Error skipping trade', 'err');
-        }
-    } catch(e) {
-        showToast('API Connection Failed', 'err');
-    }
+async function fetchTriggers() {
+  const sym = document.getElementById('skip-sym').value;
+  try {
+    const resp = await fetch(`/api/dashboard-data/?symbol=${sym}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const t = data.triggers || {};
+    rTrigger = t.r_trigger;
+    sTrigger = t.s_trigger;
+    const fmt = v => (v && isFinite(v)) ? '(' + parseFloat(v).toFixed(0) + ')' : '(—)';
+    document.getElementById('skipRPrice').textContent = fmt(rTrigger);
+    document.getElementById('skipSPrice').textContent = fmt(sTrigger);
+  } catch(e) {
+    addLog('Trigger fetch failed: ' + e.message, 'warn');
+  }
 }
+
+async function skipTrade(type) {
+  const sym = document.getElementById('skip-sym').value;
+  const price = type === 'R' ? rTrigger : sTrigger;
+  if (!price || !isFinite(price)) {
+    showToast(`${type} Trigger price उपलब्ध नहीं है`, 'err');
+    return;
+  }
+  if (!confirm(`क्या आप वाकई ${sym} के ${type} लेवल (${price}) का ट्रेड Skip करना चाहते हैं?`)) return;
+  try {
+    const resp = await fetch('/api/skip-trade/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ symbol: sym, type: type, price: price })
+    });
+    if (resp.ok) {
+      showToast(`✓ ${type} Trade Skipped [${sym}]`, 'ok');
+      addLog(`🚫 Skip Trade → ${type} @ ${price} [${sym}]`, 'warn');
+    } else {
+      showToast('Skip failed: Server Error', 'err');
+    }
+  } catch(e) {
+    showToast('Error: ' + e.message, 'err');
+  }
+}
+
+// Trigger prices हर 10 सेकंड में refresh
+fetchTriggers();
+setInterval(fetchTriggers, 10000);
 
 // ── Init ─────────────────────────────────────────────────
 refreshStatus();
