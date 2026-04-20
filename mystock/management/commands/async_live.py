@@ -1424,61 +1424,6 @@ def run_live_paper_trading(df, symbol="NIFTY"):
     SL_PTS = settings.default_sl
     BUFFER = settings.reversal_buffer
 
-    # ==========================================
-    # ── 2. LEVEL CALCULATION (R & S) ──
-    # ==========================================
-    # sr = LiveSRData.objects.filter(Symbol__iexact=symbol, Time__date=today).order_by('-Time').first()
-    # if not sr or not sr.resistance_strike or not sr.supprt_strike:
-    #     return "No SR Data"
-
-    # step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50 
-
-    # res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
-    # res_base = float(sr.resistance_strike)
-    # m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-    # res_target = float(m_res.group(1)) if m_res else res_base
-
-    # if "SHIFTED WTT" in res_status: eff_res = res_base + step
-    # elif "SHIFTED WTB" in res_status: eff_res = res_base + step
-    # elif "WTT" in res_status: eff_res = res_target + step
-    # elif "WTB" in res_status: eff_res = res_target + step
-    # elif "STRONG" in res_status: eff_res = res_base + step
-    # else: eff_res = res_base + step
-
-    # sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
-    # sup_base = float(sr.supprt_strike)
-    # m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-    # sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-    # if "SHIFTED WTT" in sup_status: eff_sup = sup_base - step
-    # elif "SHIFTED WTB" in sup_status: eff_sup = sup_base - step
-    # elif "WTT" in sup_status: eff_sup = sup_target - step
-    # elif "WTB" in sup_status: eff_sup = sup_target - step
-    # elif "STRONG" in sup_status: eff_sup = sup_base - step
-    # else: eff_sup = sup_base - step
-
-    # eff_res_sl = eff_res + step  
-    # eff_sup_sl = eff_sup - step 
-    # # 👇 नया: टारगेट स्ट्राइक निकालें
-    # eff_res_target = eff_res - step  # PUT का टारगेट (1 स्ट्राइक नीचे)
-    # eff_sup_target = eff_sup + step  # CALL का टारगेट (1 स्ट्राइक ऊपर) 
-
-    # r_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_res).order_by('-Time').first()
-    # s_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_sup).order_by('-Time').first()
-    # r_sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_res_sl).order_by('-Time').first()
-    # s_sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_sup_sl).order_by('-Time').first()
-    # # 👇 नया: टारगेट लेवल के लिए डेटाबेस क्वेरी
-    # r_target_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_res_target).order_by('-Time').first()
-    # s_target_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today, Strike_Price=eff_sup_target).order_by('-Time').first()
-
-    # r_level = float(r_row.Reversl_Ce) if r_row and r_row.Reversl_Ce else None
-    # s_level = float(s_row.Reversl_Pe) if s_row and s_row.Reversl_Pe else None
-    # r_sl_level = float(r_sl_row.Reversl_Ce) if r_sl_row and r_sl_row.Reversl_Ce else None
-    # s_sl_level = float(s_sl_row.Reversl_Pe) if s_sl_row and s_sl_row.Reversl_Pe else None
-    # # 👇 नया: टारगेट लेवल की रिवर्सल वैल्यू सेट करें
-    # r_target_level = float(r_target_row.Reversl_Ce) if r_target_row and r_target_row.Reversl_Ce else None
-    # s_target_level = float(s_target_row.Reversl_Pe) if s_target_row and s_target_row.Reversl_Pe else None
-
 
     # ==========================================
     # ── 2. NEW MASTER LEVEL CALCULATION ──
@@ -1509,21 +1454,7 @@ def run_live_paper_trading(df, symbol="NIFTY"):
         ttype = open_trade.trade_type
         hit_target = hit_sl = False
 
-        # if ttype == 'PUT':
-        #     # 🎯 PUT के लिए टारगेट: R से एक स्ट्राइक नीचे वाली Reversl_Ce
-        #     target = r_target_level if r_target_level else (entry - TARGET_PTS) 
-        #     sl = r_sl_level if r_sl_level else (entry + SL_PTS)
-            
-        #     if spot <= (target + BUFFER): hit_target = True
-        #     elif spot >= sl: hit_sl = True
 
-        # elif ttype == 'CALL':
-        #     # 🎯 CALL के लिए टारगेट: S से एक स्ट्राइक ऊपर वाली Reversl_Pe
-        #     target = s_target_level if s_target_level else (entry + TARGET_PTS)
-        #     sl = s_sl_level if s_sl_level else (entry - SL_PTS)
-            
-        #     if spot >= (target - BUFFER): hit_target = True
-        #     elif spot <= sl: hit_sl = True
         if ttype == 'PUT':
             target = r_target_level if r_target_level else (entry - TARGET_PTS) 
             sl = r_sl_level if r_sl_level else (entry + SL_PTS)
