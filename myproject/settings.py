@@ -40,6 +40,9 @@ ALLOWED_HOSTS = [
 # Render HTTPS redirect
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT     = False  # Render का LB already handle करता है
+    SESSION_COOKIE_SECURE   = True
+    CSRF_COOKIE_SECURE      = True
 
 
 # Application definition
@@ -124,32 +127,13 @@ else:
 
 
 
-# Render पर REDIS_URL env var set करें, local पर localhost fallback
-REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
-
-# ── Cache Configuration ──────────────────────────────────────────────────────
-# Render/Production पर Redis उपलब्ध नहीं होने पर LocMem fallback काम करेगा
-try:
-    import redis as _r
-    _r.from_url(REDIS_URL).ping()
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": REDIS_URL,
-            "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
-            "TIMEOUT": 60,
-        }
+# ── Cache — LocMem (Redis हटाया, Render पर ज़रूरी नहीं) ────────────────────
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "opchain-cache",
     }
-except Exception:
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "opchain-cache",
-        }
-    }
-
-# Session को DB की बजाय cache में store करो — login fast होगा
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+}
 
 from mystock.credentials import access_token
 
