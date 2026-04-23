@@ -2369,11 +2369,18 @@ def db_cleanup_api(request):
 
         targets = TABLE_MAP if table == "ALL" else {table: TABLE_MAP[table]}
 
+    
+
         # ── Delete ───────────────────────────────────────────────
         results = {}
         total   = 0
         for name, model in targets.items():
-            deleted, _ = model.objects.filter(Time__lt=cutoff_time).delete()
+            # PaperTrade टेबल में Time कॉलम नहीं है, उसमें trade_date है
+            if name == "PaperTrade":
+                deleted, _ = model.objects.filter(trade_date__lt=cutoff_date).delete()
+            else:
+                deleted, _ = model.objects.filter(Time__lt=cutoff_time).delete()
+            
             results[name] = deleted
             total += deleted
 
@@ -2442,10 +2449,17 @@ def db_cleanup_preview_api(request):
     if None in targets.values():
         return JsonResponse({"status": "error", "msg": f"Invalid table: {table}"})
 
+   
+
     counts = {}
     total  = 0
     for name, model in targets.items():
-        c = model.objects.filter(Time__lt=cutoff_time).count()
+        # यहाँ भी PaperTrade के लिए trade_date का इस्तेमाल करें
+        if name == "PaperTrade":
+            c = model.objects.filter(trade_date__lt=cutoff_date).count()
+        else:
+            c = model.objects.filter(Time__lt=cutoff_time).count()
+            
         counts[name] = c
         total += c
 
