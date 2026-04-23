@@ -3,12 +3,11 @@ import time
 from datetime import datetime, time, timedelta, date, time as dt_time
 from django.shortcuts import render
 from requests.exceptions import SSLError, ConnectionError, Timeout
-from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, LiveSRData, BotSettings
+from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, LiveSRData, BotSettings, PaperTrade
 from django.utils import timezone
-from django.db.models import OuterRef, Subquery, Q, Sum, F
-from django.views.decorators.cache import never_cache
+from django.db.models import OuterRef, Subquery, Q, Sum, F, Count
+from django.views.decorators.cache import never_cache, cache_page
 from django.http import HttpResponse, JsonResponse
-from django.views.decorators.cache import cache_page
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 from .management.commands.async_live import get_instrument_from_db, update_instrument_store_bulk 
@@ -17,10 +16,10 @@ from django.views.decorators.clickjacking import xframe_options_exempt
 import pytz
 from django.utils.timezone import localtime
 import json
-from django.http import JsonResponse
 from django.db.models.functions import Abs
 from asgiref.sync import async_to_sync
 from .trade_logic import get_master_levels
+from django.core.cache import cache
 
 
 
@@ -58,81 +57,33 @@ def admin_panel_view(request):
 
 
 # ── 2. Admin Status API ─────────────────────────────────────
-def admin_status_api1(request):
-    """
-    सभी loops का status + आज की trade stats एक call में देता है।
-    JS हर 10 सेकंड में यहाँ poll करता है।
-    """
-    from django.db.models import Sum, Count, Q
-
-    # ── Loop Statuses ──────────────────────────────────────
-    loop_names = ['nifty_loop', 'others_loop', 'bot_loop']
-    loops = {}
-    for name in loop_names:
-        ctrl, _ = SyncControl.objects.get_or_create(name=name)
-        loops[name] = ctrl.is_active
-
-    # ── Today's Trade Stats ────────────────────────────────
-    today = timezone.now().date()
-    day_start = timezone.make_aware(datetime.combine(today, dt_time.min))
-    day_end   = timezone.make_aware(datetime.combine(today, dt_time.max))
-
-    stats_qs = PaperTrade.objects.filter(
-        trade_date=today
-    ).exclude(result='SKIPPED').aggregate(
-        total  = Count('id'),
-        wins   = Count('id', filter=Q(result='TARGET')),
-        losses = Count('id', filter=Q(result='SL')),
-        pnl    = Sum('pnl'),
-    )
-
-    # ── Current Spot (NIFTY) ───────────────────────────────
-    latest_oc = OptionChain.objects.filter(
-        Symbol='NIFTY', Time__gte=day_start, Time__lte=day_end
-    ).only('Spot_Price').order_by('-Time').first()
-
-    settings, _ = BotSettings.objects.get_or_create(id=1)
-
-    return JsonResponse({
-        'loops': loops,
-        'stats': {
-            'total' : stats_qs['total']  or 0,
-            'wins'  : stats_qs['wins']   or 0,
-            'losses': stats_qs['losses'] or 0,
-            'pnl'   : round(stats_qs['pnl'] or 0, 2),
-            'spot'  : latest_oc.Spot_Price if latest_oc else None,
-        },
-        'settings': {
-            'target': settings.default_target,
-            'sl': settings.default_sl,
-            'buffer': settings.reversal_buffer
-        }
-    })
-
-
 def admin_status_api(request):
-    """सभी loops का status + आज की trade stats + Bot Settings"""
-    from django.db.models import Sum, Count, Q
-    
-    # ... (आपका पुराना loop status और stats वाला कोड यहाँ रहेगा) ...
+    """सभी loops का status + trade stats + Bot Settings — optimized & defensive"""
+
+    # ── Loop Status: एक query में सारे loops ──
     loop_names = ['nifty_loop', 'others_loop', 'bot_loop']
-    loops = {}
-    for name in loop_names:
-        ctrl, _ = SyncControl.objects.get_or_create(name=name)
-        loops[name] = ctrl.is_active
+    try:
+        existing = {c.name: c.is_active for c in SyncControl.objects.filter(name__in=loop_names)}
+        for name in loop_names:
+            if name not in existing:
+                ctrl, _ = SyncControl.objects.get_or_create(
+                    name=name, defaults={'is_active': True}
+                )
+                existing[name] = ctrl.is_active
+    except Exception:
+        existing = {name: False for name in loop_names}
+    loops = existing
 
     today = timezone.now().date()
     stats_qs = PaperTrade.objects.filter(trade_date=today).exclude(result='SKIPPED').aggregate(
-            total=Count('id'), 
-            # TARGET हिट हो या MANUAL_EXIT में प्रॉफिट हो -> Win
-            wins=Count('id', filter=Q(result='TARGET') | (Q(result='MANUAL_EXIT', pnl__gt=0))),
-            # SL हिट हो या MANUAL_EXIT में लॉस हो -> Loss
-            losses=Count('id', filter=Q(result='SL') | (Q(result='MANUAL_EXIT', pnl__lt=0))),
-            pnl=Sum('pnl')
-        )
-    latest_oc = OptionChain.objects.filter(Symbol='NIFTY', Time__date=today).order_by('-Time').first()
+        total=Count('id'),
+        wins=Count('id', filter=Q(result='TARGET') | Q(result='MANUAL_EXIT', pnl__gt=0)),
+        losses=Count('id', filter=Q(result='SL') | Q(result='MANUAL_EXIT', pnl__lt=0)),
+        pnl=Sum('pnl')
+    )
+    # FIX: only() से सिर्फ ज़रूरी field fetch
+    latest_oc = OptionChain.objects.filter(Symbol='NIFTY', Time__date=today)        .only('Spot_Price').order_by('-Time').first()
 
-    # 👇 नया: डेटाबेस से लाइव सेटिंग्स निकालें
     settings, _ = BotSettings.objects.get_or_create(id=1)
 
     return JsonResponse({
@@ -186,25 +137,25 @@ def close_all_open_trades_api(request):
             spot = float(latest_oc.Spot_Price)
             
             # सिर्फ OPEN ट्रेड्स निकालें
-            open_trades = PaperTrade.objects.filter(symbol=symbol, result="OPEN")
-            count = open_trades.count()
+            open_trades = list(PaperTrade.objects.filter(symbol=symbol, result="OPEN"))
+            count = len(open_trades)
             
             if count == 0:
                 return JsonResponse({'status': 'error', 'msg': 'कोई Open Trade नहीं है!'})
             
-            # सभी ट्रेड्स का PnL कैलकुलेट करके क्लोज करें
+            now = timezone.now()
+            # FIX: N+1 save() की जगह bulk_update — सिर्फ एक DB call
             for trade in open_trades:
                 entry = float(trade.entry_spot)
-                if trade.trade_type == 'CALL':
-                    actual_pnl = spot - entry
-                else:
-                    actual_pnl = entry - spot
-                    
+                actual_pnl = (spot - entry) if trade.trade_type == 'CALL' else (entry - spot)
                 trade.exit_spot = spot
-                trade.exit_time = timezone.now()
-                trade.result = "MANUAL_EXIT"
-                trade.pnl = round(actual_pnl, 2)
-                trade.save()
+                trade.exit_time = now
+                trade.result    = "MANUAL_EXIT"
+                trade.pnl       = round(actual_pnl, 2)
+
+            PaperTrade.objects.bulk_update(
+                open_trades, ['exit_spot', 'exit_time', 'result', 'pnl']
+            )
                 
             return JsonResponse({'status': 'success', 'msg': f'{count} Open Trades Closed at {spot}'})
         except Exception as e:
@@ -237,31 +188,64 @@ def apply_ranking_styles(all_data, metric):
             if val_2nd >= 75 and val >= 65:
                 setattr(row, base_class, "bg-yellow")
 
-def option_chain_dashboard(request):
-    latest_entry = OptionChain.objects.order_by('-Time').first()
+def _get_nifty_chain_context(symbol='NIFTY'):
+    """
+    Shared helper — option chain data fetch करता है।
+    option_chain_dashboard और table_update_api दोनों इसे use करते हैं।
+    
+    FIX: 3-second cache — हर 5 सेकंड में कई requests आ सकती हैं।
+    3s cache से duplicate DB queries skip होती हैं।
+    """
+    CACHE_KEY = f'chain_ctx_{symbol}'
+    cached = cache.get(CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    # FIX: Symbol filter — पहले पूरी table scan था
+    latest_entry = OptionChain.objects.filter(Symbol=symbol).order_by('-Time').first()
     if not latest_entry:
-        return render(request, 'mystock/dashboard.html', {'data': [], 'latest_time': None})
+        return None, None, None, [], {}
 
     latest_time = latest_entry.Time
-    spot_price = latest_entry.Spot_Price
+    spot_price  = latest_entry.Spot_Price
     expiry_date = latest_entry.Expiry_Date
 
-    # Current chain data
+    # FIX: only() — 30 fields की जगह सिर्फ 13 ज़रूरी fields fetch करो
+    # हर request पर ~50 rows × (30-13) fields = बहुत कम data DB से आएगा
+    NEEDED_FIELDS = [
+        'Strike_Price', 'CE_OI', 'CE_OI_percent', 'CE_Volume', 'CE_Volume_percent',
+        'CE_COI', 'CE_COI_percent', 'CE_LTP', 'CE_IV', 'CE_Delta',
+        'PE_OI', 'PE_OI_percent', 'PE_Volume', 'PE_Volume_percent',
+        'PE_COI', 'PE_COI_percent', 'PE_LTP', 'PE_IV', 'PE_Delta',
+        'Reversl_Ce', 'Reversl_Pe', 'Spot_Price', 'Time', 'Symbol', 'Lot_size',
+    ]
     all_data = list(
         OptionChain.objects.filter(
+            Symbol=symbol,
             Time__range=(latest_time - TIME_WINDOW, latest_time + TIME_WINDOW)
-        ).order_by('Strike_Price')
+        ).only(*NEEDED_FIELDS).order_by('Strike_Price')
     )
 
-    # Past chain data (1 hour ago)
-    time_limit = latest_time - timedelta(hours=1)
-    closest_past_entry = OptionChain.objects.filter(
-        Time__range=(time_limit, latest_time - timedelta(seconds=1))
-    ).order_by('Time').first()
+    # Past chain — 1 घंटे पहले का data
+    # FIX: यह भी cache करो — हर 5 seconds पर यही query repeat होती थी
+    PAST_ENTRY_KEY = f'past_entry_{symbol}'
+    closest_past_entry = cache.get(PAST_ENTRY_KEY)
+    if closest_past_entry is None:
+        time_limit = latest_time - timedelta(hours=1)
+        closest_past_entry = OptionChain.objects.filter(
+            Symbol=symbol,
+            Time__range=(time_limit, latest_time - timedelta(seconds=1))
+        ).only('Time').order_by('Time').first()
+        cache.set(PAST_ENTRY_KEY, closest_past_entry, 300)  # 5 minutes
 
-    past_vol_map = {}
-    if closest_past_entry:
+    # FIX: past_vol_map को 5 मिनट cache करो
+    # यह data 1 घंटे में एक बार बदलता है — हर request पर query करना waste था
+    PAST_CACHE_KEY = f'past_vol_{symbol}'
+    past_vol_map = cache.get(PAST_CACHE_KEY) or {}
+
+    if not past_vol_map and closest_past_entry:
         past_chain = OptionChain.objects.filter(
+            Symbol=symbol,
             Time__range=(closest_past_entry.Time - PAST_WINDOW, closest_past_entry.Time + PAST_WINDOW)
         ).values('Strike_Price', 'CE_Volume', 'PE_Volume')
 
@@ -272,8 +256,10 @@ def option_chain_dashboard(request):
             }
             for p in past_chain
         }
+        if past_vol_map:
+            cache.set(PAST_CACHE_KEY, past_vol_map, 300)  # 5 minutes
 
-    # Volume change calculation
+    # Volume change & percentage
     max_ce_chg, max_pe_chg = 0, 0
     for row in all_data:
         past_vols = past_vol_map.get(row.Strike_Price)
@@ -283,18 +269,16 @@ def option_chain_dashboard(request):
         else:
             row.ce_vol_1h_chg = None
             row.pe_vol_1h_chg = None
-
         if row.ce_vol_1h_chg and row.ce_vol_1h_chg > max_ce_chg:
             max_ce_chg = row.ce_vol_1h_chg
         if row.pe_vol_1h_chg and row.pe_vol_1h_chg > max_pe_chg:
             max_pe_chg = row.pe_vol_1h_chg
 
-    # Percentage calculation
     for row in all_data:
         row.ce_vol_1h_chg_pct = calculate_percentage(row.ce_vol_1h_chg, max_ce_chg)
         row.pe_vol_1h_chg_pct = calculate_percentage(row.pe_vol_1h_chg, max_pe_chg)
 
-    # Ranking logic
+    # Ranking colors
     all_metrics = [
         'ce_vol_1h_chg_pct', 'pe_vol_1h_chg_pct',
         'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
@@ -303,19 +287,24 @@ def option_chain_dashboard(request):
     for metric in all_metrics:
         apply_ranking_styles(all_data, metric)
 
-    # Window filtering (±15 strikes around spot)
+    # Window filter ±15 strikes around spot
+    display_data = []
     if all_data:
         closest_idx = min(range(len(all_data)), key=lambda i: abs(all_data[i].Strike_Price - spot_price))
         display_data = all_data[max(0, closest_idx - 15): min(len(all_data), closest_idx + 16)]
-
-        # Spot divider
         for row in display_data:
             if row.Strike_Price > spot_price:
                 row.is_spot_divider = True
                 break
-    else:
-        display_data = []
 
+    result = (latest_time, spot_price, expiry_date, display_data, all_data)
+    if latest_time is not None:
+        cache.set(CACHE_KEY, result, 3)  # 3 seconds — data 5s interval पर आता है
+    return result
+
+
+def option_chain_dashboard(request):
+    latest_time, spot_price, expiry_date, display_data, _ = _get_nifty_chain_context()
     return render(request, 'mystock/dashboard.html', {
         'data': display_data,
         'latest_time': latest_time,
@@ -323,79 +312,27 @@ def option_chain_dashboard(request):
         'expiry_date': expiry_date
     })
 
-# Constants for time windows
-TIME_WINDOW = timedelta(seconds=1)
-PAST_WINDOW = timedelta(seconds=2)
-
 def table_update_api(request):
-    latest_entry = OptionChain.objects.order_by('-Time').first()
+    """
+    AJAX table refresh — shared helper + ETag cache.
+    
+    अगर data नहीं बदला तो 304 Not Modified return होगा (0 bytes transfer)।
+    पहले हर 5 सेकंड 125KB भेजता था — अब सिर्फ तब जब data नया हो।
+    """
+    latest_time, spot_price, expiry_date, display_data, all_data = _get_nifty_chain_context()
 
-    if not latest_entry:
+    if latest_time is None:
         return HttpResponse("")
 
-    latest_time = latest_entry.Time
-    spot_price = latest_entry.Spot_Price
-    expiry_date = latest_entry.Expiry_Date
+    # ── ETag: timestamp से unique hash बनाओ ──
+    etag = f'"{latest_time.strftime("%Y%m%d%H%M%S")}"'
+    if request.META.get('HTTP_IF_NONE_MATCH') == etag:
+        # Browser के पास पहले से यही data है — कुछ नहीं भेजो
+        return HttpResponse(status=304)
 
-    # Current chain data
-    all_data = list(
-        OptionChain.objects.filter(
-            Time__range=(latest_time - TIME_WINDOW, latest_time + TIME_WINDOW)
-        ).order_by('Strike_Price')
-    )
-
-    # Past chain data (1 hour ago)
-    time_limit = latest_time - timedelta(hours=1)
-    closest_past_entry = OptionChain.objects.filter(
-        Time__range=(time_limit, latest_time - timedelta(seconds=1))
-    ).order_by('Time').first()
-
-    past_vol_map = {}
-    if closest_past_entry:
-        past_chain = OptionChain.objects.filter(
-            Time__range=(closest_past_entry.Time - PAST_WINDOW, closest_past_entry.Time + PAST_WINDOW)
-        ).values('Strike_Price', 'CE_Volume', 'PE_Volume')
-
-        past_vol_map = {
-            p['Strike_Price']: {
-                'ce_vol': p['CE_Volume'] or 0,
-                'pe_vol': p['PE_Volume'] or 0
-            }
-            for p in past_chain
-        }
-
-    # Volume change calculation
-    max_ce_chg, max_pe_chg = 0, 0
-    for row in all_data:
-        past_vols = past_vol_map.get(row.Strike_Price)
-        if past_vols:
-            row.ce_vol_1h_chg = (row.CE_Volume or 0) - past_vols['ce_vol']
-            row.pe_vol_1h_chg = (row.PE_Volume or 0) - past_vols['pe_vol']
-        else:
-            row.ce_vol_1h_chg = None
-            row.pe_vol_1h_chg = None
-
-        if row.ce_vol_1h_chg and row.ce_vol_1h_chg > max_ce_chg:
-            max_ce_chg = row.ce_vol_1h_chg
-        if row.pe_vol_1h_chg and row.pe_vol_1h_chg > max_pe_chg:
-            max_pe_chg = row.pe_vol_1h_chg
-
-    # Percentage calculation
-    for row in all_data:
-        row.ce_vol_1h_chg_pct = calculate_percentage(row.ce_vol_1h_chg, max_ce_chg)
-        row.pe_vol_1h_chg_pct = calculate_percentage(row.pe_vol_1h_chg, max_pe_chg)
-
-    # Ranking logic
-    all_metrics = [
-        'ce_vol_1h_chg_pct', 'pe_vol_1h_chg_pct',
-        'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
-        'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent'
-    ]
-    for metric in all_metrics:
-        apply_ranking_styles(all_data, metric)
-
-    # Totals using aggregate
+    # Totals aggregate
     totals = OptionChain.objects.filter(
+        Symbol='NIFTY',
         Time__range=(latest_time - TIME_WINDOW, latest_time + TIME_WINDOW)
     ).aggregate(
         total_ce_oi=Sum('CE_OI'),
@@ -404,74 +341,63 @@ def table_update_api(request):
         total_pe_coi=Sum('PE_COI')
     )
 
-    # Spot divider logic
-    if all_data:
-        closest_idx = min(range(len(all_data)), key=lambda i: abs(all_data[i].Strike_Price - spot_price))
-        display_data = all_data[max(0, closest_idx - 15): min(len(all_data), closest_idx + 16)]
-        for row in display_data:
-            if row.Strike_Price > spot_price:
-                row.is_spot_divider = True
-                break
-    else:
-        display_data = []
-
-    latest_sr = LiveSRData.objects.filter(Symbol=latest_entry.Symbol).order_by('-Time').first()
+    latest_sr = LiveSRData.objects.filter(Symbol='NIFTY').order_by('-Time').first()
 
     context = {
         'data': display_data,
         'latest_time': latest_time,
         'spot': spot_price,
         'expiry_date': expiry_date,
-        # 'is_search_dashboard': True,
         'sr_data': latest_sr,
         **totals
     }
-
-    return render(request, 'mystock/table_partial.html', context)
+    response = render(request, 'mystock/table_partial.html', context)
+    response['ETag'] = etag
+    response['Cache-Control'] = 'no-cache'
+    response['Vary'] = 'Accept-Encoding'   # GZip के साथ correct caching
+    return response
 
 def toggle_sync(request, loop_name):
+    """Loop चालू/बंद करने का API — FIX: .get() → get_or_create() (DoesNotExist crash fix)"""
     if request.method != "POST":
         return JsonResponse({"error": "Invalid method"}, status=405)
 
-    ctrl = SyncControl.objects.get(name=loop_name)
+    allowed = ['nifty_loop', 'others_loop', 'bot_loop']
+    if loop_name not in allowed:
+        return JsonResponse({"error": f"Unknown loop: {loop_name}"}, status=400)
+
+    # FIX: पहले .get() था जो DoesNotExist exception देता था अगर record DB में नहीं था
+    ctrl, _ = SyncControl.objects.get_or_create(name=loop_name, defaults={'is_active': True})
     ctrl.is_active = not ctrl.is_active
     ctrl.save()
 
     return JsonResponse({
         "loop": loop_name,
-        "is_active": ctrl.is_active
+        "is_active": ctrl.is_active,
+        "status": "ok"
     })
 
 @cache_page(10) 
+@login_required
 def all_stocks_dashboard(request):
-    # 1. सब-क्वेरी: सबसे पहले हर सिंबल की बिल्कुल लेटेस्ट ID निकालें
-    # (यहाँ अभी कोई फिल्टर न लगाएं, ताकि हमें पता चले कि अभी ताज़ा स्थिति क्या है)
+    """हर symbol की latest SR entry — 60s cache से fast response"""
+    CACHE_KEY = 'all_stocks_data'
+    cached = cache.get(CACHE_KEY)
+    if cached is not None:
+        return render(request, 'mystock/all_stocks.html', {'stocks_data': cached})
+
     newest = SupportResistance.objects.filter(
         Symbol=OuterRef('Symbol')
     ).order_by('-Time')
-    
-    # 2. मेन क्वेरी: अब यहाँ उन 'ताज़ा' एंट्रीज को हटा दें जो 0 हैं
-    latest_data = SupportResistance.objects.filter(
-        id=Subquery(newest.values('id')[:1])
-    ).exclude(
-        # यह लाइन 0, 0.0, और 0.00 सभी को हटा देगी
-        Reversl_Ce__lte=0.01  
-    ).exclude(
-        # यह लाइन खाली (NULL) डेटा को हटा देगी
-        Reversl_Ce__isnull=True
-    ).exclude(
-        # यह लाइन 0, 0.0, और 0.00 सभी को हटा देगी
-        Reversl_Pe__lte=0.01  
-    ).exclude(
-        # यह लाइन खाली (NULL) डेटा को हटा देगी
-        Reversl_Pe__isnull=True
-    ).order_by('Symbol')
 
-    context = {
-        'stocks_data': latest_data
-    }
-    
-    return render(request, 'mystock/all_stocks.html', context)
+    latest_data = list(SupportResistance.objects.filter(
+        id=Subquery(newest.values('id')[:1])
+    ).exclude(Reversl_Ce__lte=0.01).exclude(Reversl_Ce__isnull=True
+    ).exclude(Reversl_Pe__lte=0.01).exclude(Reversl_Pe__isnull=True
+    ).order_by('Symbol'))
+
+    cache.set(CACHE_KEY, latest_data, 60)
+    return render(request, 'mystock/all_stocks.html', {'stocks_data': latest_data})
 
 def stock_search_view(request):
     """
@@ -1151,199 +1077,7 @@ def get_instrument_key(symbol: str):
 
 from django.core.cache import cache
 
-def get_reversal_lines1(symbol: str, from_date: str, to_date: str):
-    # --- OPTIMIZATION 1: Cache (मेमोरी में सेव करना) ---
-    cache_key = f"rev_lines_history_{symbol}_{from_date}_{to_date}"
-    cached_data = cache.get(cache_key)
-    
-    if cached_data:
-        return cached_data
-
-    try:
-        import math
-        import re as _re
-
-        sr = LiveSRData.objects.filter(
-            Symbol__iexact=symbol,
-            Time__date__gte=from_date,
-            Time__date__lte=to_date,
-        ).order_by('-Time').first()
-
-        if not sr or not sr.resistance_strike or not sr.supprt_strike:
-            return []
-
-        low  = min(sr.supprt_strike, sr.resistance_strike)
-        high = max(sr.resistance_strike, sr.supprt_strike)
-
-        # WTT/WTB काफी दूर हो सकते हैं, इसलिए EXPAND को 1000 कर दिया है 
-        # ताकि दूर वाली स्ट्राइक्स का डेटा भी आसानी से आ जाए
-        EXPAND = 1000 
-        
-        # --- OPTIMIZATION 2: .values() का इस्तेमाल (10x Faster) ---
-        oc_qs = OptionChain.objects.filter(
-            Symbol__iexact=symbol,
-            Time__date__gte=from_date,
-            Time__date__lte=to_date,
-            Strike_Price__gte=low  - EXPAND,
-            Strike_Price__lte=high + EXPAND,
-        ).values('Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('Time')
-
-        if not oc_qs:
-            return []
-
-        history_data = {}
-        latest_rows = {}
-        
-        def is_valid(val):
-            return val is not None and not math.isnan(val) and not math.isinf(val)
-
-        for row in oc_qs:
-            strike = row['Strike_Price']
-            if strike not in history_data:
-                history_data[strike] = {'CE': [], 'PE': []}
-
-            time_str = row['Time'].isoformat()
-            
-            if is_valid(row['Reversl_Ce']):
-                history_data[strike]['CE'].append({'time': time_str, 'value': float(row['Reversl_Ce'])})
-            if is_valid(row['Reversl_Pe']):
-                history_data[strike]['PE'].append({'time': time_str, 'value': float(row['Reversl_Pe'])})
-
-            latest_rows[strike] = row
-
-        rows = list(latest_rows.values())
-        rows.sort(key=lambda r: r['Strike_Price'])
-
-        # Step साइज़ निकालना (जैसे निफ्टी में 50, बैंक निफ्टी में 100)
-        all_strikes = sorted(set(r['Strike_Price'] for r in rows))
-        step = 50
-        if len(all_strikes) >= 2:
-            diffs = [all_strikes[i+1] - all_strikes[i] for i in range(len(all_strikes)-1)]
-            step = min(diffs) if min(diffs) > 0 else 50
-
-        # ==============================================================
-        # 🚀 आपके नए नियम (NEW RULES IMPLEMENTATION)
-        # ==============================================================
-        
-        # ─── 1. CALL SIDE (RESISTANCE) ───
-        res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
-        res_base = sr.resistance_strike
-        
-        # Target Strike खोजना (जहाँ WTT/WTB जा रहा है)
-        m_res = _re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-        res_target = float(m_res.group(1)) if m_res else res_base
-
-        effective_res_strike = res_base # Default
-        
-        if "SHIFTED WTT" in res_status:
-            effective_res_strike = res_base           # Resistance स्ट्राइक का रिवर्सल
-        elif "SHIFTED WTB" in res_status:
-            effective_res_strike = res_base + step    # Resistance स्ट्राइक से बड़ी स्ट्राइक का रिवर्सल
-        elif "WTT" in res_status:
-            effective_res_strike = res_target + step  # WTT स्ट्राइक से बड़ी स्ट्राइक का रिवर्सल
-        elif "WTB" in res_status:
-            effective_res_strike = res_target + step  # WTB स्ट्राइक से बड़ी स्ट्राइक का रिवर्सल
-        elif "STRONG" in res_status: 
-            effective_res_strike = res_base + step    # Strong/Both Strong: Resistance स्ट्राइक से बड़ी स्ट्राइक
-        else:
-            effective_res_strike = res_base + step    # सुरक्षा के लिए डिफ़ॉल्ट बड़ी स्ट्राइक
-
-
-        # ─── 2. PUT SIDE (SUPPORT) ───
-        sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
-        sup_base = sr.supprt_strike
-        
-        # Target Strike खोजना (जहाँ WTT/WTB जा रहा है)
-        m_sup = _re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-        sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-        effective_sup_strike = sup_base # Default
-        
-        if "SHIFTED WTT" in sup_status:
-            effective_sup_strike = sup_base           # Support स्ट्राइक का रिवर्सल
-        elif "SHIFTED WTB" in sup_status:
-            effective_sup_strike = sup_base - step    # Support स्ट्राइक से छोटी स्ट्राइक का रिवर्सल
-        elif "WTT" in sup_status:
-            effective_sup_strike = sup_target - step  # WTT स्ट्राइक से छोटी स्ट्राइक का रिवर्सल
-        elif "WTB" in sup_status:
-            effective_sup_strike = sup_target - step  # WTB स्ट्राइक से छोटी स्ट्राइक का रिवर्सल
-        elif "STRONG" in sup_status:
-            effective_sup_strike = sup_base - step    # Strong/Both Strong: Support स्ट्राइक से छोटी स्ट्राइक
-        else:
-            effective_sup_strike = sup_base - step    # सुरक्षा के लिए डिफ़ॉल्ट छोटी स्ट्राइक
-
-        # ==============================================================
-
-        # बाउंड्री सेट करना (चार्ट में कहाँ से कहाँ तक की लाइनें दिखेंगी)
-        ce_strikes_list = [effective_res_strike, res_base, res_target]
-        pe_strikes_list = [effective_sup_strike, sup_base, sup_target]
-        
-        global_low = min(pe_strikes_list + ce_strikes_list) - step
-        global_high = max(pe_strikes_list + ce_strikes_list) + step
-
-        seen_ce = set()
-        seen_pe = set()
-        lines   = []
-
-        for row in rows:
-            strike = row['Strike_Price']
-            spot = row['Spot_Price']
-
-            if global_low <= strike <= global_high and is_valid(spot):
-                
-                is_bottom = (strike == effective_sup_strike)
-                is_top = (strike == effective_res_strike)
-
-                # ─── PUT SIDE (SUPPORT) ───
-                # नया नियम: अगर यह मेन सपोर्ट है (is_bottom), तो मार्किट कहीं भी हो, यह ब्लू लाइन हमेशा दिखेगी।
-                if is_valid(row['Reversl_Pe']):
-                    if (row['Reversl_Pe'] < spot or is_bottom) and row['Reversl_Pe'] not in seen_pe:
-                        seen_pe.add(row['Reversl_Pe'])
-                        
-                        line_color = "#00bfff" if is_bottom else "#3fb950" 
-                        
-                        lines.append({
-                            "price":  float(row['Reversl_Pe']),
-                            "strike": float(strike),
-                            "type":   "PE",
-                            "color":  line_color,
-                            "width":  4 if is_bottom else 1,
-                            "dash":   0,
-                            "label":  f"S {strike:.0f}" if is_bottom else f"P {strike:.0f}",
-                            "history": history_data[strike]['PE']
-                        })
-
-                # ─── CALL SIDE (RESISTANCE) ───
-                # नया नियम: अगर यह मेन रेजिस्टेंस है (is_top), तो मार्किट कहीं भी हो, यह ऑरेंज लाइन हमेशा दिखेगी।
-                if is_valid(row['Reversl_Ce']):
-                    if (row['Reversl_Ce'] >= spot or is_top) and row['Reversl_Ce'] not in seen_ce:
-                        seen_ce.add(row['Reversl_Ce'])
-                        
-                        line_color = "#ff8c00" if is_top else "#f85149"
-                        
-                        lines.append({
-                            "price":  float(row['Reversl_Ce']),
-                            "strike": float(strike),
-                            "type":   "CE",
-                            "color":  line_color,
-                            "width":  4 if is_top else 1,
-                            "dash":   0,
-                            "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
-                            "history": history_data[strike]['CE']
-                        })
-
-        lines.sort(key=lambda x: x["price"], reverse=True)
-        
-        # 60 सेकंड के लिए कैश सेव करें
-        cache.set(cache_key, lines, timeout=60)
-        
-        return lines
-
-    except Exception as e:
-        print(f"Reversal lines error: {e}")
-        return []
-    
-def get_reversal_lines(symbol: str, from_date: str, to_date: str):
+def get_reversal_lines2(symbol: str, from_date: str, to_date: str):
     cache_key = f"rev_lines_{symbol}_{from_date}_{to_date}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -1479,6 +1213,232 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         print(f"Reversal lines error: {e}")
         return []
 
+def get_reversal_lines1(symbol: str, from_date: str, to_date: str):
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+ 
+    cache_key = f"rev_lines_{symbol}_{from_date}_{to_date}"
+ 
+    # आज की date है तो cache use मत करो — हमेशा fresh data चाहिए
+    if from_date != today_str:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+ 
+    try:
+        import math, re as _re
+        from datetime import datetime, time as dt_time
+ 
+        day_start = timezone.make_aware(datetime.combine(
+            datetime.strptime(from_date, '%Y-%m-%d').date(), dt_time.min))
+        day_end   = timezone.make_aware(datetime.combine(
+            datetime.strptime(to_date,   '%Y-%m-%d').date(), dt_time.max))
+ 
+        sr = LiveSRData.objects.filter(
+            Symbol=symbol,
+            Time__gte=day_start,
+            Time__lte=day_end,
+        ).order_by('-Time').first()
+ 
+        if not sr or not sr.resistance_strike or not sr.supprt_strike:
+            # आज नहीं मिला → थोड़ी देर cache (60s) ताकि हर request पर DB hit न हो
+            if from_date != today_str:
+                cache.set(cache_key, [], timeout=60)
+            return []
+ 
+        step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
+ 
+        master_levels = get_master_levels(symbol, day_start.date())
+        eff_res = master_levels["R"]["strike"]
+        eff_sup = master_levels["S"]["strike"]
+ 
+        ce_strikes_list = [eff_res, float(sr.resistance_strike)]
+        pe_strikes_list = [eff_sup, float(sr.supprt_strike)]
+        global_low  = min(pe_strikes_list + ce_strikes_list) - step
+        global_high = max(pe_strikes_list + ce_strikes_list) + step
+ 
+        oc_qs = OptionChain.objects.filter(
+            Symbol=symbol,
+            Time__gte=day_start,
+            Time__lte=day_end,
+            Strike_Price__gte=global_low,
+            Strike_Price__lte=global_high,
+        ).values(
+            'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe'
+        ).order_by('-Time')
+ 
+        seen_strikes = {}
+        spot_price   = None
+        for row in oc_qs:
+            s = row['Strike_Price']
+            if s not in seen_strikes:
+                seen_strikes[s] = row
+            if spot_price is None and row['Spot_Price']:
+                spot_price = row['Spot_Price']
+ 
+        def valid(v):
+            return v is not None and not math.isnan(v) and not math.isinf(v)
+ 
+        seen_ce, seen_pe = set(), set()
+        lines = []
+ 
+        for strike, row in sorted(seen_strikes.items()):
+            if not valid(row['Spot_Price']):
+                continue
+            spot = row['Spot_Price']
+            is_top    = (strike == eff_res)
+            is_bottom = (strike == eff_sup)
+ 
+            if valid(row['Reversl_Ce']):
+                if (row['Reversl_Ce'] >= spot or is_top) and row['Reversl_Ce'] not in seen_ce:
+                    seen_ce.add(row['Reversl_Ce'])
+                    lines.append({
+                        "price":  float(row['Reversl_Ce']),
+                        "strike": float(strike),
+                        "type":   "CE",
+                        "color":  "#ff8c00" if is_top else "#f85149",
+                        "width":  4 if is_top else 1,
+                        "dash":   0,
+                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
+                    })
+ 
+            if valid(row['Reversl_Pe']):
+                if (row['Reversl_Pe'] < spot or is_bottom) and row['Reversl_Pe'] not in seen_pe:
+                    seen_pe.add(row['Reversl_Pe'])
+                    lines.append({
+                        "price":  float(row['Reversl_Pe']),
+                        "strike": float(strike),
+                        "type":   "PE",
+                        "color":  "#00bfff" if is_bottom else "#3fb950",
+                        "width":  4 if is_bottom else 1,
+                        "dash":   0,
+                        "label":  f"S {strike:.0f}" if is_bottom else f"P {strike:.0f}",
+                    })
+ 
+        lines.sort(key=lambda x: x["price"], reverse=True)
+ 
+        # ✅ Historical dates → 5 मिनट cache (नहीं बदलता)
+        # ✅ आज की date → cache नहीं (हर request पर fresh)
+        if from_date != today_str:
+            cache.set(cache_key, lines, timeout=300)
+ 
+        return lines
+ 
+    except Exception as e:
+        print(f"Reversal lines error: {e}")
+        return []
+
+def get_reversal_lines(symbol: str, from_date: str, to_date: str):
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+    cache_key = f"rev_lines_{symbol}_{from_date}_{to_date}"
+ 
+    if from_date != today_str:
+        cached = cache.get(cache_key)
+        if cached is not None: return cached
+ 
+    try:
+        import math, re as _re
+        from datetime import datetime, time as dt_time
+ 
+        day_start = timezone.make_aware(datetime.combine(datetime.strptime(from_date, '%Y-%m-%d').date(), dt_time.min))
+        day_end   = timezone.make_aware(datetime.combine(datetime.strptime(to_date, '%Y-%m-%d').date(), dt_time.max))
+ 
+        sr = LiveSRData.objects.filter(Symbol=symbol, Time__gte=day_start, Time__lte=day_end).order_by('-Time').first()
+ 
+        if not sr or not sr.resistance_strike or not sr.supprt_strike:
+            if from_date != today_str: cache.set(cache_key, [], timeout=60)
+            return []
+ 
+        step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
+ 
+        master_levels = get_master_levels(symbol, day_start.date())
+        eff_res = master_levels["R"]["strike"]
+        eff_sup = master_levels["S"]["strike"]
+ 
+        ce_strikes_list = [eff_res, float(sr.resistance_strike)]
+        pe_strikes_list = [eff_sup, float(sr.supprt_strike)]
+        global_low  = min(pe_strikes_list + ce_strikes_list) - step
+        global_high = max(pe_strikes_list + ce_strikes_list) + step
+        
+        def valid(v): return v is not None and not math.isnan(v) and not math.isinf(v)
+
+        # 👇 बदलाव 1: .values() में 'Time' जोड़ा गया और order_by('Time') किया (ताकि सुबह से शाम तक का डेटा मिले)
+        oc_qs = OptionChain.objects.filter(
+            Symbol=symbol, Time__gte=day_start, Time__lte=day_end,
+            Strike_Price__gte=global_low, Strike_Price__lte=global_high,
+        ).values('Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('Time')
+ 
+        # 👇 बदलाव 2: हिस्ट्री सेव करने के लिए Dictionary बनाई
+        history_ce = {}
+        history_pe = {}
+        latest_data = {}
+        spot_price = None
+
+        for row in oc_qs:
+            s = row['Strike_Price']
+            t_str = row['Time'].isoformat()  # समय को स्ट्रिंग में बदला
+            
+            if row['Spot_Price']: spot_price = row['Spot_Price']
+            latest_data[s] = row # हर स्ट्राइक का सबसे ताज़ा डेटा यहाँ सेव होगा
+            
+            # CE की हिस्ट्री सेव करें
+            if valid(row['Reversl_Ce']):
+                if s not in history_ce: history_ce[s] = []
+                history_ce[s].append({"time": t_str, "value": float(row['Reversl_Ce'])})
+                
+            # PE की हिस्ट्री सेव करें
+            if valid(row['Reversl_Pe']):
+                if s not in history_pe: history_pe[s] = []
+                history_pe[s].append({"time": t_str, "value": float(row['Reversl_Pe'])})
+ 
+        seen_ce, seen_pe = set(), set()
+        lines = []
+ 
+        # 👇 बदलाव 3: चार्ट के लिए लाइन्स तैयार करते समय 'history' को अटैच करना
+        for strike, row in sorted(latest_data.items()):
+            if not valid(row['Spot_Price']): continue
+            spot = row['Spot_Price']
+            is_top    = (strike == eff_res)
+            is_bottom = (strike == eff_sup)
+ 
+            if valid(row['Reversl_Ce']):
+                if (row['Reversl_Ce'] >= spot or is_top) and row['Reversl_Ce'] not in seen_ce:
+                    seen_ce.add(row['Reversl_Ce'])
+                    lines.append({
+                        "price":  float(row['Reversl_Ce']),
+                        "strike": float(strike),
+                        "type":   "CE",
+                        "color":  "#ff8c00" if is_top else "#f85149",
+                        "width":  4 if is_top else 1,
+                        "dash":   0,
+                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
+                        "history": history_ce.get(strike, []) # ✨ यहाँ हिस्ट्री जोड़ी गई
+                    })
+ 
+            if valid(row['Reversl_Pe']):
+                if (row['Reversl_Pe'] < spot or is_bottom) and row['Reversl_Pe'] not in seen_pe:
+                    seen_pe.add(row['Reversl_Pe'])
+                    lines.append({
+                        "price":  float(row['Reversl_Pe']),
+                        "strike": float(strike),
+                        "type":   "PE",
+                        "color":  "#00bfff" if is_bottom else "#3fb950",
+                        "width":  4 if is_bottom else 1,
+                        "dash":   0,
+                        "label":  f"S {strike:.0f}" if is_bottom else f"P {strike:.0f}",
+                        "history": history_pe.get(strike, []) # ✨ यहाँ हिस्ट्री जोड़ी गई
+                    })
+ 
+        lines.sort(key=lambda x: x["price"], reverse=True)
+ 
+        if from_date != today_str: cache.set(cache_key, lines, timeout=300)
+        return lines
+ 
+    except Exception as e:
+        print(f"Reversal lines error: {e}")
+        return []
+    
 # ─────────────────────────────────────────────
 # Helper: Upstox API से candle data fetch
 # ─────────────────────────────────────────────
@@ -1547,7 +1507,7 @@ def parse_candles(api_response: dict):
 # View 1: Chart Page (HTML render)
 # ─────────────────────────────────────────────
 @xframe_options_exempt
-def chart_view(request):
+def chart_view1(request):
     today     = date.today()
     symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
     unit      = request.GET.get("unit",      "minutes")
@@ -1592,11 +1552,65 @@ def chart_view(request):
     }
     return render(request, "mystock/chart.html", context)
 
+@xframe_options_exempt
+def chart_view(request):
+    today     = date.today()
+    symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
+    unit      = request.GET.get("unit",      "minutes")
+    interval  = request.GET.get("interval",  "5")
+    from_date = request.GET.get("from_date", today.isoformat())
+    to_date   = request.GET.get("to_date",   today.isoformat())
+
+    candles        = []
+    error          = None
+    instrument_key = None
+
+    # Step 1: DB से instrument_key लो  (same as before)
+    instrument_key = get_instrument_key(symbol)
+
+    if not instrument_key:
+        error = f"'{symbol}' symbol DB में नहीं मिला।"
+    else:
+        # Step 2: ✅ Redis try करो (सिर्फ आज की date के लिए)
+        if from_date == today.isoformat():
+            candles = load_intraday_candles(instrument_key, unit, interval)
+
+        # Cache miss या historical → Upstox API
+        if not candles:
+            result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+            if not result["success"]:
+                error = result["error"]
+            else:
+                candles = parse_candles(result["data"])
+                if not candles:
+                    error = "इस date range में कोई candle data नहीं मिली।"
+
+                # आज का data था तो cache में save करो
+                if from_date == today.isoformat() and candles:
+                    from .redis_cache_manager import save_intraday_candles
+                    save_intraday_candles(instrument_key, unit, interval, candles)
+
+    # Step 3: Reversal lines  (same as before)
+    reversal_lines = get_reversal_lines(symbol, from_date, to_date)
+
+    context = {
+        "candles":        candles,
+        "reversal_lines": reversal_lines,
+        "error":          error,
+        "symbol":         symbol,
+        "instrument_key": instrument_key or "—",
+        "unit":           unit,
+        "interval":       interval,
+        "from_date":      from_date,
+        "to_date":        to_date,
+    }
+    return render(request, "mystock/chart.html", context)
+
 
 # ─────────────────────────────────────────────
 # View 2: AJAX JSON API endpoint
 # ─────────────────────────────────────────────
-def candle_api(request):
+def candle_api1(request):
     symbol    = request.GET.get("symbol",    "").strip().upper()
     unit      = request.GET.get("unit",      "minutes")
     interval  = request.GET.get("interval",  "5")
@@ -1632,6 +1646,72 @@ def candle_api(request):
         "reversal_lines": reversal_lines,
     })
 
+def candle_api(request):
+    """
+    Chart AJAX endpoint।
+
+    Logic:
+      आज की date + cache hit  → Redis से serve  (0 Upstox calls ✅)
+      आज की date + cache miss → Upstox fetch करो, Redis में save करो
+      पुरानी date              → Upstox से direct (historical, rarely called)
+    """
+    today_str = date.today().isoformat()
+
+    symbol    = request.GET.get("symbol",    "").strip().upper()
+    unit      = request.GET.get("unit",      "minutes")
+    interval  = request.GET.get("interval",  "5")
+    from_date = request.GET.get("from_date", today_str)
+    to_date   = request.GET.get("to_date",   today_str)
+    show_reversal = request.GET.get("reversal", "1") != "0"
+
+    if not symbol:
+        return JsonResponse({"error": "symbol parameter जरूरी है।"}, status=400)
+
+    instrument_key = get_instrument_key(symbol)
+    if not instrument_key:
+        return JsonResponse({"error": f"'{symbol}' symbol DB में नहीं मिला।"}, status=404)
+
+    candles      = None
+    cache_source = "upstox"
+
+    # ── Intraday (आज की date) → Redis try करो ─────────────
+    if from_date == today_str:
+        candles = load_intraday_candles(instrument_key, unit, interval)
+        if candles is not None:
+            cache_source = "redis"   # ✅ Redis से मिला
+
+    # ── Cache miss या Historical → Upstox API ──────────────
+    if candles is None:
+        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+        if not result["success"]:
+            return JsonResponse({"error": result["error"]}, status=400)
+        candles = parse_candles(result["data"])
+
+        # अगर आज का data है तो Redis में save करो
+        # (अगली request के लिए cache ready रहे)
+        if from_date == today_str and candles:
+            from .redis_cache_manager import save_intraday_candles
+            save_intraday_candles(instrument_key, unit, interval, candles)
+
+    # ── Reversal lines ──────────────────────────────────────
+    reversal_lines = get_reversal_lines(symbol, from_date, to_date) if show_reversal else []
+
+    return JsonResponse({
+        "symbol":         symbol,
+        "instrument_key": instrument_key,
+        "interval":       interval,
+        "unit":           unit,
+        "from_date":      from_date,
+        "to_date":        to_date,
+        "count":          len(candles),
+        "candles":        candles,
+        "reversal_lines": reversal_lines,
+        # Debug info (चाहें तो हटा दें production में)
+        "cache_source":   cache_source,
+        "last_updated":   get_last_updated(instrument_key, unit, interval),
+    })
+
+
 # ─────────────────────────────────────────────
 # View 3: Symbol Autocomplete Search
 # ─────────────────────────────────────────────
@@ -1652,6 +1732,14 @@ def symbol_search(request):
 
 
 
+
+from .redis_cache_manager import (
+    load_intraday_candles,
+    get_last_updated,
+)
+
+
+
 from django.views.decorators.clickjacking import xframe_options_exempt
 
 @xframe_options_exempt
@@ -1667,14 +1755,35 @@ def dashboard_chart_view(request):
     error = None
     instrument_key = get_instrument_key(symbol)
 
+    # if not instrument_key:
+    #     error = f"'{symbol}' symbol DB में नहीं मिला।"
+    # else:
+    #     result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+    #     if not result["success"]:
+    #         error = result["error"]
+    #     else:
+    #         candles = parse_candles(result["data"])
     if not instrument_key:
         error = f"'{symbol}' symbol DB में नहीं मिला।"
     else:
-        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
-        if not result["success"]:
-            error = result["error"]
-        else:
-            candles = parse_candles(result["data"])
+        # Step 2: ✅ Redis try करो (सिर्फ आज की date के लिए)
+        if from_date == today.isoformat():
+            candles = load_intraday_candles(instrument_key, unit, interval)
+
+        # Cache miss या historical → Upstox API
+        if not candles:
+            result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+            if not result["success"]:
+                error = result["error"]
+            else:
+                candles = parse_candles(result["data"])
+                if not candles:
+                    error = "इस date range में कोई candle data नहीं मिली।"
+
+                # आज का data था तो cache में save करो
+                if from_date == today.isoformat() and candles:
+                    from .redis_cache_manager import save_intraday_candles
+                    save_intraday_candles(instrument_key, unit, interval, candles)
 
     reversal_lines = get_reversal_lines(symbol, from_date, to_date)
 
@@ -2269,610 +2378,12 @@ def support_resistance_view(request):
     return render(request, 'sr_data_page.html', context)
 
 
-
-
-from django.http import HttpResponse
-from datetime import date
-# यह एक बहुत ही बेसिक बैकटेस्टिंग व्यू है जो आज के दिन के ऑप्शन चेन डेटा पर आधारित है। 
-# यह स्पॉट प्राइस को रिवर्सल लेवल्स (Reversl_Ce और Reversl_Pe) के साथ तुलना करता है 
-# और एंट्री, टारगेट, और स्टॉपलॉस को लॉग करता है। अंत में, यह एक HTML रिपोर्ट बनाता है 
-# जिसमें सभी ट्रेड्स और कुल P&L दिखाया जाता है।
-
-def run_backtest_view(request):
-    symbol = request.GET.get('symbol', 'NIFTY').upper()
-    today = date.today()
-    target = 50
-    sl = 50
-
-    # 1. आज का सारा डेटा टाइम के हिसाब से लाएं (Time Ascending ताकि सुबह से शाम तक चले)
-    # नोट: आपको अपने डेटाबेस के हिसाब से इसे थोड़ा एडजस्ट करना पड़ सकता है
-    day_data = OptionChain.objects.filter(
-        Symbol__iexact=symbol,
-        Time__date=today
-    ).values('Time', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('Time')
-
-    position = None  
-    entry_price = 0
-    total_pnl = 0  
-    trades_log = []
-
-    for row in day_data:
-        time_str = row['Time'].strftime('%H:%M:%S') if row['Time'] else "00:00"
-        spot = row['Spot_Price']
-        
-        # रिवर्सल की वैल्यू (अगर None नहीं है तो float में बदलें)
-        r_val = float(row['Reversl_Ce']) if row['Reversl_Ce'] else None
-        s_val = float(row['Reversl_Pe']) if row['Reversl_Pe'] else None
-
-        if spot is None:
-            continue
-
-        # ─── 1. एंट्री ढूँढना ───
-        if position is None:
-            # PUT Buy: अगर स्पॉट R (Resistance) के बराबर या ऊपर जाए
-            if r_val and spot >= r_val:
-                position = 'PE'
-                entry_price = spot
-                trades_log.append(f"<div class='log entry-put'>[{time_str}] 🔴 <b>PUT Buy</b> @ {spot:.2f} (Resistance = {r_val:.2f})</div>")
-            
-            # CALL Buy: अगर स्पॉट S (Support) के बराबर या नीचे जाए
-            elif s_val and spot <= s_val:
-                position = 'CE'
-                entry_price = spot
-                trades_log.append(f"<div class='log entry-call'>[{time_str}] 🟢 <b>CALL Buy</b> @ {spot:.2f} (Support = {s_val:.2f})</div>")
-
-        # ─── 2. टारगेट और स्टॉपलॉस चेक करना ───
-        else:
-            if position == 'CE':
-                if spot >= (entry_price + target):
-                    trades_log.append(f"<div class='log target'>&nbsp;&nbsp;✅ [{time_str}] CALL Target Hit @ {spot:.2f} (+{target} Points)</div>")
-                    total_pnl += target
-                    position = None
-                elif spot <= (entry_price - sl):
-                    trades_log.append(f"<div class='log sl'>&nbsp;&nbsp;❌ [{time_str}] CALL SL Hit @ {spot:.2f} (-{sl} Points)</div>")
-                    total_pnl -= sl
-                    position = None
-
-            elif position == 'PE':
-                if spot <= (entry_price - target):
-                    trades_log.append(f"<div class='log target'>&nbsp;&nbsp;✅ [{time_str}] PUT Target Hit @ {spot:.2f} (+{target} Points)</div>")
-                    total_pnl += target
-                    position = None
-                elif spot >= (entry_price + sl):
-                    trades_log.append(f"<div class='log sl'>&nbsp;&nbsp;❌ [{time_str}] PUT SL Hit @ {spot:.2f} (-{sl} Points)</div>")
-                    total_pnl -= sl
-                    position = None
-
-    # 3. HTML रिपोर्ट तैयार करना (सुंदर डिज़ाइन के साथ)
-    pnl_color = "#00e676" if total_pnl >= 0 else "#ff1744"
-    
-    html_content = f"""
-    <html>
-    <head>
-        <title>Today's Backtest Report</title>
-        <style>
-            body {{ background-color: #0f1115; color: #fff; font-family: 'Courier New', monospace; padding: 30px; }}
-            h2 {{ color: #2962ff; border-bottom: 1px solid #333; padding-bottom: 10px; }}
-            .container {{ max-width: 800px; margin: 0 auto; background: #181b21; padding: 20px; border-radius: 8px; border: 1px solid #333; }}
-            .log {{ padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 15px; }}
-            .entry-put {{ background: rgba(255, 23, 68, 0.1); border-left: 3px solid #ff1744; }}
-            .entry-call {{ background: rgba(0, 200, 83, 0.1); border-left: 3px solid #00c853; }}
-            .target {{ color: #00c853; font-weight: bold; }}
-            .sl {{ color: #ff1744; font-weight: bold; }}
-            .result-box {{ margin-top: 20px; padding: 15px; background: #222; border-radius: 6px; text-align: center; font-size: 20px; border: 1px solid #444; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h2>📊 Backtest Report: {symbol} (Target: {target}, SL: {sl})</h2>
-            <p>Date: {today}</p>
-            <hr style="border: 0; border-top: 1px solid #333; margin-bottom: 20px;">
-    """
-    
-    if not trades_log:
-        html_content += "<div class='log' style='color:#888;'>आज कोई ट्रेड नहीं मिला (मार्केट R और S के बीच में ही रहा)।</div>"
-    else:
-        for log in trades_log:
-            html_content += log
-            
-    html_content += f"""
-            <div class="result-box">
-                आज का कुल रिज़ल्ट: <strong style="color: {pnl_color};">{total_pnl} Points</strong>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return HttpResponse(html_content)
-
-
-
-
-
-
-
-
-
-# =============================================================================
-# FILE: yourapp/views.py  (इस function को अपने existing views.py में add करो)
-#
-# URL: urls.py में add करो:
-#   from yourapp.views import backtest_view
-#   path('backtest/', backtest_view, name='backtest'),
-# =============================================================================
-
-import math, re
-from django.shortcuts import render
-from django.utils.timezone import localtime
-
-
-
-
-# ── Helpers (management command जैसे ही) ─────────────────────────────────────
-def _is_valid(val):
-    try:
-        f = float(val)
-        return not math.isnan(f) and not math.isinf(f)
-    except (TypeError, ValueError):
-        return False
-
-
-def _get_step(strikes):
-    all_s = sorted(set(strikes))
-    if len(all_s) < 2:
-        return 50.0
-    diffs = [all_s[i + 1] - all_s[i] for i in range(len(all_s) - 1)]
-    step = min(diffs)
-    return step if step > 0 else 50.0
-
-
-def _compute_effective_strikes(sr, step):
-    res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
-    res_base   = float(sr.resistance_strike)
-    m          = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-    res_target = float(m.group(1)) if m else res_base
-
-    if   "SHIFTED WTT" in res_status: eff_res = res_base
-    elif "SHIFTED WTB" in res_status: eff_res = res_base + step
-    elif "WTT"         in res_status: eff_res = res_target + step
-    elif "WTB"         in res_status: eff_res = res_target + step
-    else:                             eff_res = res_base + step
-
-    sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
-    sup_base   = float(sr.supprt_strike)
-    m          = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-    sup_target = float(m.group(1)) if m else sup_base
-
-    if   "SHIFTED WTT" in sup_status: eff_sup = sup_base
-    elif "SHIFTED WTB" in sup_status: eff_sup = sup_base - step
-    elif "WTT"         in sup_status: eff_sup = sup_target - step
-    elif "WTB"         in sup_status: eff_sup = sup_target - step
-    else:                             eff_sup = sup_base - step
-
-    return eff_res, eff_sup
-
-
-def _run_backtest(symbol, date_str, target, sl):
-
-    result = {
-        'trades': [], 'stats': {}, 'timeline': [],
-        'r_level': None, 's_level': None,
-        'r_strike': None, 's_strike': None,
-        'res_status': '', 'sup_status': '',
-        'error': None,
-    }
-
-    # ── LiveSRData ─────────────────────────────────────────
-    sr = (LiveSRData.objects
-          .filter(Symbol__iexact=symbol, Time__date=date_str)
-          .only('resistance_strike', 'supprt_strike', 'resistance_status', 'supprt_status')
-          .order_by('-Time')
-          .first())
-
-    if not sr:
-        result['error'] = f"LiveSRData नहीं मिली: {symbol} / {date_str}"
-        return result
-
-    if not sr.resistance_strike or not sr.supprt_strike:
-        result['error'] = "resistance_strike या supprt_strike खाली है!"
-        return result
-
-    # ── OptionChain: SINGLE QUERY ─────────────────────────
-    oc_qs = list(
-        OptionChain.objects
-        .filter(Symbol__iexact=symbol, Time__date=date_str)
-        .values('Time', 'Spot_Price', 'Strike_Price', 'Reversl_Ce', 'Reversl_Pe')
-        .order_by('Time')
-    )
-
-    if not oc_qs:
-        result['error'] = "OptionChain data नहीं मिला!"
-        return result
-
-    # ── STEP FAST ─────────────────────────────────────────
-    strikes = sorted({row['Strike_Price'] for row in oc_qs if row['Strike_Price']})
-    step = min((b - a for a, b in zip(strikes, strikes[1:])), default=50.0)
-
-    # ── Effective Strikes ─────────────────────────────────
-    eff_res, eff_sup = _compute_effective_strikes(sr, step)
-
-    # ── Latest data map (NO DB HIT) ───────────────────────
-    latest_map = {}
-    for row in reversed(oc_qs):  # latest first
-        sp = row['Strike_Price']
-        if sp not in latest_map:
-            latest_map[sp] = row
-
-    r_row = latest_map.get(eff_res)
-    s_row = latest_map.get(eff_sup)
-
-    if not r_row or not _is_valid(r_row.get('Reversl_Ce')):
-        result['error'] = f"Strike {eff_res} की Reversl_Ce नहीं मिली!"
-        return result
-
-    if not s_row or not _is_valid(s_row.get('Reversl_Pe')):
-        result['error'] = f"Strike {eff_sup} की Reversl_Pe नहीं मिली!"
-        return result
-
-    R_LEVEL = float(r_row['Reversl_Ce'])
-    S_LEVEL = float(s_row['Reversl_Pe'])
-
-    result.update({
-        'r_level': R_LEVEL,
-        's_level': S_LEVEL,
-        'r_strike': eff_res,
-        's_strike': eff_sup,
-        'res_status': str(sr.resistance_status or ''),
-        'sup_status': str(sr.supprt_status or ''),
-        'step': step,
-    })
-
-    # ── Timeline FAST ─────────────────────────────────────
-    timeline_dict = {}
-    for row in oc_qs:
-        t = row['Time']
-        sp = row['Spot_Price']
-        if t not in timeline_dict and _is_valid(sp):
-            timeline_dict[t] = float(sp)
-
-    if not timeline_dict:
-        result['error'] = "Spot_Price data नहीं मिला!"
-        return result
-
-    sorted_times = sorted(timeline_dict)
-
-    result['timeline'] = [
-        {'time': localtime(t).strftime('%H:%M'), 'spot': timeline_dict[t]}
-        for t in sorted_times
-    ]
-
-    # ── Backtest Loop (Optimized) ─────────────────────────
-    trades = []
-    append_trade = trades.append
-
-    open_trade = None
-    trade_no = 0
-
-    for t in sorted_times:
-        spot = timeline_dict[t]
-        t_str = localtime(t).strftime('%H:%M:%S')
-
-        # EXIT
-        if open_trade:
-            entry = open_trade['entry_spot']
-            ttype = open_trade['type']
-
-            if ttype == 'PUT':
-                if spot <= entry - target:
-                    pnl, res = target, 'TARGET'
-                elif spot >= entry + sl:
-                    pnl, res = -sl, 'SL'
-                else:
-                    pnl = None
-            else:
-                if spot >= entry + target:
-                    pnl, res = target, 'TARGET'
-                elif spot <= entry - sl:
-                    pnl, res = -sl, 'SL'
-                else:
-                    pnl = None
-
-            if pnl is not None:
-                open_trade.update({
-                    'exit_spot': round(spot, 2),
-                    'exit_time': t_str,
-                    'result': res,
-                    'pnl': round(pnl, 2),
-                })
-                append_trade(open_trade)
-                open_trade = None
-                continue
-
-        # ENTRY
-        if not open_trade:
-            if spot >= R_LEVEL:
-                trade_no += 1
-                open_trade = {
-                    'no': trade_no,
-                    'type': 'PUT',
-                    'trigger': 'R',
-                    'level': R_LEVEL,
-                    'entry_spot': round(spot, 2),
-                    'entry_time': t_str,
-                }
-
-            elif spot <= S_LEVEL:
-                trade_no += 1
-                open_trade = {
-                    'no': trade_no,
-                    'type': 'CALL',
-                    'trigger': 'S',
-                    'level': S_LEVEL,
-                    'entry_spot': round(spot, 2),
-                    'entry_time': t_str,
-                }
-
-    # ── Day End ───────────────────────────────────────────
-    if open_trade:
-        last_spot = timeline_dict[sorted_times[-1]]
-        entry = open_trade['entry_spot']
-
-        pnl = (entry - last_spot) if open_trade['type'] == 'PUT' else (last_spot - entry)
-
-        open_trade.update({
-            'exit_spot': round(last_spot, 2),
-            'exit_time': localtime(sorted_times[-1]).strftime('%H:%M:%S'),
-            'result': 'OPEN',
-            'pnl': round(pnl, 2),
-        })
-        append_trade(open_trade)
-
-    result['trades'] = trades
-
-    # ── Stats FAST ────────────────────────────────────────
-    total = len(trades)
-    wins = sum(1 for tr in trades if tr['pnl'] > 0)
-    losses = sum(1 for tr in trades if tr['pnl'] < 0)
-    net = sum(tr['pnl'] for tr in trades)
-
-    result['stats'] = {
-        'total': total,
-        'wins': wins,
-        'losses': losses,
-        'win_rate': round((wins / total * 100), 1) if total else 0,
-        'net_pnl': round(net, 2),
-        'open_time': localtime(sorted_times[0]).strftime('%H:%M:%S'),
-        'close_time': localtime(sorted_times[-1]).strftime('%H:%M:%S'),
-        'ticks': len(sorted_times),
-    }
-
-    return result
-
-
-# =============================================================================
-# VIEW
-# =============================================================================
-def backtest_view(request):
-    context = {'result': None, 'form': {}}
-
-    if request.method == 'POST':
-        symbol  = request.POST.get('symbol', '').strip().upper()
-        date    = request.POST.get('date', '').strip()
-        target  = float(request.POST.get('target', 50))
-        sl      = float(request.POST.get('sl', 50))
-
-        context['form'] = {
-            'symbol': symbol, 'date': date,
-            'target': target, 'sl': sl,
-        }
-
-        if symbol and date:
-            context['result'] = _run_backtest(symbol, date, target, sl)
-
-    return render(request, 'mystock/backtestv.html', context)
-
-import re as _re
-from django.http import HttpResponse
-from datetime import date
-from django.utils import timezone  # <--- 1. यह नया इम्पोर्ट जोड़ा गया है (IST के लिए)
-# सुनिश्चित करें कि आपके मॉडल्स (OptionChain, LiveSRData) ऊपर इम्पोर्टेड हों
-
-def run_backtest_view(request):
-    symbol = request.GET.get('symbol', 'NIFTY').upper()
-    today = date.today()
-    target = 50
-    sl = 50
-
-    # ─── 0. Step Size (गैप) निकालना ───
-    oc_strikes = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=today).values_list('Strike_Price', flat=True).distinct()
-    all_strikes = sorted(list(oc_strikes))
-    step = 50
-    if len(all_strikes) >= 2:
-        diffs = [all_strikes[i+1] - all_strikes[i] for i in range(len(all_strikes)-1)]
-        valid_diffs = [d for d in diffs if d > 0]
-        if valid_diffs:
-            step = min(valid_diffs)
-
-    # ==========================================
-    # 1. S/R Line Movement (सिर्फ चार्ट की लाइन खिसकने पर)
-    # ==========================================
-    sr_history_data = LiveSRData.objects.filter(
-        Symbol__iexact=symbol,
-        Time__date=today
-    ).order_by('Time')
-
-    sr_shifts_log = []
-    last_eff_r = None
-    last_eff_s = None
-
-    for sr in sr_history_data:
-        # <--- 2. यहाँ टाइम को भारतीय समय (IST) में बदला गया है --->
-        local_time = timezone.localtime(sr.Time) if sr.Time else None
-        time_str = local_time.strftime('%H:%M:%S') if local_time else "00:00"
-
-        # ─── CALL SIDE (RESISTANCE LINE) ───
-        res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
-        res_base = sr.resistance_strike
-        m_res = _re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-        res_target = float(m_res.group(1)) if m_res else res_base
-
-        eff_r = None
-        if res_base:
-            if "SHIFTED WTT" in res_status: eff_r = res_base
-            elif "SHIFTED WTB" in res_status: eff_r = res_base + step
-            elif "WTT" in res_status: eff_r = res_target + step
-            elif "WTB" in res_status: eff_r = res_target + step
-            elif "STRONG" in res_status: eff_r = res_base + step
-            else: eff_r = res_base + step
-
-        # ─── PUT SIDE (SUPPORT LINE) ───
-        sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
-        sup_base = sr.supprt_strike
-        m_sup = _re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-        sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-        eff_s = None
-        if sup_base:
-            if "SHIFTED WTT" in sup_status: eff_s = sup_base
-            elif "SHIFTED WTB" in sup_status: eff_s = sup_base - step
-            elif "WTT" in sup_status: eff_s = sup_target - step
-            elif "WTB" in sup_status: eff_s = sup_target - step
-            elif "STRONG" in sup_status: eff_s = sup_base - step
-            else: eff_s = sup_base - step
-
-        # अगर चार्ट पर 'Drawn Line' की पोजीशन बदलती है, तभी लिस्ट में डालेंगे
-        if (eff_r is not None and eff_s is not None) and (eff_r != last_eff_r or eff_s != last_eff_s):
-            sr_shifts_log.append(
-                f"<div class='sr-shift-line'>⏱️ <b>{time_str}</b> &nbsp;👉&nbsp; "
-                f"<span style='color:#ff8c00;'>R Line: {eff_r:.0f}</span> &nbsp;|&nbsp; "
-                f"<span style='color:#00bfff;'>S Line: {eff_s:.0f}</span></div>"
-            )
-            last_eff_r = eff_r
-            last_eff_s = eff_s
-
-    # ==========================================
-    # 2. बैकटेस्ट ट्रेड लॉजिक
-    # ==========================================
-    day_data = OptionChain.objects.filter(
-        Symbol__iexact=symbol,
-        Time__date=today
-    ).values('Time', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('Time')
-
-    position = None  
-    entry_price = 0
-    total_pnl = 0  
-    trades_log = []
-
-    for row in day_data:
-        # <--- 3. यहाँ भी टाइम को भारतीय समय (IST) में बदला गया है --->
-        local_time = timezone.localtime(row['Time']) if row['Time'] else None
-        time_str = local_time.strftime('%H:%M:%S') if local_time else "00:00"
-        
-        spot = row['Spot_Price']
-        
-        r_val = float(row['Reversl_Ce']) if row['Reversl_Ce'] else None
-        s_val = float(row['Reversl_Pe']) if row['Reversl_Pe'] else None
-
-        if spot is None:
-            continue
-
-        if position is None:
-            if r_val and spot >= r_val:
-                position = 'PE'
-                entry_price = spot
-                trades_log.append(f"<div class='log entry-put'>[{time_str}] 🔴 <b>PUT Buy</b> @ {spot:.2f} (R Line = {r_val:.2f})</div>")
-            elif s_val and spot <= s_val:
-                position = 'CE'
-                entry_price = spot
-                trades_log.append(f"<div class='log entry-call'>[{time_str}] 🟢 <b>CALL Buy</b> @ {spot:.2f} (S Line = {s_val:.2f})</div>")
-        else:
-            if position == 'CE':
-                if spot >= (entry_price + target):
-                    trades_log.append(f"<div class='log target'>&nbsp;&nbsp;✅ [{time_str}] CALL Target Hit @ {spot:.2f} (+{target} Points)</div>")
-                    total_pnl += target
-                    position = None
-                elif spot <= (entry_price - sl):
-                    trades_log.append(f"<div class='log sl'>&nbsp;&nbsp;❌ [{time_str}] CALL SL Hit @ {spot:.2f} (-{sl} Points)</div>")
-                    total_pnl -= sl
-                    position = None
-
-            elif position == 'PE':
-                if spot <= (entry_price - target):
-                    trades_log.append(f"<div class='log target'>&nbsp;&nbsp;✅ [{time_str}] PUT Target Hit @ {spot:.2f} (+{target} Points)</div>")
-                    total_pnl += target
-                    position = None
-                elif spot >= (entry_price + sl):
-                    trades_log.append(f"<div class='log sl'>&nbsp;&nbsp;❌ [{time_str}] PUT SL Hit @ {spot:.2f} (-{sl} Points)</div>")
-                    total_pnl -= sl
-                    position = None
-
-    # ==========================================
-    # 3. HTML रिपोर्ट तैयार करना
-    # ==========================================
-    pnl_color = "#00e676" if total_pnl >= 0 else "#ff1744"
-    
-    html_content = f"""
-    <html>
-    <head>
-        <title>Today's Backtest & S/R Report</title>
-        <style>
-            body {{ background-color: #0f1115; color: #fff; font-family: 'Courier New', monospace; padding: 30px; }}
-            h2 {{ color: #2962ff; border-bottom: 1px solid #333; padding-bottom: 10px; margin-top: 0; }}
-            .container {{ max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }}
-            .card {{ background: #181b21; padding: 20px; border-radius: 8px; border: 1px solid #333; }}
-            .log {{ padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 15px; }}
-            .entry-put {{ background: rgba(255, 23, 68, 0.1); border-left: 3px solid #ff1744; }}
-            .entry-call {{ background: rgba(0, 200, 83, 0.1); border-left: 3px solid #00c853; }}
-            .target {{ color: #00c853; font-weight: bold; }}
-            .sl {{ color: #ff1744; font-weight: bold; }}
-            .sr-shift-line {{ padding: 6px 10px; font-size: 14px; border-bottom: 1px dashed #2a2d35; }}
-            .sr-shift-line:last-child {{ border-bottom: none; }}
-            .sr-history-box {{ background: #0d1117; border: 1px solid #2a2d35; border-radius: 6px; padding: 10px; max-height: 250px; overflow-y: auto; }}
-            .result-box {{ margin-top: 10px; padding: 15px; background: #222; border-radius: 6px; text-align: center; font-size: 20px; border: 1px solid #444; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="card">
-                <h2>📈 Support & Resistance Chart Lines</h2>
-                <p style="color:#888; font-size: 13px; margin-top:-10px;">यहाँ सिर्फ वे समय (Time) दिखाए गए हैं जब चार्ट पर लाइन (R और S) ने अपनी असली जगह बदली।</p>
-                <div class="sr-history-box">
-                    {"".join(sr_shifts_log) if sr_shifts_log else "<div style='color:#888;'>आज लाइन ने अपनी जगह नहीं बदली।</div>"}
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>📊 Backtest Trades (Target: {target}, SL: {sl})</h2>
-                <p style="color:#888; font-size: 13px; margin-top:-10px;">Date: {today} | Symbol: {symbol}</p>
-                <div style="margin-top: 15px;">
-                    {"".join(trades_log) if trades_log else "<div class='log' style='color:#888;'>आज कोई ट्रेड नहीं मिला (मार्केट R और S के बीच में ही रहा)।</div>"}
-                </div>
-                
-                <div class="result-box">
-                    आज का कुल P&L (बिना ब्रोकरेज): <strong style="color: {pnl_color};">{total_pnl} Points</strong>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return HttpResponse(html_content)
-
-
-
-
-
-
-
-
-
-
-
  # लाइव पेपर ट्रेड्स देखने के लिए
 from django.shortcuts import render
 from django.utils import timezone
 from .models import PaperTrade
 
+@login_required
 def live_trades_view(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
     selected_date_str = request.GET.get('date')
@@ -2930,155 +2441,155 @@ from django.utils import timezone
 from django.utils.timezone import localtime
 import re
 
-def dashboard_data_api1(request):
-    symbol = request.GET.get('symbol', 'NIFTY').upper()
-    date_str = request.GET.get('date') 
+# def dashboard_data_api1(request):
+#     symbol = request.GET.get('symbol', 'NIFTY').upper()
+#     date_str = request.GET.get('date') 
     
-    if date_str:
-        selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
-    else:
-        selected_date = timezone.now().date()
+#     if date_str:
+#         selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
+#     else:
+#         selected_date = timezone.now().date()
     
-    day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
-    day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
+#     day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
+#     day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
 
-    # 1. Latest Spot Price
-    latest_oc = OptionChain.objects.filter(
-        Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-    ).only('Spot_Price', 'Time').order_by('-Time').first()
-    current_spot = latest_oc.Spot_Price if latest_oc else None
+#     # 1. Latest Spot Price
+#     latest_oc = OptionChain.objects.filter(
+#         Symbol=symbol, Time__gte=day_start, Time__lte=day_end
+#     ).only('Spot_Price', 'Time').order_by('-Time').first()
+#     current_spot = latest_oc.Spot_Price if latest_oc else None
 
-    # 2. Trades Query
-    trades_qs = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date).order_by('-entry_time')
+#     # 2. Trades Query
+#     trades_qs = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date).order_by('-entry_time')
     
-    total_pnl = 0.0
-    trades_list = []
+#     total_pnl = 0.0
+#     trades_list = []
     
-    # सिंबल के हिसाब से स्टेप (Gap) तय करें
-    step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+#     # सिंबल के हिसाब से स्टेप (Gap) तय करें
+#     step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
 
-    for tr in trades_qs:
-        current_pnl = float(tr.pnl) if tr.pnl else 0.0
+#     for tr in trades_qs:
+#         current_pnl = float(tr.pnl) if tr.pnl else 0.0
         
-        if tr.result == 'OPEN' and current_spot:
-            if tr.trade_type == 'PUT':
-                current_pnl = float(tr.entry_spot) - float(current_spot)
-            elif tr.trade_type == 'CALL':
-                current_pnl = float(current_spot) - float(tr.entry_spot)
+#         if tr.result == 'OPEN' and current_spot:
+#             if tr.trade_type == 'PUT':
+#                 current_pnl = float(tr.entry_spot) - float(current_spot)
+#             elif tr.trade_type == 'CALL':
+#                 current_pnl = float(current_spot) - float(tr.entry_spot)
                 
-        total_pnl += current_pnl
+#         total_pnl += current_pnl
 
-        # 👇 डायनामिक टारगेट और स्टॉपलॉस कैलकुलेशन (UI के लिए)
-        trade_target = 0
-        trade_sl = 0
+#         # 👇 डायनामिक टारगेट और स्टॉपलॉस कैलकुलेशन (UI के लिए)
+#         trade_target = 0
+#         trade_sl = 0
         
-        if tr.entry_strike:
-            if tr.trade_type == 'PUT':
-                # PUT के लिए: Target = (Strike - Step) का Reversal_Ce, SL = (Strike + Step) का Reversal_Ce
-                t_strike = tr.entry_strike - step
-                sl_strike = tr.entry_strike + step
+#         if tr.entry_strike:
+#             if tr.trade_type == 'PUT':
+#                 # PUT के लिए: Target = (Strike - Step) का Reversal_Ce, SL = (Strike + Step) का Reversal_Ce
+#                 t_strike = tr.entry_strike - step
+#                 sl_strike = tr.entry_strike + step
                 
-                t_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=t_strike).order_by('-Time').first()
-                sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=sl_strike).order_by('-Time').first()
+#                 t_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=t_strike).order_by('-Time').first()
+#                 sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=sl_strike).order_by('-Time').first()
                 
-                trade_target = float(t_row.Reversl_Ce) if t_row and t_row.Reversl_Ce else (tr.entry_spot - 50)
-                trade_sl = float(sl_row.Reversl_Ce) if sl_row and sl_row.Reversl_Ce else (tr.entry_spot + 50)
+#                 trade_target = float(t_row.Reversl_Ce) if t_row and t_row.Reversl_Ce else (tr.entry_spot - 50)
+#                 trade_sl = float(sl_row.Reversl_Ce) if sl_row and sl_row.Reversl_Ce else (tr.entry_spot + 50)
                 
-            elif tr.trade_type == 'CALL':
-                # CALL के लिए: Target = (Strike + Step) का Reversal_Pe, SL = (Strike - Step) का Reversal_Pe
-                t_strike = tr.entry_strike + step
-                sl_strike = tr.entry_strike - step
+#             elif tr.trade_type == 'CALL':
+#                 # CALL के लिए: Target = (Strike + Step) का Reversal_Pe, SL = (Strike - Step) का Reversal_Pe
+#                 t_strike = tr.entry_strike + step
+#                 sl_strike = tr.entry_strike - step
                 
-                t_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=t_strike).order_by('-Time').first()
-                sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=sl_strike).order_by('-Time').first()
+#                 t_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=t_strike).order_by('-Time').first()
+#                 sl_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=sl_strike).order_by('-Time').first()
                 
-                trade_target = float(t_row.Reversl_Pe) if t_row and t_row.Reversl_Pe else (tr.entry_spot + 50)
-                trade_sl = float(sl_row.Reversl_Pe) if sl_row and sl_row.Reversl_Pe else (tr.entry_spot - 50)
-        else:
-            # अगर एंट्री स्ट्राइक नहीं है (पुराने डेटा के लिए), तो डिफॉल्ट 50 पॉइंट्स
-            trade_target = tr.entry_spot + 50 if tr.trade_type == 'CALL' else tr.entry_spot - 50
-            trade_sl = tr.entry_spot - 50 if tr.trade_type == 'CALL' else tr.entry_spot + 50
+#                 trade_target = float(t_row.Reversl_Pe) if t_row and t_row.Reversl_Pe else (tr.entry_spot + 50)
+#                 trade_sl = float(sl_row.Reversl_Pe) if sl_row and sl_row.Reversl_Pe else (tr.entry_spot - 50)
+#         else:
+#             # अगर एंट्री स्ट्राइक नहीं है (पुराने डेटा के लिए), तो डिफॉल्ट 50 पॉइंट्स
+#             trade_target = tr.entry_spot + 50 if tr.trade_type == 'CALL' else tr.entry_spot - 50
+#             trade_sl = tr.entry_spot - 50 if tr.trade_type == 'CALL' else tr.entry_spot + 50
 
-        trades_list.append({
-            'type': tr.trade_type,
-            'entry_time': localtime(tr.entry_time).strftime('%H:%M:%S') if tr.entry_time else '—',
-            'trigger_level': tr.trigger_level,
-            'trigger_price': round(tr.trigger_price, 2) if tr.trigger_price else 0,
-            'entry_spot': round(tr.entry_spot, 2) if tr.entry_spot else 0,
-            'exit_time': localtime(tr.exit_time).strftime('%H:%M:%S') if tr.exit_time else '—',
-            'exit_spot': round(tr.exit_spot, 2) if tr.exit_spot else None,
-            'result': tr.result,
-            'pnl': round(current_pnl, 2),
-            'target': round(trade_target, 2), # ✨ डायनामिक टारगेट
-            'sl': round(trade_sl, 2),         # ✨ डायनामिक स्टॉपलॉस
-            'entry_strike': tr.entry_strike
-        })
+#         trades_list.append({
+#             'type': tr.trade_type,
+#             'entry_time': localtime(tr.entry_time).strftime('%H:%M:%S') if tr.entry_time else '—',
+#             'trigger_level': tr.trigger_level,
+#             'trigger_price': round(tr.trigger_price, 2) if tr.trigger_price else 0,
+#             'entry_spot': round(tr.entry_spot, 2) if tr.entry_spot else 0,
+#             'exit_time': localtime(tr.exit_time).strftime('%H:%M:%S') if tr.exit_time else '—',
+#             'exit_spot': round(tr.exit_spot, 2) if tr.exit_spot else None,
+#             'result': tr.result,
+#             'pnl': round(current_pnl, 2),
+#             'target': round(trade_target, 2), # ✨ डायनामिक टारगेट
+#             'sl': round(trade_sl, 2),         # ✨ डायनामिक स्टॉपलॉस
+#             'entry_strike': tr.entry_strike
+#         })
 
-    # 3. उस तारीख के लेवल (R/S) लाएं
-    sr = LiveSRData.objects.filter(Symbol__iexact=symbol, Time__date=selected_date).order_by('-Time').first()
+#     # 3. उस तारीख के लेवल (R/S) लाएं
+#     sr = LiveSRData.objects.filter(Symbol__iexact=symbol, Time__date=selected_date).order_by('-Time').first()
 
-    # लेवल कैलकुलेशन लॉजिक
-    r_trigger, s_trigger = None, None
-    r_strike, s_strike = None, None
+#     # लेवल कैलकुलेशन लॉजिक
+#     r_trigger, s_trigger = None, None
+#     r_strike, s_strike = None, None
     
-    try:
-        ctrl, created = SyncControl.objects.get_or_create(name="bot_loop") 
-        bot_active = ctrl.is_active
-    except Exception as e:
-        bot_active = False
+#     try:
+#         ctrl, created = SyncControl.objects.get_or_create(name="bot_loop") 
+#         bot_active = ctrl.is_active
+#     except Exception as e:
+#         bot_active = False
 
-    if sr and current_spot:
-        step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+#     if sr and current_spot:
+#         step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
         
-        # Resistance logic
-        res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
-        res_base = float(sr.resistance_strike) if sr.resistance_strike else 0
-        m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-        res_target = float(m_res.group(1)) if m_res else res_base
+#         # Resistance logic
+#         res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
+#         res_base = float(sr.resistance_strike) if sr.resistance_strike else 0
+#         m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
+#         res_target = float(m_res.group(1)) if m_res else res_base
 
-        if "SHIFTED WTT" in res_status: eff_r = res_base + step
-        elif "SHIFTED WTB" in res_status: eff_r = res_base + step
-        elif "WTT" in res_status: eff_r = res_target + step
-        elif "WTB" in res_status: eff_r = res_target + step
-        elif "STRONG" in res_status: eff_r = res_base + step
-        else: eff_r = res_base + step
+#         if "SHIFTED WTT" in res_status: eff_r = res_base + step
+#         elif "SHIFTED WTB" in res_status: eff_r = res_base + step
+#         elif "WTT" in res_status: eff_r = res_target + step
+#         elif "WTB" in res_status: eff_r = res_target + step
+#         elif "STRONG" in res_status: eff_r = res_base + step
+#         else: eff_r = res_base + step
 
-        # Support logic
-        sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
-        sup_base = float(sr.supprt_strike) if sr.supprt_strike else 0
-        m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-        sup_target = float(m_sup.group(1)) if m_sup else sup_base
+#         # Support logic
+#         sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
+#         sup_base = float(sr.supprt_strike) if sr.supprt_strike else 0
+#         m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
+#         sup_target = float(m_sup.group(1)) if m_sup else sup_base
 
-        if "SHIFTED WTT" in sup_status: eff_s = sup_base - step
-        elif "SHIFTED WTB" in sup_status: eff_s = sup_base - step
-        elif "WTT" in sup_status: eff_s = sup_target - step
-        elif "WTB" in sup_status: eff_s = sup_target - step
-        elif "STRONG" in sup_status: eff_s = sup_base - step
-        else: eff_s = sup_base - step
+#         if "SHIFTED WTT" in sup_status: eff_s = sup_base - step
+#         elif "SHIFTED WTB" in sup_status: eff_s = sup_base - step
+#         elif "WTT" in sup_status: eff_s = sup_target - step
+#         elif "WTB" in sup_status: eff_s = sup_target - step
+#         elif "STRONG" in sup_status: eff_s = sup_base - step
+#         else: eff_s = sup_base - step
         
-        r_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=eff_r).order_by('-Time').first()
-        s_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=eff_s).order_by('-Time').first()
+#         r_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=eff_r).order_by('-Time').first()
+#         s_row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=eff_s).order_by('-Time').first()
         
-        r_trigger = float(r_row.Reversl_Ce) if r_row and r_row.Reversl_Ce else None
-        s_trigger = float(s_row.Reversl_Pe) if s_row and s_row.Reversl_Pe else None
-        r_strike, s_strike = eff_r, eff_s
+#         r_trigger = float(r_row.Reversl_Ce) if r_row and r_row.Reversl_Ce else None
+#         s_trigger = float(s_row.Reversl_Pe) if s_row and s_row.Reversl_Pe else None
+#         r_strike, s_strike = eff_r, eff_s
 
-    return JsonResponse({
-        'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
-        'bot_active': bot_active,
-        'total_pnl': round(total_pnl, 2), # ✨ Total PnL में भी लाइव चेंज दिखेगा
-        'triggers': {
-            'spot': current_spot,
-            'r_trigger': r_trigger,
-            'r_strike': r_strike,
-            'r_status': sr.resistance_status if sr else '—',
-            's_trigger': s_trigger,
-            's_strike': s_strike,
-            's_status': sr.supprt_status if sr else '—',
-            'data_time': latest_oc.Time.isoformat() if latest_oc else None
-        },
-        'trades': trades_list
-    })
+#     return JsonResponse({
+#         'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
+#         'bot_active': bot_active,
+#         'total_pnl': round(total_pnl, 2), # ✨ Total PnL में भी लाइव चेंज दिखेगा
+#         'triggers': {
+#             'spot': current_spot,
+#             'r_trigger': r_trigger,
+#             'r_strike': r_strike,
+#             'r_status': sr.resistance_status if sr else '—',
+#             's_trigger': s_trigger,
+#             's_strike': s_strike,
+#             's_status': sr.supprt_status if sr else '—',
+#             'data_time': latest_oc.Time.isoformat() if latest_oc else None
+#         },
+#         'trades': trades_list
+#     })
 
 def dashboard_data_api(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
@@ -3210,6 +2721,7 @@ def skip_trade_api(request):
 
 
 # पुराने ट्रेड्स और डैशबोर्ड के लिए व्यू
+@login_required
 def trade_dashboard(request):
     today = timezone.now().date()
 
