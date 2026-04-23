@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Render Build Script
 set -o errexit
 
 pip install -r requirements.txt
 
 python manage.py collectstatic --no-input
 
-# Note: makemigrations यहाँ नहीं — migrations हमेशा local पर बनाएं और commit करें
+# makemigrations यहाँ नहीं — local पर करें और commit करें
 python manage.py migrate --no-input
+
+# SyncControl records ensure करो (loop toggles के लिए)
+python manage.py shell -c "
+from mystock.models import SyncControl
+for name in ['nifty_loop','others_loop','bot_loop']:
+    c,_ = SyncControl.objects.get_or_create(name=name, defaults={'is_active':True})
+print('SyncControl records ready.')
+"
