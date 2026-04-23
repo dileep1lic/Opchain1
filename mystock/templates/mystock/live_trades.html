@@ -439,7 +439,11 @@ function updateUI(d) {
 }
 
 // ✅ Bug 4 Fix: API call में date parameter भी भेजो
+let _liveInFlight = false;
 async function refresh() {
+    if (_liveInFlight) return;
+    _liveInFlight = true;
+    try {
   const eb = document.getElementById('errBox');
   try {
     const dateVal = document.getElementById('datePicker').value;
@@ -461,10 +465,31 @@ async function refresh() {
     eb.style.display = 'block';
     eb.innerHTML = '<strong>Connection Error:</strong> ' + e.message;
   }
+    } finally { _liveInFlight = false; }
 }
 
+// ── Smart Polling: AbortController + Visibility API ─────────────────
+let _liveAbort = null;
+let _liveTimer = null;
+
+function startLivePolling() {
+    if (_liveTimer) clearInterval(_liveTimer);
+    _liveTimer = setInterval(refresh, 5000);
+}
+function stopLivePolling() {
+    if (_liveTimer)  { clearInterval(_liveTimer); _liveTimer = null; }
+    if (_liveAbort)  { _liveAbort.abort(); _liveAbort = null; }
+    _liveInFlight = false;
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { stopLivePolling(); }
+    else { refresh(); startLivePolling(); }
+});
+window.addEventListener('beforeunload', stopLivePolling);
+
 refresh();
-setInterval(refresh, 5000);
+startLivePolling();
 </script>
 </body>
 </html>
