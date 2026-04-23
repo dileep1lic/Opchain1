@@ -157,6 +157,26 @@
   <a href="{% url 'resistance_dashboard' %}" class="nav-link">🔥 Resistance</a>
   <a href="{% url 'chart' %}"            class="nav-link">🕯️ Chart</a>
   <a href="{% url 'market_replay' %}"    class="nav-link">⏮️ Replay</a>
+  <a href="{% url 'backtest' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank" class="nav-link">⚡ Run Backtest</a>
+</div>
+
+<!-- ── Server Offline Banner ── -->
+<div id="server-offline-banner" style="
+  display:none;
+  background:rgba(239,68,68,0.12);
+  border:1px solid rgba(239,68,68,0.35);
+  border-radius:10px;
+  padding:10px 16px;
+  margin-bottom:16px;
+  font-size:13px;
+  color:#fca5a5;
+  display:none;
+  align-items:center;
+  gap:10px;
+">
+  <span style="font-size:18px;">🔴</span>
+  <span id="offline-msg">Server से connection नहीं — Reconnecting...</span>
+  <span id="offline-countdown" style="margin-left:auto;color:#f87171;font-weight:700;"></span>
 </div>
 
 <!-- ── LOOP CONTROLS ── -->
@@ -436,39 +456,7 @@ function setLoopUI(name, isActive) {
 
 // ── Fetch all loop statuses ──────────────────────────────
 let settingsLoaded = false;
-async function refreshStatus() {
-  try {
-    // GET /api/admin-status/ — नीचे view में define करेंगे
-    const resp = await fetch('/api/admin-status/');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-
-    LOOPS.forEach(name => {
-      const status = data.loops[name];
-      if (status !== undefined) setLoopUI(name, status);
-    });
-
-    // Stats
-    document.getElementById('st-total').textContent  = data.stats.total  ?? '—';
-    document.getElementById('st-wins').textContent   = data.stats.wins   ?? '—';
-    document.getElementById('st-losses').textContent = data.stats.losses ?? '—';
-    const pnl = data.stats.pnl;
-    const pnlEl = document.getElementById('st-pnl');
-    pnlEl.textContent = pnl != null ? (pnl >= 0 ? '+' : '') + pnl : '—';
-    pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
-    document.getElementById('st-spot').textContent = data.stats.spot ?? '—';
-
-    if (!settingsLoaded && data.settings) {
-        document.getElementById('cfg-target').value = data.settings.target;
-        document.getElementById('cfg-sl').value = data.settings.sl;
-        document.getElementById('cfg-buffer').value = data.settings.buffer;
-        settingsLoaded = true;
-    }
-
-  } catch(e) {
-    addLog('Status fetch failed: ' + e.message, 'err');
-  }
-}
+/* OLD refreshStatus removed — replaced by smart polling manager below */
 
 
 async function placeManualOrder() {
@@ -547,7 +535,7 @@ async function toggleLoop(name, checkbox) {
 
   } catch(e) {
     checkbox.checked = wasChecked; // revert
-    addLog('Toggle failed: ' + e.message, 'err');
+    addLog('Toggle failed: ' + (e.message === 'Failed to fetch' ? 'Server offline — restart होने दें' : e.message), 'err');
     showToast('Error: ' + e.message, 'err');
   } finally {
     checkbox.disabled = false;
@@ -604,22 +592,7 @@ async function closeAllPositions() {
 // ── Skip Trade ───────────────────────────────────────────
 let rTrigger = null, sTrigger = null;
 
-async function fetchTriggers() {
-  const sym = document.getElementById('skip-sym').value;
-  try {
-    const resp = await fetch(`/api/dashboard-data/?symbol=${sym}`);
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const t = data.triggers || {};
-    rTrigger = t.r_trigger;
-    sTrigger = t.s_trigger;
-    const fmt = v => (v && isFinite(v)) ? '(' + parseFloat(v).toFixed(0) + ')' : '(—)';
-    document.getElementById('skipRPrice').textContent = fmt(rTrigger);
-    document.getElementById('skipSPrice').textContent = fmt(sTrigger);
-  } catch(e) {
-    addLog('Trigger fetch failed: ' + e.message, 'warn');
-  }
-}
+/* OLD fetchTriggers removed — replaced below */
 
 async function skipTrade(type) {
   const sym = document.getElementById('skip-sym').value;
@@ -646,13 +619,116 @@ async function skipTrade(type) {
   }
 }
 
-// Trigger prices हर 10 सेकंड में refresh
-fetchTriggers();
-setInterval(fetchTriggers, 10000);
+// ═══════════════════════════════════════════════════════════
+//  SMART POLLING MANAGER — Exponential Backoff + Offline UI
+//  Server restart पर log spam नहीं, सिर्फ एक banner दिखेगा
+// ═══════════════════════════════════════════════════════════
+let _failCount   = 0;         // लगातार कितनी बार fail हुआ
+let _offlineMode = false;     // क्या हम offline हैं?
+let _retryTimer  = null;
+let _cdTimer     = null;
+const BASE_INTERVAL = 10000; // 10 seconds normal
+const MAX_BACKOFF   = 30000; // 30 seconds max retry
 
-// ── Init ─────────────────────────────────────────────────
+function _showOffline(retryIn) {
+  if (!_offlineMode) {
+    _offlineMode = true;
+    const banner = document.getElementById('server-offline-banner');
+    if (banner) banner.style.display = 'flex';
+  }
+  // Countdown timer
+  let sec = Math.round(retryIn / 1000);
+  const cd = document.getElementById('offline-countdown');
+  if (_cdTimer) clearInterval(_cdTimer);
+  _cdTimer = setInterval(() => {
+    if (cd) cd.textContent = sec > 0 ? `${sec}s में retry` : 'Retrying...';
+    sec--;
+    if (sec < 0) clearInterval(_cdTimer);
+  }, 1000);
+}
+
+function _showOnline() {
+  if (_offlineMode) {
+    _offlineMode = false;
+    _failCount   = 0;
+    const banner = document.getElementById('server-offline-banner');
+    if (banner) banner.style.display = 'none';
+    if (_cdTimer) clearInterval(_cdTimer);
+    addLog('✅ Server reconnected', 'ok');
+  }
+}
+
+function _onFetchFail(label) {
+  _failCount++;
+  if (_failCount === 1) {
+    // पहली fail पर log में एक entry
+    addLog(`⚡ ${label}: server restarting? Retrying...`, 'warn');
+  }
+  // Exponential backoff: 2s, 4s, 8s, 16s, 30s max
+  const delay = Math.min(2000 * Math.pow(2, _failCount - 1), MAX_BACKOFF);
+  _showOffline(delay);
+  if (_retryTimer) clearTimeout(_retryTimer);
+  _retryTimer = setTimeout(() => { refreshStatus(); fetchTriggers(); }, delay);
+}
+
+async function refreshStatus() {
+  try {
+    const resp = await fetch('/api/admin-status/');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    _showOnline();  // server वापस आया
+
+    if (!data.loops) return;
+    LOOPS.forEach(name => {
+      const status = data.loops[name];
+      if (status !== undefined && status !== null) setLoopUI(name, status);
+      else setLoopUI(name, false);
+    });
+
+    document.getElementById('st-total').textContent  = data.stats.total  ?? '—';
+    document.getElementById('st-wins').textContent   = data.stats.wins   ?? '—';
+    document.getElementById('st-losses').textContent = data.stats.losses ?? '—';
+    const pnl = data.stats.pnl;
+    const pnlEl = document.getElementById('st-pnl');
+    pnlEl.textContent = pnl != null ? (pnl >= 0 ? '+' : '') + pnl : '—';
+    pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
+    document.getElementById('st-spot').textContent = data.stats.spot ?? '—';
+
+    if (!settingsLoaded && data.settings) {
+      document.getElementById('cfg-target').value = data.settings.target;
+      document.getElementById('cfg-sl').value     = data.settings.sl;
+      document.getElementById('cfg-buffer').value = data.settings.buffer;
+      settingsLoaded = true;
+    }
+  } catch(e) {
+    _onFetchFail('Status');  // हर fail पर addLog की जगह backoff manager
+  }
+}
+
+async function fetchTriggers() {
+  if (_offlineMode) return;  // offline हो तो trigger fetch skip
+  const sym = document.getElementById('skip-sym').value;
+  try {
+    const resp = await fetch(`/api/dashboard-data/?symbol=${sym}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const t = data.triggers || {};
+    rTrigger = t.r_trigger;
+    sTrigger = t.s_trigger;
+    const fmt = v => (v && isFinite(v)) ? '(' + parseFloat(v).toFixed(0) + ')' : '(—)';
+    document.getElementById('skipRPrice').textContent = fmt(rTrigger);
+    document.getElementById('skipSPrice').textContent = fmt(sTrigger);
+  } catch(e) {
+    // trigger fail को silently ignore — status API पहले से handle कर रहा है
+  }
+}
+
+// ── Init: normal intervals ─────────────────────────────
 refreshStatus();
-setInterval(refreshStatus, 10000); // हर 10 सेकंड में auto-refresh
+setInterval(refreshStatus, BASE_INTERVAL);
+
+fetchTriggers();
+setInterval(fetchTriggers, BASE_INTERVAL);
 </script>
 </body>
 </html>
