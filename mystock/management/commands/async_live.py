@@ -1464,7 +1464,7 @@ def run_live_paper_trading(df, symbol="NIFTY"):
                 sl = entry + SL_PTS
 
             if spot <= (target + BUFFER): hit_target = True
-            elif spot >= sl: hit_sl = True
+            elif spot >= (sl + BUFFER): hit_sl = True
 
         elif ttype == 'CALL':
             target = s_target_level if s_target_level else (entry + TARGET_PTS)
@@ -1475,7 +1475,7 @@ def run_live_paper_trading(df, symbol="NIFTY"):
                 sl = entry - SL_PTS
             
             if spot >= (target - BUFFER): hit_target = True
-            elif spot <= sl: hit_sl = True
+            elif spot <= (sl - BUFFER): hit_sl = True
 
         if hit_target or hit_sl:
             actual_pnl = (spot - entry) if ttype == 'CALL' else (entry - spot)
