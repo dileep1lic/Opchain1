@@ -3160,6 +3160,147 @@ def skip_trade_api(request):
     return JsonResponse({'status': 'invalid method'})
 
 
+# ════════════════════════════════════════════════════════════════
+#  DB Cleanup API — Admin Panel से पुराना data delete करने के लिए
+# ════════════════════════════════════════════════════════════════
+@csrf_exempt
+@login_required
+def db_cleanup_api(request):
+    """
+    Admin Panel → DB Cleanup section से call होता है।
+    किसी भी table से किसी भी date से पुराना data delete करता है।
+
+    POST body:
+        table      : "OptionChain" | "SupportResistance" |
+                     "TempOptionChain" | "LiveSRData" | "ALL"
+        cutoff_date: "YYYY-MM-DD"  — इस date से पहले का सब delete होगा
+        optimize   : true/false    — VACUUM/ANALYZE चलाएं?
+    """
+    if request.method != "POST":
+        return JsonResponse({"status": "error", "msg": "POST method required"}, status=405)
+
+    try:
+        data        = json.loads(request.body)
+        table       = data.get("table", "ALL").strip()
+        cutoff_str  = data.get("cutoff_date", "")
+        run_optimize = data.get("optimize", False)
+
+        # ── Cutoff date validate ──────────────────────────────────
+        if not cutoff_str:
+            return JsonResponse({"status": "error", "msg": "cutoff_date ज़रूरी है"})
+
+        from datetime import datetime as _dt
+        try:
+            cutoff_date = _dt.strptime(cutoff_str, "%Y-%m-%d").date()
+        except ValueError:
+            return JsonResponse({"status": "error", "msg": "Date format YYYY-MM-DD होना चाहिए"})
+
+        cutoff_time = timezone.make_aware(
+            _dt.combine(cutoff_date, _dt.min.time())
+        )
+
+        # ── Table map ────────────────────────────────────────────
+        TABLE_MAP = {
+            "OptionChain":       OptionChain,
+            "SupportResistance": SupportResistance,
+            "TempOptionChain":   TempOptionChain,
+            "LiveSRData":        LiveSRData,
+        }
+
+        allowed = list(TABLE_MAP.keys()) + ["ALL"]
+        if table not in allowed:
+            return JsonResponse({"status": "error", "msg": f"Invalid table: {table}"})
+
+        targets = TABLE_MAP if table == "ALL" else {table: TABLE_MAP[table]}
+
+        # ── Delete ───────────────────────────────────────────────
+        results = {}
+        total   = 0
+        for name, model in targets.items():
+            deleted, _ = model.objects.filter(Time__lt=cutoff_time).delete()
+            results[name] = deleted
+            total += deleted
+
+        # ── Optimize (optional) ──────────────────────────────────
+        optimize_msg = ""
+        if run_optimize:
+            from django.db import connection
+            with connection.cursor() as cursor:
+                db_engine = connection.vendor  # 'sqlite' या 'postgresql'
+                if db_engine == "sqlite":
+                    cursor.execute("PRAGMA optimize;")
+                    cursor.execute("VACUUM;")
+                    optimize_msg = "SQLite VACUUM + optimize चला।"
+                elif db_engine == "postgresql":
+                    cursor.execute("VACUUM ANALYZE;")
+                    optimize_msg = "PostgreSQL VACUUM ANALYZE चला।"
+
+        return JsonResponse({
+            "status":       "success",
+            "cutoff_date":  cutoff_str,
+            "table":        table,
+            "total_deleted": total,
+            "details":      results,
+            "optimize_msg": optimize_msg,
+            "msg": f"✅ {total} records deleted from {table} (before {cutoff_str})"
+        })
+
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            "status": "error",
+            "msg":    str(e),
+            "detail": traceback.format_exc()
+        }, status=500)
+
+
+@login_required
+def db_cleanup_preview_api(request):
+    """
+    Delete से पहले count दिखाता है — confirmation के लिए।
+    GET params: table, cutoff_date
+    """
+    table      = request.GET.get("table", "ALL")
+    cutoff_str = request.GET.get("cutoff_date", "")
+
+    if not cutoff_str:
+        return JsonResponse({"status": "error", "msg": "cutoff_date ज़रूरी है"})
+
+    from datetime import datetime as _dt
+    try:
+        cutoff_date = _dt.strptime(cutoff_str, "%Y-%m-%d").date()
+    except ValueError:
+        return JsonResponse({"status": "error", "msg": "Invalid date format"})
+
+    cutoff_time = timezone.make_aware(_dt.combine(cutoff_date, _dt.min.time()))
+
+    TABLE_MAP = {
+        "OptionChain":       OptionChain,
+        "SupportResistance": SupportResistance,
+        "TempOptionChain":   TempOptionChain,
+        "LiveSRData":        LiveSRData,
+    }
+
+    targets = TABLE_MAP if table == "ALL" else {table: TABLE_MAP.get(table)}
+    if None in targets.values():
+        return JsonResponse({"status": "error", "msg": f"Invalid table: {table}"})
+
+    counts = {}
+    total  = 0
+    for name, model in targets.items():
+        c = model.objects.filter(Time__lt=cutoff_time).count()
+        counts[name] = c
+        total += c
+
+    return JsonResponse({
+        "status":      "ok",
+        "cutoff_date": cutoff_str,
+        "table":       table,
+        "total":       total,
+        "details":     counts,
+    })
+
+
 # पुराने ट्रेड्स और डैशबोर्ड के लिए व्यू
 @login_required
 def trade_dashboard(request):
