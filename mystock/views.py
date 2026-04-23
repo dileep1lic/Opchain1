@@ -378,7 +378,7 @@ def toggle_sync(request, loop_name):
     })
 
 @cache_page(10) 
-@login_required
+# @login_required
 def all_stocks_dashboard(request):
     """हर symbol की latest SR entry — 60s cache से fast response"""
     CACHE_KEY = 'all_stocks_data'
@@ -2383,7 +2383,7 @@ from django.shortcuts import render
 from django.utils import timezone
 from .models import PaperTrade
 
-@login_required
+# @login_required
 def live_trades_view(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
     selected_date_str = request.GET.get('date')
@@ -2721,7 +2721,7 @@ def skip_trade_api(request):
 
 
 # पुराने ट्रेड्स और डैशबोर्ड के लिए व्यू
-@login_required
+# @login_required
 def trade_dashboard(request):
     today = timezone.now().date()
 
