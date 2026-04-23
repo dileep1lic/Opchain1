@@ -304,12 +304,18 @@ def _get_nifty_chain_context(symbol='NIFTY'):
 
 
 def option_chain_dashboard(request):
-    latest_time, spot_price, expiry_date, display_data, _ = _get_nifty_chain_context()
+    """
+    FIX: Page load पर अब कोई DB query नहीं।
+    पहले _get_nifty_chain_context() 4-5 queries करता था →
+    Render/NeonDB पर हर query ~100ms = 400-500ms page load।
+
+    अब: empty shell return करो (instant) → JS/AJAX table load करे।
+    """
     return render(request, 'mystock/dashboard.html', {
-        'data': display_data,
-        'latest_time': latest_time,
-        'spot': spot_price,
-        'expiry_date': expiry_date
+        'data': [],
+        'latest_time': None,
+        'spot': None,
+        'expiry_date': None,
     })
 
 def table_update_api(request):
@@ -1461,24 +1467,14 @@ def chart_view(request):
     if not instrument_key:
         error = f"'{symbol}' symbol DB में नहीं मिला।"
     else:
-        # Step 2: ✅ Redis try करो (सिर्फ आज की date के लिए)
-        if from_date == today.isoformat():
-            candles = load_intraday_candles(instrument_key, unit, interval)
-
-        # Cache miss या historical → Upstox API
-        if not candles:
-            result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
-            if not result["success"]:
-                error = result["error"]
-            else:
-                candles = parse_candles(result["data"])
-                if not candles:
-                    error = "इस date range में कोई candle data नहीं मिली।"
-
-                # आज का data था तो cache में save करो
-                if from_date == today.isoformat() and candles:
-                    from .redis_cache_manager import save_intraday_candles
-                    save_intraday_candles(instrument_key, unit, interval, candles)
+        # Upstox API से directly fetch (Redis हटाया)
+        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+        if not result["success"]:
+            error = result["error"]
+        else:
+            candles = parse_candles(result["data"])
+            if not candles:
+                error = "इस date range में कोई candle data नहीं मिली।"
 
     # Step 3: Reversal lines  (same as before)
     reversal_lines = get_reversal_lines(symbol, from_date, to_date)
@@ -1561,27 +1557,11 @@ def candle_api(request):
     if not instrument_key:
         return JsonResponse({"error": f"'{symbol}' symbol DB में नहीं मिला।"}, status=404)
 
-    candles      = None
-    cache_source = "upstox"
-
-    # ── Intraday (आज की date) → Redis try करो ─────────────
-    if from_date == today_str:
-        candles = load_intraday_candles(instrument_key, unit, interval)
-        if candles is not None:
-            cache_source = "redis"   # ✅ Redis से मिला
-
-    # ── Cache miss या Historical → Upstox API ──────────────
-    if candles is None:
-        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
-        if not result["success"]:
-            return JsonResponse({"error": result["error"]}, status=400)
-        candles = parse_candles(result["data"])
-
-        # अगर आज का data है तो Redis में save करो
-        # (अगली request के लिए cache ready रहे)
-        if from_date == today_str and candles:
-            from .redis_cache_manager import save_intraday_candles
-            save_intraday_candles(instrument_key, unit, interval, candles)
+    # Upstox API से directly fetch
+    result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+    if not result["success"]:
+        return JsonResponse({"error": result["error"]}, status=400)
+    candles = parse_candles(result["data"])
 
     # ── Reversal lines ──────────────────────────────────────
     reversal_lines = get_reversal_lines(symbol, from_date, to_date) if show_reversal else []
@@ -1597,8 +1577,7 @@ def candle_api(request):
         "candles":        candles,
         "reversal_lines": reversal_lines,
         # Debug info (चाहें तो हटा दें production में)
-        "cache_source":   cache_source,
-        "last_updated":   get_last_updated(instrument_key, unit, interval),
+
     })
 
 
@@ -1620,13 +1599,6 @@ def symbol_search(request):
 
     return JsonResponse({"results": list(results)})
 
-
-
-
-from .redis_cache_manager import (
-    load_intraday_candles,
-    get_last_updated,
-)
 
 
 
