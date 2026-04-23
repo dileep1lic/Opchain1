@@ -458,8 +458,7 @@
                 <a href="{% url 'stock_dashboard' %}" target="_blank"><span>Market</span> <span style="color: #64b5f6;">ALL ↗</span></a>
                 <a href="{% url 'chart' %}" target="_blank"><span>Chart View</span> <span style="color: #64b5f6;">NIFTY ↗</span></a>
                 <a href="{% url 'market_replay' %}" target="_blank" class="replay-link"><span>Market Replay</span> <span>▶ REPLAY</span></a>
-                <a href="{% url 'run_backtest' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank" style="color: var(--accent-yellow);">
-                    <span>⚡ Run Backtest</span> <span>TEST ↗</span>
+                
                 </a>
                 <a href="{% url 'live_trades' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank">
                     <span>🤖 Live Paper Trades</span> <span style="color: #64b5f6;">BOT ↗</span>
@@ -613,51 +612,8 @@ function loadColumnPreferences() {
 
 
 
-// --- Refresh Data ---
-function refreshData() {
-    fetch('/table-update-url/') 
-    .then(response => response.text())
-    .then(html => {
-        if(html.trim() !== "") {
-            // 1. सबसे पहले टेबल के अंदर नया डेटा डालें
-            document.getElementById('table-container').innerHTML = html;
-
-            // 2. छुपे हुए इनपुट्स से नई वैल्यू निकालें
-            const newTime = document.getElementById('hidden-latest-time')?.value;
-            const newSpot = document.getElementById('hidden-spot-price')?.value;
-            const resStrike = document.getElementById('hidden-res-strike')?.value;
-            const resStatus = document.getElementById('hidden-res-status')?.value;
-            const supStrike = document.getElementById('hidden-sup-strike')?.value;
-            const supStatus = document.getElementById('hidden-sup-status')?.value;
-
-            // 3. हेडर अपडेट करें
-            if(newSpot) document.getElementById('header-spot').innerText = newSpot;
-            if(newTime) document.getElementById('header-time').innerText = newTime;
-            
-            if(resStrike) {
-                document.getElementById('header-res').innerHTML = `${resStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${resStatus}]</span>`;
-            }
-            if(supStrike) {
-                document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
-            }
-            
-            // ---------------------------------------------------------
-            // CRITICAL FIX: ऑर्डर और टाइमिंग सही करना
-            // ---------------------------------------------------------
-            
-            // STEP A: सबसे पहले Colspans और Table का लेआउट फिक्स करें
-            fixTableColspans(); 
-
-            // STEP B: टेबल का लेआउट सेट होने के लिए ब्राउज़र को 50ms का समय दें, 
-            // उसके बाद लेबल्स की जगह नापें ताकि वे खिसकें नहीं।
-            setTimeout(() => {
-                addSRLabelsToLine();
-            }, 50);
-            
-        }
-    })
-    .catch(err => console.warn("Update Error:", err));
-}
+// --- Refresh Data (Optimized with ETag + duplicate-request guard) ---
+let _tableEtag = '';
 
 function addSRLabelsToLine() {
     const spotRow = document.querySelector('.spot-line-row');
@@ -875,7 +831,84 @@ window.addEventListener('load', () => {
     addSRLabelsToLine();
 });
 
-setInterval(refreshData, 5000);
+// ── Smart Polling ─────────────────────────────────────────────────────────
+// 1. AbortController: tab बंद/navigate होने पर request cancel होगी (Broken pipe fix)
+// 2. Page Visibility: tab background में हो तो polling रुकेगी (CPU/battery save)
+// 3. setInterval की जगह setTimeout chain — request complete होने के बाद अगली शुरू होगी
+
+let _abortController = null;
+let _pollTimer = null;
+
+function refreshData() {
+    if (_refreshInFlight) return;
+    _refreshInFlight = true;
+
+    // पिछली request abort करो (Broken pipe का असली कारण)
+    if (_abortController) _abortController.abort();
+    _abortController = new AbortController();
+
+    const headers = {};
+    if (_tableEtag) headers['If-None-Match'] = _tableEtag;
+
+    fetch('/table-update-url/', { headers, signal: _abortController.signal })
+    .then(response => {
+        _refreshInFlight = false;
+        if (response.status === 304) return null;
+        if (!response.ok) return null;
+        const newEtag = response.headers.get('ETag');
+        if (newEtag) _tableEtag = newEtag;
+        return response.text();
+    })
+    .then(html => {
+        if (!html || html.trim() === "") return;
+        document.getElementById('table-container').innerHTML = html;
+        const newTime   = document.getElementById('hidden-latest-time')?.value;
+        const newSpot   = document.getElementById('hidden-spot-price')?.value;
+        const resStrike = document.getElementById('hidden-res-strike')?.value;
+        const resStatus = document.getElementById('hidden-res-status')?.value;
+        const supStrike = document.getElementById('hidden-sup-strike')?.value;
+        const supStatus = document.getElementById('hidden-sup-status')?.value;
+        if(newSpot) document.getElementById('header-spot').innerText = newSpot;
+        if(newTime) document.getElementById('header-time').innerText = newTime;
+        if(resStrike) {
+            document.getElementById('header-res').innerHTML = `${resStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${resStatus}]</span>`;
+        }
+        if(supStrike) {
+            document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
+        }
+        fixTableColspans();
+        setTimeout(() => { addSRLabelsToLine(); }, 50);
+    })
+    .catch(err => {
+        _refreshInFlight = false;
+        if (err.name !== 'AbortError') console.warn("Update Error:", err);
+    });
+}
+
+function startPolling() {
+    stopPolling();
+    _pollTimer = setInterval(refreshData, 5000);
+}
+function stopPolling() {
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    if (_abortController) { _abortController.abort(); _abortController = null; }
+    _refreshInFlight = false;
+}
+
+// Tab background में जाने पर रोको, वापस आने पर तुरंत refresh + resume
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopPolling();
+    } else {
+        refreshData();   // तुरंत एक refresh
+        startPolling();  // फिर interval resume
+    }
+});
+
+// Page unload पर cleanly cancel करो (Broken pipe fix)
+window.addEventListener('beforeunload', stopPolling);
+
+startPolling();
 
 </script>
 
