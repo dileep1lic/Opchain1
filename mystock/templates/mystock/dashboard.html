@@ -479,7 +479,22 @@
 
 <div class="dashboard-layout">
     <div id="table-container" style="width: 60%;">
-        {% include 'mystock/table_partial.html' %}
+        <!-- FIX: Page load पर अब DB query नहीं — loading skeleton दिखाओ -->
+        <div id="table-loading" style="
+            display:flex; flex-direction:column; align-items:center;
+            justify-content:center; height:300px; gap:16px;
+            color:#64748b; font-size:13px;
+        ">
+            <div style="
+                width:36px; height:36px; border:3px solid #1e2230;
+                border-top-color:#3b82f6; border-radius:50%;
+                animation: spin 0.8s linear infinite;
+            "></div>
+            <span>Option Chain load हो रही है...</span>
+        </div>
+        <style>
+            @keyframes spin { to { transform: rotate(360deg); } }
+        </style>
     </div>
 
     <div id="drag-resizer"></div>
@@ -820,11 +835,15 @@ document.addEventListener('mouseup', function(e) {
     }
 });
 
-// ── Page Init — एक ही जगह सब कुछ ──────────────────────────
+// ── Page Init ──────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
     const iframe = document.getElementById('mainChartFrame');
     if (iframe) originalChartUrl = iframe.src;
     loadColumnPreferences();
+
+    // FIX: Page load पर तुरंत table fetch करो (shell है, data नहीं आया)
+    // इससे user को spinner/empty state की जगह data दिखेगा
+    refreshData();
 });
 
 window.addEventListener('load', () => {
