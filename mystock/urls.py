@@ -10,6 +10,8 @@ urlpatterns = [
     path('api/admin-status/', views.admin_status_api, name='admin_status_api'),
     path('api/update-bot-settings/', views.update_bot_settings_api, name='update_bot_settings_api'),
     path('api/close-all-trades/', views.close_all_open_trades_api, name='close_all_open_trades_api'),
+    path('api/db-cleanup/',       views.db_cleanup_api,            name='db_cleanup_api'),
+    path('api/db-cleanup-preview/', views.db_cleanup_preview_api,  name='db_cleanup_preview_api'),
 
     # लूप्स को चालू/बंद करने वाला URL (जैसे: /toggle/nifty_loop/)
     path('toggle/<str:loop_name>/', views.toggle_sync, name='toggle_sync'),
