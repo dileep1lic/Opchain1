@@ -458,7 +458,7 @@
                 <a href="{% url 'stock_dashboard' %}" target="_blank"><span>Market</span> <span style="color: #64b5f6;">ALL ↗</span></a>
                 <a href="{% url 'chart' %}" target="_blank"><span>Chart View</span> <span style="color: #64b5f6;">NIFTY ↗</span></a>
                 <a href="{% url 'market_replay' %}" target="_blank" class="replay-link"><span>Market Replay</span> <span>▶ REPLAY</span></a>
-                <a href="{% url 'run_backtest' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank" style="color: var(--accent-yellow);">
+                <a href="{% url 'backtest' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank" style="color: var(--accent-yellow);">
                     <span>⚡ Run Backtest</span> <span>TEST ↗</span>
                 </a>
                 <a href="{% url 'live_trades' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank">
