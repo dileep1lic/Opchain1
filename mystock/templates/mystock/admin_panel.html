@@ -367,6 +367,84 @@
 
 </div>
 
+<!-- ── DB CLEANUP ── -->
+<div class="section-title">🗑️ DB Cleanup</div>
+<div style="
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:20px;
+    margin-bottom:28px;
+">
+
+  <!-- Row 1: Table + Date + Optimize -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+
+    <div style="display:flex;flex-direction:column;gap:5px;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px;text-transform:uppercase;">Table</label>
+      <select id="cleanup-table" style="
+          background:var(--bg);border:1px solid var(--border);
+          color:var(--text);border-radius:8px;padding:8px 12px;
+          font-size:13px;font-family:inherit;cursor:pointer;
+      ">
+        <option value="ALL">🗂️ सभी Tables (ALL)</option>
+        <option value="OptionChain">📊 OptionChain</option>
+        <option value="SupportResistance">🎯 SupportResistance</option>
+        <option value="TempOptionChain">🔄 TempOptionChain</option>
+        <option value="LiveSRData">📡 LiveSRData</option>
+      </select>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:5px;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px;text-transform:uppercase;">इस Date से पहले का Delete करें</label>
+      <input type="date" id="cleanup-date" style="
+          background:var(--bg);border:1px solid var(--border);
+          color:var(--text);border-radius:8px;padding:8px 12px;
+          font-size:13px;font-family:inherit;
+      ">
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px;padding-bottom:2px;">
+      <input type="checkbox" id="cleanup-optimize" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);">
+      <label for="cleanup-optimize" style="font-size:12px;color:var(--muted);cursor:pointer;">
+        DB Optimize भी करें<br>
+        <span style="font-size:10px;color:var(--border)">(VACUUM / ANALYZE)</span>
+      </label>
+    </div>
+
+  </div>
+
+  <!-- Row 2: Preview + Delete buttons -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+
+    <button onclick="previewCleanup()" style="
+        padding:9px 18px;background:rgba(59,130,246,.12);
+        border:1px solid rgba(59,130,246,.3);color:#93c5fd;
+        border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+        transition:all .2s;
+    " onmouseover="this.style.background='rgba(59,130,246,.22)'"
+       onmouseout="this.style.background='rgba(59,130,246,.12)'">
+      🔍 Preview (count देखें)
+    </button>
+
+    <button onclick="runCleanup()" style="
+        padding:9px 18px;background:rgba(239,68,68,.12);
+        border:1px solid rgba(239,68,68,.3);color:#fca5a5;
+        border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+        transition:all .2s;
+    " onmouseover="this.style.background='rgba(239,68,68,.22)'"
+       onmouseout="this.style.background='rgba(239,68,68,.12)'">
+      🗑️ Delete करें
+    </button>
+
+  </div>
+
+  <!-- Result Box -->
+  <div id="cleanup-result" style="display:none;margin-top:14px;"></div>
+
+</div>
+
+
 <!-- ── ACTIVITY LOG ── -->
 <div class="section-title">🗒️ Activity Log</div>
 <div class="log-box">
@@ -616,6 +694,127 @@ async function skipTrade(type) {
   } catch(e) {
     showToast('Error: ' + e.message, 'err');
   }
+}
+
+// ════════════════════════════════════════════════════════════
+//  DB CLEANUP FUNCTIONS
+// ════════════════════════════════════════════════════════════
+
+// Default date: आज से 30 दिन पहले
+(function setDefaultCleanupDate() {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    const iso = d.toISOString().split('T')[0];
+    const el = document.getElementById('cleanup-date');
+    if (el) el.value = iso;
+})();
+
+function _getCleanupParams() {
+    const table    = document.getElementById('cleanup-table').value;
+    const date     = document.getElementById('cleanup-date').value;
+    const optimize = document.getElementById('cleanup-optimize').checked;
+    return { table, date, optimize };
+}
+
+function _showCleanupResult(html, isError = false) {
+    const box = document.getElementById('cleanup-result');
+    box.style.display = 'block';
+    box.style.background    = isError ? 'rgba(239,68,68,.08)'  : 'rgba(34,197,94,.07)';
+    box.style.border        = isError ? '1px solid rgba(239,68,68,.25)' : '1px solid rgba(34,197,94,.2)';
+    box.style.borderRadius  = '8px';
+    box.style.padding       = '12px 16px';
+    box.style.fontSize      = '13px';
+    box.style.color         = isError ? '#fca5a5' : '#86efac';
+    box.innerHTML = html;
+}
+
+async function previewCleanup() {
+    const { table, date } = _getCleanupParams();
+    if (!date) { _showCleanupResult('⚠️ पहले Date select करें।', true); return; }
+
+    _showCleanupResult('⏳ Count निकाल रहे हैं...');
+
+    try {
+        const resp = await fetch(`/api/db-cleanup-preview/?table=${table}&cutoff_date=${date}`);
+        const data = await resp.json();
+        if (data.status !== 'ok') { _showCleanupResult('❌ ' + data.msg, true); return; }
+
+        let rows = '';
+        for (const [tbl, cnt] of Object.entries(data.details)) {
+            rows += `<tr>
+                <td style="padding:3px 12px 3px 0;color:var(--muted)">${tbl}</td>
+                <td style="font-weight:700;color:${cnt > 0 ? '#fbbf24' : 'var(--muted)'}">${cnt.toLocaleString()} records</td>
+            </tr>`;
+        }
+
+        _showCleanupResult(`
+            <div style="font-weight:700;margin-bottom:8px;">
+                🔍 ${date} से पहले <span style="color:#fbbf24">${data.total.toLocaleString()}</span> records मिले (${table})
+            </div>
+            <table style="border-collapse:collapse">${rows}</table>
+            ${data.total > 0
+                ? '<div style="margin-top:8px;font-size:11px;color:var(--muted)">👆 "Delete करें" बटन से permanently हटाएं।</div>'
+                : '<div style="margin-top:8px;color:#4ade80;">✅ Delete करने के लिए कुछ नहीं है।</div>'
+            }
+        `);
+    } catch(e) {
+        _showCleanupResult('❌ Network error: ' + e.message, true);
+    }
+}
+
+async function runCleanup() {
+    const { table, date, optimize } = _getCleanupParams();
+    if (!date) { _showCleanupResult('⚠️ पहले Date select करें।', true); return; }
+
+    const confirmMsg = `⚠️ "${table}" से ${date} से पहले का सारा data DELETE होगा!
+
+यह action UNDO नहीं होगा। क्या आप sure हैं?`;
+    if (!confirm(confirmMsg)) return;
+
+    _showCleanupResult('⏳ Delete हो रहा है...');
+
+    try {
+        const resp = await fetch('/api/db-cleanup/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+            body: JSON.stringify({ table, cutoff_date: date, optimize })
+        });
+        const data = await resp.json();
+
+        if (data.status !== 'success') {
+            _showCleanupResult('❌ Error: ' + data.msg, true);
+            addLog('❌ DB Cleanup failed: ' + data.msg, 'err');
+            return;
+        }
+
+        let rows = '';
+        for (const [tbl, cnt] of Object.entries(data.details)) {
+            rows += `<tr>
+                <td style="padding:3px 12px 3px 0;color:var(--muted)">${tbl}</td>
+                <td style="font-weight:700;color:#4ade80">${cnt.toLocaleString()} deleted</td>
+            </tr>`;
+        }
+
+        _showCleanupResult(`
+            <div style="font-weight:700;margin-bottom:8px;color:#4ade80;">
+                ✅ ${data.total_deleted.toLocaleString()} records deleted (${table}, before ${date})
+            </div>
+            <table style="border-collapse:collapse">${rows}</table>
+            ${data.optimize_msg ? `<div style="margin-top:8px;font-size:11px;color:var(--muted)">🔧 ${data.optimize_msg}</div>` : ''}
+        `);
+
+        addLog(`🗑️ DB Cleanup: ${data.total_deleted} records deleted from ${table} (before ${date})`, 'ok');
+
+    } catch(e) {
+        _showCleanupResult('❌ Network error: ' + e.message, true);
+    }
+}
+
+function getCsrfToken() {
+    const el = document.querySelector('[name=csrfmiddlewaretoken]');
+    if (el) return el.value;
+    const match = document.cookie.match(/csrftoken=([^;]+)/);
+    return match ? match[1] : '';
 }
 
 // ═══════════════════════════════════════════════════════════
