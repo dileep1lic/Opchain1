@@ -48,8 +48,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # SecurityMiddleware के ठीक बाद — correct order
+    'django.middleware.gzip.GZipMiddleware',       # ← NEW: 125KB → ~12KB (90% compression!)
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -99,6 +100,44 @@ DATABASES = {
         conn_max_age=600
     )
 }
+REDIS_URL = "redis://127.0.0.1:6379/0"
+
+# ── Cache Configuration ──────────────────────────────────────────────────────
+# Render/Production पर Redis उपलब्ध नहीं होने पर LocMem fallback काम करेगा
+try:
+    import redis as _r
+    _r.from_url(REDIS_URL).ping()
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
+            "TIMEOUT": 60,
+        }
+    }
+except Exception:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "opchain-cache",
+        }
+    }
+
+# Session को DB की बजाय cache में store करो — login fast होगा
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+
+from mystock.credentials import access_token
+
+UPSTOX_ACCESS_TOKEN = access_token
+
+# जो symbols हर 1 minute fetch होंगे:
+WATCHED_INSTRUMENTS = [
+    # {"instrument_key": "NSE_INDEX|Nifty 50",   "unit": "minutes", "interval": "1"},
+    {"instrument_key": "NSE_INDEX|Nifty 50",   "unit": "minutes", "interval": "5"},
+    # {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "5"},
+    # {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "1"},
+    # और symbols जोड़ते जाएं...
+]
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -137,3 +176,68 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+
+# लॉगिन के लिए डिफ़ॉल्ट URL
+LOGIN_URL = '/accounts/login/'
+
+# लॉगिन सफल होने के बाद कहाँ जाना है (अगर URL में ?next= नहीं है तो)
+LOGIN_REDIRECT_URL = '/admin-panel/' 
+
+# लॉगआउट होने के बाद कहाँ जाना है
+LOGOUT_REDIRECT_URL = '/accounts/login/'
+
+
+# ═══════════════════════════════════════════════════════
+# यह block settings.py के END में add करें
+# ═══════════════════════════════════════════════════════
+
+# ── Broken Pipe filter: dev server पर harmless warning suppress करता है ──
+import logging
+
+class _IgnoreBrokenPipe(logging.Filter):
+    """
+    Django dev server पर 'Broken pipe' warning आती है जब browser
+    page reload/navigate करता है और in-flight request cancel होती है।
+    Production (gunicorn/uvicorn) पर यह नहीं आती — यहाँ सिर्फ suppress करें।
+    """
+    def filter(self, record):
+        msg = record.getMessage()
+        return "Broken pipe" not in msg and "broken pipe" not in msg.lower()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "ignore_broken_pipe": {
+            "()": _IgnoreBrokenPipe,
+        },
+    },
+    "formatters": {
+        "simple": {
+            "format": "[{levelname}] {name} — {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+            "filters": ["ignore_broken_pipe"],
+        },
+    },
+    "loggers": {
+        "mystock": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # django.server = dev runserver का access log (Broken pipe यहाँ से आती है)
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+            "filters": ["ignore_broken_pipe"],
+        },
+    },
+}
