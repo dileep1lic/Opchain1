@@ -190,7 +190,8 @@
 <div class="controls">
   <div>
     <label>Symbol</label>
-    <input id="ctrl-symbol" type="text" value="{{ symbol }}" style="width:200px">
+    <input id="ctrl-symbol" type="text" list="symbol-list" value="{{ symbol }}" style="width:200px" oninput="fetchSymbols(this.value)">
+    <datalist id="symbol-list"></datalist>
   </div>
   <div>
     <label>Unit</label>
@@ -638,6 +639,26 @@
     }
   }
 
+  // ── Symbol Autocomplete Fetcher ───────────────────────────────
+  function fetchSymbols(query) {
+    if (query.trim().length < 2) return; // 2 अक्षर से कम पर सर्च न करें
+    
+    fetch(`/api/symbols/?q=${encodeURIComponent(query)}`)
+      .then(r => r.json())
+      .then(data => {
+        const dataList = document.getElementById('symbol-list');
+        dataList.innerHTML = ''; // पुरानी लिस्ट क्लियर करें
+        
+        if (data.results && data.results.length > 0) {
+          data.results.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item.symbol; // डेटाबेस वाला एकदम सही नाम
+            dataList.appendChild(option);
+          });
+        }
+      })
+      .catch(err => console.error("Symbol search error:", err));
+  }
   waitForLib(onLibReady);
 </script>
 </body>
