@@ -23,16 +23,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-2naf5mkppgegf1#1$$4k+rq3#dc2@i&&ityp6z=&j1y=0nb-9v'
+import os, dj_database_url
 
-# SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = True
-DEBUG = False
+# ── Secret Key — Render पर Environment Variable से आएगा ──────────────────
+SECRET_KEY = os.environ.get('SECRET_KEY', 'fallback-only-for-local-dev')
+
+# ── Debug — Render पर False, local पर True ───────────────────────────────
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = [
-    'optchain.onrender.com', 
-    'localhost', '127.0.0.1'
-    ]
+    'optchain.onrender.com',
+    'localhost',
+    '127.0.0.1',
+]
+
+# Render HTTPS redirect
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Application definition
@@ -82,53 +89,58 @@ TEMPLATES = [
 WSGI_APPLICATION = 'myproject.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-# postgresql://my_stock_db_user:L3RXkyhLGjbkLm1kuCF3H76uXTq4TkFR@dpg-d6a6kgf5r7bs73fionkg-a/my_stock_db
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
+# ── Database ─────────────────────────────────────────────────────────────
+# Render पर DATABASE_URL environment variable set करें
+# Local dev पर SQLite automatically use होगा
+_db_url = os.environ.get('DATABASE_URL')
 
-DATABASES = {
-    'default': dj_database_url.config(
-        # अगर DATABASE_URL नहीं मिला (Localhost पर), तो SQLite यूज़ करो
-        default='sqlite:///' + str(BASE_DIR / 'db.sqlite3'),
-        conn_max_age=600
-    )
-}
-REDIS_URL = "redis://127.0.0.1:6379/0"
-# REDIS_URL = "redis://127.0.0.1:6379/0"
+if _db_url:
+    # Render / Production: PostgreSQL
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=_db_url,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+else:
+    # Local Development: SQLite
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 20,
+                'init_command': (
+                    'PRAGMA journal_mode=WAL;'
+                    'PRAGMA synchronous=NORMAL;'
+                    'PRAGMA cache_size=-32000;'
+                    'PRAGMA temp_store=MEMORY;'
+                ),
+            }
+        }
+    }
 
-import os
 
-# डेटाबेस के लिए (यह पहले से लगा हुआ है)
-DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# Redis के लिए (जो आप अब जोड़ेंगे)
-REDIS_URL = os.environ.get('REDIS_URL')
+# Render पर REDIS_URL env var set करें, local पर localhost fallback
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 
 # ── Cache Configuration ──────────────────────────────────────────────────────
 # Render/Production पर Redis उपलब्ध नहीं होने पर LocMem fallback काम करेगा
-# ── Cache Configuration ──────────────────────────────────────────────────────
-if REDIS_URL:
-    print("🟢 Connected to Redis Cache Successfully!")
+try:
+    import redis as _r
+    _r.from_url(REDIS_URL).ping()
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
             "LOCATION": REDIS_URL,
-            "OPTIONS": {
-                "socket_connect_timeout": 3,  # 3 सेकंड में कनेक्ट नहीं हुआ तो छोड़ देगा
-                "socket_timeout": 3
-            },
+            "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
             "TIMEOUT": 60,
         }
     }
-else:
-    print("🟡 Redis URL not found! Using Local Memory (LocMemCache).")
+except Exception:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
@@ -136,6 +148,7 @@ else:
         }
     }
 
+# Session को DB की बजाय cache में store करो — login fast होगा
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
 from mystock.credentials import access_token
@@ -144,7 +157,7 @@ UPSTOX_ACCESS_TOKEN = access_token
 
 # जो symbols हर 1 minute fetch होंगे:
 WATCHED_INSTRUMENTS = [
-    # {"instrument_key": "NSE_INDEX|Nifty 50",   "unit": "minutes", "interval": "1"},
+    {"instrument_key": "NSE_INDEX|Nifty 50",   "unit": "minutes", "interval": "1"},
     {"instrument_key": "NSE_INDEX|Nifty 50",   "unit": "minutes", "interval": "5"},
     # {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "5"},
     # {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "1"},
