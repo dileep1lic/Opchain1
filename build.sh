@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Render Build Script
 set -o errexit
+
 pip install -r requirements.txt
+
 python manage.py collectstatic --no-input
-python manage.py makemigrations
-python manage.py migrate
-# python manage.py run_sync_async
+
+# Note: makemigrations यहाँ नहीं — migrations हमेशा local पर बनाएं और commit करें
+python manage.py migrate --no-input
