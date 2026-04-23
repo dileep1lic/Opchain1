@@ -38,17 +38,17 @@ class OptionChain(models.Model):
     
     Spot_Price = models.FloatField(null=True, blank=True)
 
-    class Meta:
-        ordering = ['-Time']
-
     def __str__(self):
         return f"{self.Symbol} | {self.Strike_Price} | {self.Time}"
+
     class Meta:
+        ordering = ['-Time']
         indexes = [
             models.Index(fields=['Symbol', 'Time']),
             models.Index(fields=['Symbol', 'Strike_Price', 'Time']),
-            models.Index(fields=['Symbol', 'Time', 'Strike_Price']),
-    ]
+            # FIX: यह index duplicate था (Symbol+Time+Strike = Strike+Time+Symbol same है)
+            # हटाया — extra index write को slow करते हैं
+        ]
 
 
 class SupportResistance(models.Model):
@@ -228,22 +228,29 @@ class LiveSRData(models.Model):
 
     
 class PaperTrade(models.Model):
-    symbol = models.CharField(max_length=20)
-    trade_date = models.DateField(default=timezone.now)
-    trade_type = models.CharField(max_length=10) # 'CALL' या 'PUT'
-    
+    symbol = models.CharField(max_length=20, db_index=True)
+    trade_date = models.DateField(default=timezone.now, db_index=True)
+    trade_type = models.CharField(max_length=10)  # 'CALL' या 'PUT'
+
     # ── Entry Details ──
     entry_time = models.DateTimeField(default=timezone.now)
     entry_spot = models.FloatField()
-    trigger_level = models.CharField(max_length=10) # 'R' या 'S'
+    trigger_level = models.CharField(max_length=10)  # 'R' या 'S'
     trigger_price = models.FloatField()
-    
+
     # ── Exit Details ──
     exit_time = models.DateTimeField(null=True, blank=True)
     exit_spot = models.FloatField(null=True, blank=True)
-    result = models.CharField(max_length=20, default="OPEN") # OPEN, TARGET, SL
+    result = models.CharField(max_length=20, default="OPEN", db_index=True)  # OPEN, TARGET, SL
     pnl = models.FloatField(default=0.0)
     entry_strike = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            # admin_status_api में हर बार यही query होती है
+            models.Index(fields=['trade_date', 'result']),
+            models.Index(fields=['symbol', 'result']),
+        ]
 
     def __str__(self):
         return f"{self.symbol} | {self.trade_type} | {self.result} | PNL: {self.pnl}"
