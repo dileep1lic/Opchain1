@@ -113,18 +113,22 @@ REDIS_URL = os.environ.get('REDIS_URL')
 
 # ── Cache Configuration ──────────────────────────────────────────────────────
 # Render/Production पर Redis उपलब्ध नहीं होने पर LocMem fallback काम करेगा
-try:
-    import redis as _r
-    _r.from_url(REDIS_URL).ping()
+# ── Cache Configuration ──────────────────────────────────────────────────────
+if REDIS_URL:
+    print("🟢 Connected to Redis Cache Successfully!")
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
             "LOCATION": REDIS_URL,
-            "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
+            "OPTIONS": {
+                "socket_connect_timeout": 3,  # 3 सेकंड में कनेक्ट नहीं हुआ तो छोड़ देगा
+                "socket_timeout": 3
+            },
             "TIMEOUT": 60,
         }
     }
-except Exception:
+else:
+    print("🟡 Redis URL not found! Using Local Memory (LocMemCache).")
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
@@ -132,7 +136,6 @@ except Exception:
         }
     }
 
-# Session को DB की बजाय cache में store करो — login fast होगा
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 
 from mystock.credentials import access_token
