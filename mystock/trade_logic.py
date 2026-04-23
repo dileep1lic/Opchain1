@@ -1,6 +1,6 @@
 import re
 from django.utils import timezone
-from .models import OptionChain, LiveSRData
+from .models import OptionChain, LiveSRData, PaperTrade
 
 def get_master_levels(symbol, selected_date=None):
     """
@@ -24,10 +24,43 @@ def get_master_levels(symbol, selected_date=None):
         return levels
 
     # हेल्पर: डेटाबेस से Reversal वैल्यू लाने के लिए
-    def get_rev_val(strike, side):
+    def get_rev_val1(strike, side):
         row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=strike).order_by('-Time').first()
         if not row: return None
         return float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
+    
+    # हेल्पर: डेटाबेस से Reversal वैल्यू का Average (SMA) लाने के लिए
+    def get_rev_val(strike, side, period=5):
+        """
+        period=5 का मतलब है कि यह पिछले 5 डेटा पॉइंट्स का एवरेज निकालेगा।
+        आप इसे अपनी सुविधानुसार 3, 5 या 10 कर सकते हैं।
+        """
+        rows = OptionChain.objects.filter(
+            Symbol__iexact=symbol, 
+            Time__date=selected_date, 
+            Strike_Price=strike
+        ).order_by('-Time')[:period]
+        
+        if not rows: 
+            return None
+            
+        total_val = 0.0
+        valid_count = 0
+        
+        for row in rows:
+            # चेक करें कि CE चाहिए या PE
+            val = float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
+            
+            # सिर्फ तभी जोड़ें जब वैल्यू 0 से बड़ी और वैलिड हो
+            if val and val > 0:
+                total_val += val
+                valid_count += 1
+                
+        # एवरेज निकाल कर 2 डेसिमल तक राउंड करें
+        if valid_count > 0:
+            return round(total_val / valid_count, 2)
+        else:
+            return None
 
     # ==========================================
     # ─── RESISTANCE LOGIC (CALL SIDE) ───
@@ -44,6 +77,15 @@ def get_master_levels(symbol, selected_date=None):
     elif "WTB" in res_status: eff_res = res_target + step
     elif "STRONG" in res_status: eff_res = res_base + step
     else: eff_res = res_base + step
+
+   # 👇 2. नया रेजिस्टेंस SL शिफ्टिंग लॉजिक 
+    # चेक करें कि क्या आखिरी PUT ट्रेड में इसी स्ट्राइक पर SL लगा था?
+    last_put = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date, trade_type='PUT').exclude(result='OPEN').order_by('-exit_time').first()
+    
+    if last_put and last_put.result == 'SL' and last_put.entry_strike == eff_res:
+        eff_res = eff_res + step # रेजिस्टेंस को एक स्ट्राइक ऊपर खिसका दें
+        res_status = res_status + " (POST-SL SHIFT)"
+ 
 
     levels["R"]["status"] = res_status
     levels["R"]["strike"] = eff_res
@@ -66,6 +108,14 @@ def get_master_levels(symbol, selected_date=None):
     elif "WTB" in sup_status: eff_sup = sup_target + step
     elif "STRONG" in sup_status: eff_sup = sup_base - step
     else: eff_sup = sup_base - step
+
+    # 👇 3. नया सपोर्ट SL शिफ्टिंग लॉजिक 
+    # चेक करें कि क्या आखिरी CALL ट्रेड में इसी स्ट्राइक पर SL लगा था?
+    last_call = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date, trade_type='CALL').exclude(result='OPEN').order_by('-exit_time').first()
+    
+    if last_call and last_call.result == 'SL' and last_call.entry_strike == eff_sup:
+        eff_sup = eff_sup - step # सपोर्ट को एक स्ट्राइक नीचे खिसका दें
+        sup_status = sup_status + " (POST-SL SHIFT)"
 
     levels["S"]["status"] = sup_status
     levels["S"]["strike"] = eff_sup
