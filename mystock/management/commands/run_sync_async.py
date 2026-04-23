@@ -49,6 +49,7 @@ class Command(BaseCommand):
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
     is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(15, 30)
+    # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
     is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(14, 45)
 
     def handle(self, *args, **options):
@@ -130,7 +131,7 @@ class Command(BaseCommand):
     async def nifty_loop(self, session, expiry, fixes_sym):
         """NIFTY Loop - Optimized Cleanup before Trading Hours"""
         # यह फ्लैग ट्रैक करेगा कि क्या आज की सफाई पूरी हो गई है
-        cleanup_done_today = None
+        # cleanup_done_today = None
 
         while True:
             await sync_to_async(close_old_connections)()
@@ -142,47 +143,10 @@ class Command(BaseCommand):
                 continue 
     
             ctrl, _ = await get_control_async(name="nifty_loop")
-            current_now = timezone.now()
-            current_date = current_now.date()
+            # current_now = timezone.now()
+            # current_date = current_now.date()
             
-            # 1. 🧹 PRE-TRADE CLEANUP: सुबह ट्रेडिंग शुरू होने से पहले (जैसे 9:15 AM से पहले)
-            # अगर आज सफाई नहीं हुई है, तो इसे चलाएं
-            if cleanup_done_today != current_date:
-                try:
-                    print(f"🌅 Morning Maintenance starting... Deleting 5 days old data.")
-                    
-                    # 3 दिन पुराना कटऑफ टाइम (timedelta में days=1 सेट किया है)
-                    cutoff_time = current_now - timedelta(days=1)
-                    
-                    # सभी टेबल्स से 3 दिन पुराना डेटा डिलीट करें
-                    oc_del, _ = await sync_to_async(OptionChain.objects.filter(Time__lt=cutoff_time).delete)()
-                    sr_del, _ = await sync_to_async(SupportResistance.objects.filter(Time__lt=cutoff_time).delete)()
-                    temp_del, _ = await sync_to_async(TempOptionChain.objects.filter(Time__lt=cutoff_time).delete)()
-                    live_sr_del, _ = await sync_to_async(LiveSRData.objects.filter(Time__lt=cutoff_time).delete)()
-                    
-                    print(f"✅ Cleanup Complete:")
-                    print(f"  - OptionChain: {oc_del} records removed")
-                    print(f"  - SupportResistance: {sr_del} records removed")
-                    print(f"  - TempOptionChain: {temp_del} records removed")
-                    print(f"  - LiveSRData: {live_sr_del} records removed")
-                    
-                    # डेटाबेस इंडेक्स को रिसेट और ऑप्टिमाइज़ करें
-                    from django.db import connection
-                    def optimize_db():
-                        with connection.cursor() as cursor:
-                            # अगर आप Postgres इस्तेमाल कर रहे हैं तो:
-                            cursor.execute("VACUUM ANALYZE;")
-                            # अगर आप SQLite इस्तेमाल कर रहे हैं तो:
-                            # cursor.execute("PRAGMA optimize;")
-                            # cursor.execute("VACUUM;") 
-                    
-                    await sync_to_async(optimize_db)()
-                    
-                    print("✅ DB Optimized.")
-                    cleanup_done_today = current_date # फ्लैग अपडेट करें ताकि दोबारा न चले
-                except Exception as e:
-                    logger.error(f"Pre-Trade Cleanup Error: {e}")
-
+            
 
             # 2. 📈 LIVE TRADING LOOP
             if not ctrl.is_active:
