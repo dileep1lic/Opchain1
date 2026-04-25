@@ -1464,7 +1464,7 @@ def run_live_paper_trading(df, symbol="NIFTY"):
                 sl = entry + SL_PTS
 
             if spot <= (target + BUFFER): hit_target = True
-            elif spot >= sl: hit_sl = True
+            elif spot >= (sl + BUFFER): hit_sl = True
 
         elif ttype == 'CALL':
             target = s_target_level if s_target_level else (entry + TARGET_PTS)
@@ -1475,7 +1475,7 @@ def run_live_paper_trading(df, symbol="NIFTY"):
                 sl = entry - SL_PTS
             
             if spot >= (target - BUFFER): hit_target = True
-            elif spot <= sl: hit_sl = True
+            elif spot <= (sl - BUFFER): hit_sl = True
 
         if hit_target or hit_sl:
             actual_pnl = (spot - entry) if ttype == 'CALL' else (entry - spot)
@@ -1515,31 +1515,31 @@ def run_live_paper_trading(df, symbol="NIFTY"):
     # ==========================================
     # ── 5. AVOID REPEAT & SHIFT TO NEXT LEVEL ──
     # ==========================================
-    tolerance = 20.0 
+    # tolerance = 20.0 
     
-    if r_level:
-        r_already_traded = PaperTrade.objects.filter(
-            symbol=symbol, trade_date=today, trade_type='PUT',
-            trigger_price__gte=r_level - tolerance, trigger_price__lte=r_level + tolerance
-        ).exists()
+    # if r_level:
+    #     r_already_traded = PaperTrade.objects.filter(
+    #         symbol=symbol, trade_date=today, trade_type='PUT',
+    #         trigger_price__gte=r_level - tolerance, trigger_price__lte=r_level + tolerance
+    #     ).exists()
 
-        if r_already_traded:
-            if r_sl_level:
-                r_level = r_sl_level  
-            else:
-                r_level = None  
+    #     if r_already_traded:
+    #         if r_sl_level:
+    #             r_level = r_sl_level  
+    #         else:
+    #             r_level = None  
 
-    if s_level:
-        s_already_traded = PaperTrade.objects.filter(
-            symbol=symbol, trade_date=today, trade_type='CALL',
-            trigger_price__gte=s_level - tolerance, trigger_price__lte=s_level + tolerance
-        ).exists()
+    # if s_level:
+    #     s_already_traded = PaperTrade.objects.filter(
+    #         symbol=symbol, trade_date=today, trade_type='CALL',
+    #         trigger_price__gte=s_level - tolerance, trigger_price__lte=s_level + tolerance
+    #     ).exists()
 
-        if s_already_traded:
-            if s_sl_level:
-                s_level = s_sl_level  
-            else:
-                s_level = None  
+    #     if s_already_traded:
+    #         if s_sl_level:
+    #             s_level = s_sl_level  
+    #         else:
+    #             s_level = None  
 
     # ==========================================
     # ── 6. AUTOMATIC ENTRY LOGIC ──
