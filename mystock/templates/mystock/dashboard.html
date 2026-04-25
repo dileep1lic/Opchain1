@@ -164,8 +164,8 @@
             background-color: rgba(255,193,7,0.1);
         }
 
-        /* Show the dropdown menu on hover */
-        .dropdown:hover .dropdown-content {
+        /* Show the dropdown menu via JS */
+        .dropdown-content.show {
             display: block;
         }
 
@@ -402,33 +402,12 @@
             <span class="label">Last Sync</span>
             <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
         </div>
-        
-        <!-- <a href="{% url 'resistance_dashboard' %}" target="_blank" style="text-decoration: none;">
-        <div class="stat-item sr-badge sr-res" style="cursor: pointer;" onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1)'">
-            <span class="label sr-label-res">Resistance (CE) ↗</span>
-            <span id="header-res" class="value" style="color: var(--accent-green); font-size: 14px;">
-                {{ sr_data.resistance_strike|floatformat:0|default:"-" }} 
-                <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.resistance_status|default:"Waiting..." }}]</span>
-            </span>
-        </div>
-        </a>
-
-        <a href="{% url 'resistance_dashboard' %}" target="_blank" style="text-decoration: none;">
-        <div class="stat-item sr-badge sr-sup" style="cursor: pointer;" onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1)'">
-            <span class="label sr-label-sup">Support (PE) ↗</span>
-            <span id="header-sup" class="value" style="color: var(--accent-red); font-size: 14px;">
-                {{ sr_data.supprt_strike|floatformat:0|default:"-" }} 
-                <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[{{ sr_data.supprt_status|default:"Waiting..." }}]</span>
-            </span>
-        </div>
-        </a> -->
-
     </div>
 
     <div class="controls-group">
         
         <div class="dropdown">
-            <button class="dropbtn" style="border-color: var(--accent-blue);">
+            <button class="dropbtn" onclick="toggleDropdown(event)" style="border-color: var(--accent-blue);">
                 <span>👁️ Columns</span> 
                 <span style="font-size: 10px;">▼</span>
             </button>
@@ -448,7 +427,7 @@
         </button>
 
         <div class="dropdown">
-            <button class="dropbtn">
+            <button class="dropbtn" onclick="toggleDropdown(event)" style="border-color: var(--accent-red);">
                 <span>⚙️ Tools Menu</span> 
                 <span style="font-size: 10px;">▼</span>
             </button>
@@ -914,6 +893,43 @@ function stopPolling() {
     if (_abortController) { _abortController.abort(); _abortController = null; }
     _refreshInFlight = false;
 }
+
+// ==========================================
+// --- DROPDOWN CLICK LOGIC (Hover Fix) ---
+// ==========================================
+
+function toggleDropdown(event) {
+    // क्लिक इवेंट को आगे बढ़ने (bubble) से रोकें
+    event.stopPropagation(); 
+    
+    // जिस बटन पर क्लिक हुआ, उसके आगे वाले मेनू को चुनें
+    const currentMenu = event.currentTarget.nextElementSibling;
+    const isCurrentlyOpen = currentMenu.classList.contains('show');
+
+    // पहले सभी खुले हुए मेनू को बंद करें (ताकि एक बार में एक ही मेनू खुले)
+    closeAllDropdowns();
+
+    // अगर क्लिक किया गया मेनू पहले से बंद था, तो उसे खोल दें
+    if (!isCurrentlyOpen && currentMenu && currentMenu.classList.contains('dropdown-content')) {
+        currentMenu.classList.add('show');
+    }
+}
+
+function closeAllDropdowns() {
+    const dropdowns = document.getElementsByClassName("dropdown-content");
+    for (let i = 0; i < dropdowns.length; i++) {
+        dropdowns[i].classList.remove('show');
+    }
+}
+
+// अगर यूजर स्क्रीन पर कहीं भी (मेनू के बाहर) क्लिक करे, तो मेनू बंद कर दें
+window.addEventListener('click', function(event) {
+    // चेक करें कि क्लिक ड्रॉपडाउन के 'अंदर' तो नहीं हुआ है?
+    // इससे Columns के चेकबॉक्स क्लिक करने पर मेनू बंद नहीं होगा।
+    if (!event.target.closest('.dropdown')) {
+        closeAllDropdowns();
+    }
+});
 
 // Tab background में जाने पर रोको, वापस आने पर तुरंत refresh + resume
 document.addEventListener('visibilitychange', () => {
