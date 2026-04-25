@@ -6,6 +6,11 @@
 <title>Paper Trade Journal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- jsPDF + AutoTable for PDF generation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
 <style>
   :root {
     --bg: #0d0f14;
@@ -35,7 +40,6 @@
     padding: 28px 0; border-bottom: 1px solid var(--border); margin-bottom: 28px;
   }
   
-  /* Back Button CSS */
   .btn-back {
     background: transparent;
     color: var(--muted);
@@ -55,6 +59,61 @@
     color: var(--text);
     border-color: var(--accent);
     background: rgba(124, 111, 255, 0.1);
+  }
+
+  /* PDF Download Button */
+  .btn-pdf {
+    background: linear-gradient(135deg, #e53e3e, #c53030);
+    color: white;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 700;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 14px rgba(229,62,62,0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-pdf::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+    pointer-events: none;
+  }
+  .btn-pdf:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(229,62,62,0.45);
+  }
+  .btn-pdf:active {
+    transform: translateY(0);
+  }
+  .btn-pdf.loading {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+  .btn-pdf svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+
+  .header-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+  }
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
 
   .logo h1 { font-size: 20px; font-weight: 700; }
@@ -108,20 +167,66 @@
   .empty-state { text-align: center; padding: 48px; color: var(--muted); font-size: 14px; }
   .pnl-cell { text-align: right; font-weight: bold; }
   .text-muted { color: var(--muted); }
+
+  /* PDF Toast notification */
+  #pdf-toast {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    background: #1a1d27;
+    border: 1px solid #252836;
+    border-radius: 12px;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #e8eaf0;
+    font-family: 'Syne', sans-serif;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    z-index: 9999;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  #pdf-toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  #pdf-toast .toast-icon {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #e53e3e, #c53030);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+  <div class="header-top-row">
     <div class="logo">
       <h1>📋 Paper Trade Journal</h1>
       <span>कस्टम एनालिटिक्स डैशबोर्ड</span>
     </div>
 
-    <button onclick="history.back()" class="btn-back">
-      <span>←</span> Back
-    </button>
+    <div class="header-actions">
+      <!-- PDF Download Button -->
+      <button onclick="downloadPDF()" class="btn-pdf" id="btn-pdf-download">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        PDF Download
+      </button>
+
+      <button onclick="history.back()" class="btn-back">
+        <span>←</span> Back
+      </button>
+    </div>
   </div>
 
   <form method="GET" class="filter-form">
@@ -137,45 +242,45 @@
 
     <div>
       <label class="filter-label">From:</label>
-      <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}" class="filter-input">
+      <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}" class="filter-input" id="input-start-date">
     </div>
 
     <div>
       <label class="filter-label">To:</label>
-      <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}" class="filter-input">
+      <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}" class="filter-input" id="input-end-date">
     </div>
 
     <button type="submit" class="btn-submit">एनालाइज़ करें ↗</button>
   </form>
 </header>
 
-<div class="stats-row">
+<div class="stats-row" id="stats-section">
   <div class="stat-card">
     <div class="stat-label">कुल ट्रेड्स</div>
-    <div class="stat-val">{{ total_trades }}</div>
+    <div class="stat-val" id="stat-total">{{ total_trades }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Wins ✅</div>
-    <div class="stat-val" style="color: var(--green);">{{ wins }}</div>
+    <div class="stat-val" style="color: var(--green);" id="stat-wins">{{ wins }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Losses ❌</div>
-    <div class="stat-val" style="color: var(--red);">{{ losses }}</div>
+    <div class="stat-val" style="color: var(--red);" id="stat-losses">{{ losses }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Win Rate</div>
-    <div class="stat-val" style="color: var(--accent);">{{ win_rate }}%</div>
+    <div class="stat-val" style="color: var(--accent);" id="stat-winrate">{{ win_rate }}%</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Net PnL (pts)</div>
-    <div class="stat-val" style="color: {% if total_pnl >= 0 %}var(--green){% else %}var(--red){% endif %};">
+    <div class="stat-val" style="color: {% if total_pnl >= 0 %}var(--green){% else %}var(--red){% endif %};" id="stat-pnl">
       {% if total_pnl > 0 %}+{% endif %}{{ total_pnl }}
     </div>
   </div>
 </div>
 
 <div class="table-wrap">
-  <table>
+  <table id="trades-table">
     <thead>
       <tr>
         <th>Date</th>
@@ -235,6 +340,187 @@
     </tbody>
   </table>
 </div>
+
+<!-- Toast Notification -->
+<div id="pdf-toast">
+  <div class="toast-icon">📄</div>
+  <span id="toast-msg">PDF तैयार हो रही है...</span>
+</div>
+
+<script>
+  function showToast(msg, duration = 2800) {
+    const toast = document.getElementById('pdf-toast');
+    document.getElementById('toast-msg').textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), duration);
+  }
+
+  function downloadPDF() {
+    const btn = document.getElementById('btn-pdf-download');
+    btn.classList.add('loading');
+    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> बन रही है...`;
+
+    showToast('📥 PDF तैयार हो रही है...', 5000);
+
+    setTimeout(() => {
+      try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+        // ── Date range label ──
+        const startVal = document.getElementById('input-start-date')?.value || '';
+        const endVal   = document.getElementById('input-end-date')?.value   || '';
+        const dateLabel = (startVal && endVal)
+          ? `${startVal}  to  ${endVal}`
+          : (startVal || endVal || 'All Dates');
+
+        // ── Header background ──
+        doc.setFillColor(13, 15, 20);
+        doc.rect(0, 0, 297, 210, 'F');
+
+        // ── Title bar ──
+        doc.setFillColor(28, 32, 46);
+        doc.roundedRect(10, 8, 277, 18, 3, 3, 'F');
+        doc.setTextColor(124, 111, 255);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Paper Trade Journal', 18, 20);
+        doc.setTextColor(107, 112, 144);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Custom Analytics Dashboard', 18, 25.5);
+        doc.setTextColor(200, 200, 220);
+        doc.setFontSize(9);
+        doc.text(`Date Range: ${dateLabel}`, 297 - 18, 20, { align: 'right' });
+        const now = new Date();
+        doc.text(`Generated: ${now.toLocaleString('en-IN')}`, 297 - 18, 25.5, { align: 'right' });
+
+        // ── Stats cards ──
+        const total   = document.getElementById('stat-total')?.textContent?.trim()   || '—';
+        const wins    = document.getElementById('stat-wins')?.textContent?.trim()    || '—';
+        const losses  = document.getElementById('stat-losses')?.textContent?.trim()  || '—';
+        const winrate = document.getElementById('stat-winrate')?.textContent?.trim() || '—';
+        const pnl     = document.getElementById('stat-pnl')?.textContent?.trim()     || '—';
+
+        const stats = [
+          { label: 'Total Trades', val: total,   color: [200,202,210] },
+          { label: 'Wins',         val: wins,    color: [0, 212, 160] },
+          { label: 'Losses',       val: losses,  color: [255, 94, 114] },
+          { label: 'Win Rate',     val: winrate, color: [124, 111, 255] },
+          { label: 'Net PnL (pts)',val: pnl,     color: pnl.startsWith('-') ? [255,94,114] : [0,212,160] }
+        ];
+
+        const cardW = 52, cardH = 16, cardY = 30, gap = 3.5;
+        const totalW = stats.length * cardW + (stats.length - 1) * gap;
+        let cx = (297 - totalW) / 2;
+
+        stats.forEach(s => {
+          doc.setFillColor(26, 29, 39);
+          doc.roundedRect(cx, cardY, cardW, cardH, 2, 2, 'F');
+          doc.setDrawColor(37, 40, 54);
+          doc.roundedRect(cx, cardY, cardW, cardH, 2, 2, 'S');
+          doc.setTextColor(107, 112, 144);
+          doc.setFontSize(6.5);
+          doc.setFont('helvetica', 'normal');
+          doc.text(s.label.toUpperCase(), cx + cardW / 2, cardY + 5.5, { align: 'center' });
+          doc.setTextColor(...s.color);
+          doc.setFontSize(13);
+          doc.setFont('helvetica', 'bold');
+          doc.text(s.val, cx + cardW / 2, cardY + 13, { align: 'center' });
+          cx += cardW + gap;
+        });
+
+        // ── Collect table data ──
+        const rows = [];
+        document.querySelectorAll('#trades-table tbody tr').forEach(tr => {
+          const tds = tr.querySelectorAll('td');
+          if (tds.length < 10) return; // skip empty state row
+          const cells = Array.from(tds).map(td => td.textContent.trim().replace(/\s+/g, ' '));
+          rows.push(cells);
+        });
+
+        // ── AutoTable ──
+        doc.autoTable({
+          startY: 52,
+          head: [['Date','Symbol','Type','Entry Time','Entry Spot','Trig','Exit Time','Exit Spot','Result','PnL (pts)']],
+          body: rows,
+          theme: 'plain',
+          styles: {
+            font: 'courier',
+            fontSize: 8,
+            textColor: [200, 202, 215],
+            cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+            lineColor: [37, 40, 54],
+            lineWidth: 0.3,
+          },
+          headStyles: {
+            fillColor: [26, 29, 39],
+            textColor: [107, 112, 144],
+            fontSize: 7,
+            fontStyle: 'bold',
+            lineWidth: 0.3,
+            lineColor: [37, 40, 54],
+          },
+          alternateRowStyles: {
+            fillColor: [17, 20, 30],
+          },
+          bodyStyles: {
+            fillColor: [13, 15, 20],
+          },
+          columnStyles: {
+            9: { halign: 'right', fontStyle: 'bold' }
+          },
+          // Color PnL column dynamically
+          didParseCell: function(data) {
+            if (data.section === 'body' && data.column.index === 9) {
+              const val = parseFloat(data.cell.raw.replace(/[^0-9.\-]/g, ''));
+              if (!isNaN(val)) {
+                data.cell.styles.textColor = val > 0 ? [0,212,160] : val < 0 ? [255,94,114] : [107,112,144];
+              }
+            }
+            if (data.section === 'body' && data.column.index === 8) {
+              const v = data.cell.raw.trim().toUpperCase();
+              if (v === 'TARGET') data.cell.styles.textColor = [0,212,160];
+              else if (v === 'SL') data.cell.styles.textColor = [255,94,114];
+              else if (v === 'OPEN') data.cell.styles.textColor = [245,166,35];
+              else if (v === 'SKIPPED') data.cell.styles.textColor = [107,112,144];
+            }
+            if (data.section === 'body' && data.column.index === 2) {
+              const v = data.cell.raw.trim().toUpperCase();
+              if (v === 'CALL') data.cell.styles.textColor = [74,158,255];
+              else if (v === 'PUT') data.cell.styles.textColor = [255,94,114];
+            }
+          },
+          margin: { left: 10, right: 10 },
+          tableLineColor: [37, 40, 54],
+          tableLineWidth: 0.3,
+        });
+
+        // ── Footer ──
+        const pageH = doc.internal.pageSize.getHeight();
+        doc.setFillColor(28, 32, 46);
+        doc.rect(0, pageH - 10, 297, 10, 'F');
+        doc.setTextColor(107, 112, 144);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Paper Trade Journal — Auto-generated Report', 10, pageH - 3.5);
+        doc.text(`Total Rows: ${rows.length}`, 297 - 10, pageH - 3.5, { align: 'right' });
+
+        // ── Save ──
+        const fname = `Trade_Report_${(startVal || 'all').replace(/-/g,'')}_${(endVal || 'all').replace(/-/g,'')}.pdf`;
+        doc.save(fname);
+
+        showToast('✅ PDF सफलतापूर्वक डाउनलोड हो गई!');
+      } catch (err) {
+        console.error('PDF Error:', err);
+        showToast('❌ PDF बनाने में त्रुटि हुई।', 3500);
+      }
+
+      btn.classList.remove('loading');
+      btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> PDF Download`;
+    }, 100);
+  }
+</script>
 
 </body>
 </html>
