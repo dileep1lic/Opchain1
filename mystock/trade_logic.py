@@ -11,6 +11,7 @@ def get_master_levels(symbol, selected_date=None):
         selected_date = timezone.now().date()
         
     step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+    tolerance = 20.0 # रिपीट ट्रेड को इग्नोर करने के लिए टॉलरेंस पॉइंट्स
     
     # डिफ़ॉल्ट आउटपुट डिक्शनरी
     levels = {
@@ -78,7 +79,7 @@ def get_master_levels(symbol, selected_date=None):
     elif "STRONG" in res_status: eff_res = res_base + step
     else: eff_res = res_base + step
 
-   # 👇 2. नया रेजिस्टेंस SL शिफ्टिंग लॉजिक 
+   # 👇 1. नया रेजिस्टेंस SL शिफ्टिंग लॉजिक 
     # चेक करें कि क्या आखिरी PUT ट्रेड में इसी स्ट्राइक पर SL लगा था?
     last_put = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date, trade_type='PUT').exclude(result='OPEN').order_by('-exit_time').first()
     
@@ -86,6 +87,19 @@ def get_master_levels(symbol, selected_date=None):
         eff_res = eff_res + step # रेजिस्टेंस को एक स्ट्राइक ऊपर खिसका दें
         res_status = res_status + " (POST-SL SHIFT)"
  
+    # 👇 2. AVOID REPEAT लॉजिक (नया)
+    r_entry_val = get_rev_val(eff_res, 'CE')
+    if r_entry_val:
+        # चेक करें कि क्या इस भाव के आस-पास पहले ही PUT ट्रेड हो चुका है?
+        r_already_traded = PaperTrade.objects.filter(
+            symbol=symbol, trade_date=selected_date, trade_type='PUT',
+            trigger_price__gte=r_entry_val - tolerance, 
+            trigger_price__lte=r_entry_val + tolerance
+        ).exists()
+        
+        if r_already_traded:
+            eff_res = eff_res + step # रेजिस्टेंस को एक स्ट्राइक ऊपर खिसका दें
+            res_status += " (REPEAT SHIFT)"
 
     levels["R"]["status"] = res_status
     levels["R"]["strike"] = eff_res
@@ -116,6 +130,20 @@ def get_master_levels(symbol, selected_date=None):
     if last_call and last_call.result == 'SL' and last_call.entry_strike == eff_sup:
         eff_sup = eff_sup - step # सपोर्ट को एक स्ट्राइक नीचे खिसका दें
         sup_status = sup_status + " (POST-SL SHIFT)"
+
+    # 👇 4. AVOID REPEAT लॉजिक (नया)
+    s_entry_val = get_rev_val(eff_sup, 'PE')
+    if s_entry_val:
+        # चेक करें कि क्या इस भाव के आस-पास पहले ही CALL ट्रेड हो चुका है?
+        s_already_traded = PaperTrade.objects.filter(
+            symbol=symbol, trade_date=selected_date, trade_type='CALL',
+            trigger_price__gte=s_entry_val - tolerance, 
+            trigger_price__lte=s_entry_val + tolerance
+        ).exists()
+        
+        if s_already_traded:
+            eff_sup = eff_sup - step # सपोर्ट को एक स्ट्राइक नीचे खिसका दें
+            sup_status += " (REPEAT SHIFT)"
 
     levels["S"]["status"] = sup_status
     levels["S"]["strike"] = eff_sup
