@@ -346,10 +346,14 @@
 <div class="section-title">⚡ Quick Actions</div>
 <div class="actions-grid" style="margin-bottom:28px;">
 
-  <a href="{% url 'update_expiries' %}" class="action-btn" onclick="return confirmAction('Expiry cache update होगा। Continue?')">
+  <!-- <a href="{% url 'update_expiries' %}" class="action-btn" onclick="return confirmAction('Expiry cache update होगा। Continue?')">
     <div class="aicon" style="background:var(--amber-bg)">📅</div>
     <div><div>Expiry Update</div><div class="atext">सभी symbols की expiry DB में refresh करें</div></div>
-  </a>
+  </a> -->
+  <div class="action-btn" onclick="updateExpiries()">
+    <div class="aicon" style="background:var(--amber-bg)">📅</div>
+    <div><div>Expiry Update</div><div class="atext">सभी symbols की expiry DB में refresh करें</div></div>
+  </div>
 
   <div class="action-btn" onclick="pauseAllLoops()">
     <div class="aicon" style="background:var(--red-bg)">⏸️</div>
@@ -677,7 +681,72 @@ async function closeAllPositions() {
         showToast('API Connection Failed', 'err');
     }
 }
+// अपडेट Expiries के लिए नया फंक्शन जो API कॉल करेगा और UI को अपडेट करेगा
+// async function updateExpiries() {
+//     if (!confirm('Expiry cache update होगा। Continue?')) return;
+    
+//     try {
+//         // Fetch API के जरिए बैकग्राउंड में रिक्वेस्ट भेजें 
+//         const resp = await fetch("{% url 'update_expiries' %}", {
+//             method: 'GET', // पहले यह लिंक (<a>) था, इसलिए व्यू GET request ही ले रहा होगा
+//             headers: { 
+//                 'X-Requested-With': 'XMLHttpRequest'
+//             }
+//         });
+        
+//         const res = await resp.json();
+        
+//         if (res.status === 'success') {
+//             // आपका Toast और Log फंक्शन कॉल करें 
+//             showToast(res.message, 'ok');
+//             addLog('📅 Expiry Update: ' + res.message, 'ok');
+//         } else {
+//             // अगर बैकएंड से success नहीं आता है
+//             showToast('Error: ' + (res.message || 'Failed to update'), 'err');
+//             addLog('❌ Expiry Update Error', 'err');
+//         }
+//     } catch(e) {
+//         showToast('API Connection Failed', 'err');
+//         addLog('❌ API Error: ' + e.message, 'err');
+//     }
+// }
+async function updateExpiries() {
+    if (!confirm('Expiry cache update होगा। Continue?')) return;
+    
+    try {
+        console.log("🔄 Request भेजी जा रही है..."); // Console में चेक करने के लिए
 
+        // Fetch API के जरिए बैकग्राउंड में रिक्वेस्ट भेजें 
+        const resp = await fetch("{% url 'update_expiries' %}", {
+            method: 'GET', 
+            headers: { 
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json' // सर्वर को बताना कि हमें JSON ही चाहिए
+            }
+        });
+        
+        console.log("HTTP Status:", resp.status); // चेक करें कि 200 आया या 500
+
+        // पहले रिस्पॉन्स को Text के रूप में पढ़ें, ताकि अगर HTML error आए तो पता चल जाए
+        const textData = await resp.text(); 
+        console.log("Raw Response:", textData);
+
+        // अब उसे JSON में कन्वर्ट करें
+        const res = JSON.parse(textData);
+        
+        if (res.status === 'success') {
+            showToast(res.message, 'ok');
+            addLog('📅 Expiry Update: ' + res.message, 'ok');
+        } else {
+            showToast('Error: ' + (res.message || 'Failed to update'), 'err');
+            addLog('❌ Expiry Update Error', 'err');
+        }
+    } catch(e) {
+        console.error("API Call में दिक्कत आई:", e); // अगर कुछ फटेगा तो यहाँ दिखेगा
+        showToast('API Connection Failed. Console चेक करें!', 'err');
+        addLog('❌ Error: JSON Parse Failed', 'err');
+    }
+}
 // ── Skip Trade ───────────────────────────────────────────
 let rTrigger = null, sTrigger = null;
 
