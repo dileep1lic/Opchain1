@@ -129,9 +129,9 @@ else:
 
 # ── Cache — LocMem (Redis हटाया, Render पर ज़रूरी नहीं) ────────────────────
 CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "opchain-cache",
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'mystock_cache_table', # यह डेटाबेस में बनने वाली नई टेबल का नाम है
     }
 }
 
