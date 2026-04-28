@@ -52,7 +52,7 @@ class Command(BaseCommand):
     # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
-    is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(20, 30)
+    is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(15, 30)
     # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
     is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(14, 45)
 
