@@ -1,894 +1,540 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Market Replay — Tick by Tick</title>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet"/>
-  <style>
-    :root {
-      --bg-dark:      #0f1115;
-      --header-bg:    #181b21;
-      --card-bg:      #1e2028;
-      --border:       #2a2d35;
-      --border-hi:    #3a3f4e;
-      --text:         #e8eaf0;
-      --text-dim:     #6b7280;
-      --text-muted:   #374151;
+    <meta charset="UTF-8">
+    <title>Market Replay Simulator</title>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f1115; --header-bg: #181b21; --card-bg: #1e1e1e;
+            --accent-blue: #2962ff; --accent-yellow: #ffc107;
+            --accent-green: #00c853; --accent-red: #ff1744;
+            --text-primary: #ffffff; --text-secondary: #909399;
+            --border-color: #333;
+        }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-dark); color: var(--text-primary); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        /* 1. TOP BAR */
+        .top-bar { display: flex; align-items: center; justify-content: space-between; background: var(--header-bg); padding: 10px 20px; border-bottom: 1px solid var(--border-color); }
+        .logo { font-weight: 900; font-size: 18px; color: var(--text-primary); display: flex; gap: 5px; }
+        .logo span { color: var(--accent-yellow); }
+        
+        .controls { display: flex; gap: 15px; align-items: center; }
+        select, input[type="date"], button { background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 4px; font-size: 13px; outline: none; }
+        button { cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-load { background: var(--accent-blue); border-color: var(--accent-blue); }
+        .btn-load:hover { filter: brightness(1.2); }
+        
+        .stats { display: flex; gap: 20px; font-family: monospace; font-size: 14px; }
+        .stat-val { font-weight: bold; }
+        .text-green { color: var(--accent-green); }
+        .text-red { color: var(--accent-red); }
 
-      --accent-blue:  #2962ff;
-      --accent-yellow:#ffc107;
-      --accent-green: #00c853;
-      --accent-red:   #ff1744;
-      --accent-cyan:  #00bcd4;
+        /* 2. PLAYER BAR */
+        .player-bar { display: flex; align-items: center; gap: 15px; padding: 10px 20px; background: #13151a; border-bottom: 1px solid var(--border-color); }
+        .play-btn { background: var(--accent-green); color: black; border: none; border-radius: 50%; width: 35px; height: 35px; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+        .stop-btn { background: var(--accent-red); color: white; border: none; border-radius: 4px; width: 35px; height: 35px; }
+        .step-btn { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }
+        
+        .timeline-container { flex-grow: 1; display: flex; align-items: center; gap: 10px; position: relative; }
+        
+        /* नया टूलटिप डिज़ाइन */
+        #slider-tooltip {
+            position: absolute;
+            top: -22px; /* स्लाइडर के ठीक ऊपर */
+            background: var(--accent-blue);
+            color: white;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            pointer-events: none; /* माउस को डिस्टर्ब न करे */
+            display: none;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            z-index: 100;
+        }
+        input[type="range"] { width: 100%; cursor: pointer; accent-color: var(--accent-blue); }
+        
+        /* 3. MAIN LAYOUT */
+        .main-content { display: flex; flex-grow: 1; overflow: hidden; }
+        
+        /* LEFT: Option Chain */
+        .left-panel { width: 55%; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; }
+        .sr-header { display: flex; justify-content: space-between; padding: 10px; background: var(--header-bg); border-bottom: 1px solid var(--border-color); font-size: 12px; font-weight: bold; }
+        .oc-container { flex-grow: 1; overflow-y: auto; padding: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; }
+        th, td { border: 1px solid #333; padding: 4px; }
+        th { background: #000066; position: sticky; top: 0; }
+        .spot-row td { border-top: 2px solid var(--accent-red); }
 
-      --itm-bg:       #1a1f2e;
-      --strike-bg:    #000066;
-      --up-green:     #00e676;
-      --down-red:     #ff5252;
+        
+        /* RIGHT: Chart */
+        .right-panel { width: 45%; display: flex; flex-direction: column; }
+        .chart-container { flex-grow: 1; position: relative; }
+        #chart { width: 100%; height: 100%; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 1000; flex-direction: column; gap: 15px;}
+        .hourglass { font-size: 40px; animation: spin 2s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
 
-      --player-h:     56px;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      font-family: 'Inter', sans-serif;
-      background: var(--bg-dark);
-      color: var(--text);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    /* ═══════ TOP HEADER ═══════ */
-    .top-bar {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 0 18px;
-      background: var(--header-bg);
-      border-bottom: 1px solid var(--border);
-      height: 52px;
-      flex-shrink: 0;
-      flex-wrap: wrap;
-    }
-
-    .brand {
-      font-weight: 900;
-      font-size: 15px;
-      letter-spacing: -0.3px;
-      color: #fff;
-      white-space: nowrap;
-    }
-    .brand span { color: var(--accent-yellow); }
-
-    .sep { width: 1px; height: 28px; background: var(--border); flex-shrink: 0; }
-
-    /* Selectors */
-    .ctrl-group {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .ctrl-label {
-      font-size: 10px;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      white-space: nowrap;
-    }
-    select, input[type=date] {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      color: var(--text);
-      padding: 5px 8px;
-      font-family: 'Roboto Mono', monospace;
-      font-size: 12px;
-      outline: none;
-      cursor: pointer;
-    }
-    select:focus, input[type=date]:focus { border-color: var(--accent-blue); }
-    select option { background: var(--card-bg); }
-
-    .load-btn {
-      background: var(--accent-blue);
-      color: #fff;
-      border: none;
-      border-radius: 5px;
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: 0.15s;
-    }
-    .load-btn:hover { background: #1a4fdb; }
-
-    /* Header stats */
-    .hstat { display: flex; flex-direction: column; align-items: center; padding: 0 10px; }
-    .hstat .hl  { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; }
-    .hstat .hv  { font-size: 14px; font-weight: 700; font-family: 'Roboto Mono', monospace; }
-    .hv.spot    { color: var(--accent-green); }
-    .hv.time    { color: var(--accent-yellow); font-size: 13px; }
-    .hv.tick-no { color: var(--accent-cyan); }
-
-    .back-link {
-      margin-left: auto;
-      font-size: 11px;
-      color: var(--text-dim);
-      text-decoration: none;
-      padding: 5px 10px;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      transition: 0.15s;
-      white-space: nowrap;
-    }
-    .back-link:hover { color: var(--text); border-color: var(--border-hi); }
-
-    /* ═══════ PLAYER BAR ═══════ */
-    .player-bar {
-      background: #12151c;
-      border-bottom: 1px solid var(--border);
-      padding: 0 18px;
-      height: var(--player-h);
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex-shrink: 0;
-    }
-
-    /* Play/Pause/Stop */
-    .pbtn {
-      width: 34px; height: 34px;
-      border-radius: 50%;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      display: flex; align-items: center; justify-content: center;
-      transition: 0.15s;
-      flex-shrink: 0;
-    }
-    .pbtn-play  { background: var(--accent-green); color: #000; }
-    .pbtn-play:hover { background: #00f56a; }
-    .pbtn-pause { background: var(--accent-yellow); color: #000; }
-    .pbtn-pause:hover { filter: brightness(1.15); }
-    .pbtn-stop  { background: var(--accent-red); color: #fff; }
-    .pbtn-stop:hover  { filter: brightness(1.15); }
-    .pbtn-step  { background: var(--card-bg); color: var(--text); border: 1px solid var(--border); font-size: 12px; font-weight: 700; border-radius: 5px; width: auto; padding: 0 10px; height: 34px; }
-    .pbtn-step:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
-
-    /* Speed */
-    .speed-group { display: flex; align-items: center; gap: 5px; }
-    .speed-group .ctrl-label { margin: 0; }
-    .speed-select {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--accent-cyan);
-      font-family: 'Roboto Mono', monospace;
-      font-size: 12px;
-      font-weight: 700;
-      padding: 4px 6px;
-      outline: none;
-      cursor: pointer;
-      width: 68px;
-    }
-
-    /* Timeline scrubber */
-    .timeline-wrap {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      min-width: 0;
-    }
-    .timeline-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 9px;
-      color: var(--text-dim);
-      font-family: 'Roboto Mono', monospace;
-    }
-    #scrubber {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 100%;
-      height: 6px;
-      border-radius: 3px;
-      background: var(--border);
-      outline: none;
-      cursor: pointer;
-    }
-    #scrubber::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 16px; height: 16px;
-      border-radius: 50%;
-      background: var(--accent-blue);
-      cursor: pointer;
-      border: 2px solid #fff;
-      box-shadow: 0 0 6px rgba(41,98,255,0.5);
-    }
-
-    /* Progress fill via JS */
-    .progress-bar-wrap {
-      position: relative;
-      display: flex;
-      align-items: center;
-    }
-
-    .tick-counter {
-      font-family: 'Roboto Mono', monospace;
-      font-size: 11px;
-      color: var(--text-dim);
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    .tick-counter span { color: var(--accent-cyan); font-weight: 700; }
-
-    /* Status pill */
-    .status-pill {
-      padding: 3px 10px;
-      border-radius: 10px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    .pill-idle    { background: rgba(107,114,128,0.15); color: var(--text-dim); border: 1px solid var(--border); }
-    .pill-loading { background: rgba(255,193,7,0.12);   color: var(--accent-yellow); border: 1px solid rgba(255,193,7,0.3); animation: blink 1s infinite; }
-    .pill-playing { background: rgba(0,200,83,0.12);    color: var(--accent-green);  border: 1px solid rgba(0,200,83,0.3);  animation: blink 1.4s infinite; }
-    .pill-paused  { background: rgba(41,98,255,0.12);   color: #64b5f6;              border: 1px solid rgba(41,98,255,0.3); }
-    .pill-done    { background: rgba(0,188,212,0.12);   color: var(--accent-cyan);   border: 1px solid rgba(0,188,212,0.3); }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
-
-    /* ═══════ TABLE ═══════ */
-    .table-wrap {
-      flex: 1;
-      overflow: auto;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--card-bg);
-      table-layout: fixed;
-      font-family: 'Roboto Mono', monospace;
-    }
-
-    th, td {
-      border: 1px solid #2a2d35;
-      padding: 2px 4px;
-      text-align: center;
-      font-size: 11.5px;
-      height: 34px;        /* 2-line ke liye thoda zyada */
-      line-height: 1.2;
-    }
-
-    thead {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-    }
-
-    .th-group-ce     { background: #061933; color: #4fc3f7; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 5px 2px; }
-    .th-group-strike { background: #0a0a3a; color: var(--accent-yellow); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 5px 2px; }
-    .th-group-pe     { background: #1f0514; color: #f48fb1; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 5px 2px; }
-
-    .th-sub-ce     { background: #071c33; color: #5ba8d4; font-size: 10px; height: 28px; }
-    .th-sub-strike { background: #000066; color: var(--accent-yellow); font-size: 10px; height: 28px; }
-    .th-sub-pe     { background: #1a0210; color: #cf6fa8; font-size: 10px; height: 28px; }
-
-    tbody tr { border-bottom: 1px solid #1e2128; }
-    tbody tr:hover td { filter: brightness(1.25); }
-
-    .td-ce     { background: #061526; color: var(--text); }
-    .td-strike { background: var(--strike-bg); color: var(--accent-yellow); font-weight: 700; font-size: 13px; position: relative; }
-    .td-pe     { background: #160510; color: var(--text); }
-    .td-itm-ce { background: #0c2440; }
-    .td-itm-pe { background: #2a0518; }
-
-    /* ── Ranking highlight classes (Dashboard jaisi) ── */
-    .bg-green  { background-color: #1b5e20 !important; color: #fff !important; }
-    .bg-red    { background-color: #b71c1c !important; color: #fff !important; }
-    .bg-yellow { background-color: #f9a825 !important; color: #000 !important; }
-    /* % text bhi readable rahe highlight mein */
-    .bg-green  .cell-pct,
-    .bg-red    .cell-pct  { color: rgba(255,255,255,0.8) !important; opacity: 1; }
-    .bg-yellow .cell-pct  { color: rgba(0,0,0,0.7)       !important; opacity: 1; }
-
-    .pos-val { color: var(--up-green) !important; font-weight: 700; }
-    .neg-val { color: var(--down-red) !important; font-weight: 700; }
-    .dim-val { color: var(--text-muted); }
-
-    .spot-line td { border-top: 3px solid var(--accent-red) !important; }
-
-    .spot-label {
-      position: absolute;
-      top: -14px; left: 50%;
-      transform: translateX(-50%);
-      background: var(--accent-yellow);
-      color: #000; padding: 1px 8px;
-      font-size: 10px; font-weight: 900;
-      border-radius: 8px; z-index: 5;
-      white-space: nowrap;
-    }
-
-    /* Value + % two-line cell */
-    .cell-main { display: block; font-weight: 600; line-height: 1.3; }
-    .cell-pct  {
-      display: block;
-      font-size: 9.5px;
-      font-weight: 400;
-      opacity: 0.72;
-      line-height: 1.2;
-      margin-top: 1px;
-    }
-    .cell-pct.pos-pct { color: var(--up-green);  opacity: 0.9; }
-    .cell-pct.neg-pct { color: var(--down-red);  opacity: 0.9; }
-    .pct-small { font-size: 9px; opacity: 0.65; display: block; margin-top: 1px; }
-
-    /* Flash animation on tick update */
-    @keyframes flash-ce { 0%{background:#0a3a6a} 100%{background:#061526} }
-    @keyframes flash-pe { 0%{background:#4a0a28} 100%{background:#160510} }
-    .flash-ce { animation: flash-ce 0.6s ease; }
-    .flash-pe { animation: flash-pe 0.6s ease; }
-    .flash-strike { animation: flash-ce 0.4s ease; }
-
-    /* Empty/Loading state */
-    .empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 80px 20px;
-      gap: 12px;
-      color: var(--text-dim);
-    }
-    .empty-icon { font-size: 52px; }
-    .empty-text { font-size: 14px; }
-    .empty-hint { font-size: 12px; color: var(--text-muted); }
-
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: var(--bg-dark); }
-    ::-webkit-scrollbar-thumb { background: #2a2d35; border-radius: 3px; }
-  </style>
+        /* Color Coding Styles */
+        .bg-green { background-color: #1b5e20 !important; color: #fff !important; }
+        .bg-red   { background-color: #b71c1c !important; color: #fff !important; }
+        .bg-yellow { background-color: #fbc02d !important; color: #000 !important; }
+        .pct-text { font-size: 10px; font-weight: normal; opacity: 0.7; display: block; margin-top: 2px;}
+    </style>
 </head>
 <body>
 
-<!-- ═══════════════ TOP HEADER ═══════════════ -->
-<div class="top-bar">
-  <div class="brand">Market <span>Replay</span></div>
-  <div class="sep"></div>
-
-  <div class="ctrl-group">
-    <span class="ctrl-label">Symbol</span>
-    <select id="sel-symbol" onchange="onSymbolChange()">
-      {% for sym in symbols %}
-      <option value="{{ sym }}">{{ sym }}</option>
-      {% endfor %}
-    </select>
-  </div>
-
-  <div class="ctrl-group">
-    <span class="ctrl-label">Expiry</span>
-    <select id="sel-expiry">
-      <option value="">All</option>
-      {% for ed in expiry_dates %}
-      <option value="{{ ed }}">{{ ed }}</option>
-      {% endfor %}
-    </select>
-  </div>
-
-  <div class="ctrl-group">
-    <span class="ctrl-label">Date</span>
-    <input type="date" id="sel-date"/>
-  </div>
-
-  <button class="load-btn" onclick="loadReplay()">⏬ Load</button>
-
-  <div class="sep"></div>
-
-  <div class="hstat">
-    <span class="hl">Spot</span>
-    <span id="hdr-spot" class="hv spot">—</span>
-  </div>
-  <div class="hstat">
-    <span class="hl">Time</span>
-    <span id="hdr-time" class="hv time">—</span>
-  </div>
-  <div class="hstat">
-    <span class="hl">Tick</span>
-    <span id="hdr-tick" class="hv tick-no">0 / 0</span>
-  </div>
-
-  <a href="{% url 'dashboard' %}" class="back-link">← Live Dashboard</a>
-</div>
-
-<!-- ═══════════════ PLAYER BAR ═══════════════ -->
-<div class="player-bar">
-
-  <button class="pbtn pbtn-play"  id="btn-play"  onclick="playReplay()"  title="Play (Space)">▶</button>
-  <button class="pbtn pbtn-pause" id="btn-pause" onclick="pauseReplay()" title="Pause (Space)" style="display:none">⏸</button>
-  <button class="pbtn pbtn-stop"  onclick="stopReplay()" title="Stop">⏹</button>
-  <button class="pbtn pbtn-step"  onclick="stepForward()"  title="Next Tick →">+1 →</button>
-  <button class="pbtn pbtn-step"  onclick="stepBackward()" title="Prev Tick ←">← -1</button>
-
-  <div class="sep" style="height:28px"></div>
-
-  <div class="speed-group">
-    <span class="ctrl-label">Speed</span>
-    <select class="speed-select" id="sel-speed">
-      <option value="3000">0.5×</option>
-      <option value="1500" selected>1×</option>
-      <option value="750">2×</option>
-      <option value="300">5×</option>
-      <option value="100">10×</option>
-      <option value="30">MAX</option>
-    </select>
-  </div>
-
-  <div class="sep" style="height:28px"></div>
-
-  <div class="timeline-wrap">
-    <div class="timeline-labels">
-      <span id="tl-start">—</span>
-      <span id="tl-mid">—</span>
-      <span id="tl-end">—</span>
+    <div class="top-bar">
+        <div class="logo">Market <span>Replay</span></div>
+        <div class="controls">
+            <select id="sim-symbol">
+                <option value="NIFTY">NIFTY</option>
+                <option value="BANKNIFTY">BANKNIFTY</option>
+            </select>
+            <input type="date" id="sim-date">
+            <button class="btn-load" onclick="loadReplayData()">⬇ Load Data</button>
+        </div>
+        <div class="stats">
+            <div>SPOT: <span id="stat-spot" class="stat-val text-green">—</span></div>
+            <div>TIME: <span id="stat-time" class="stat-val text-yellow">—</span></div>
+            <a href="{% url 'admin_panel' %}" style="color:var(--text-secondary); text-decoration:none;">← Live Dashboard</a>
+        </div>
     </div>
-    <input type="range" id="scrubber" min="0" value="0" step="1"
-           oninput="scrubTo(this.value)" onchange="scrubTo(this.value)"/>
-  </div>
-
-  <div class="tick-counter">
-    Tick <span id="tc-cur">0</span> / <span id="tc-tot">0</span>
-  </div>
-
-  <div class="status-pill pill-idle" id="status-pill">IDLE</div>
-</div>
-
-<!-- ═══════════════ TABLE ═══════════════ -->
-<div class="table-wrap" id="table-wrap">
-  <div class="empty-state" id="empty-state">
-    <div class="empty-icon">⏳</div>
-    <div class="empty-text">Symbol, Expiry aur Date select karein</div>
-    <div class="empty-hint">Phir "Load" button dabayein</div>
-  </div>
-  <table id="replay-table" style="display:none">
-    <thead id="table-head"></thead>
-    <tbody id="table-body"></tbody>
-  </table>
-</div>
-
-<script>
-// ══════════════════════════════════════════════
-//  STATE
-// ══════════════════════════════════════════════
-let timestamps   = [];
-let currentTick  = 0;
-let playTimer    = null;
-let isPlaying    = false;
-let currentRows  = [];
-let allTickData  = {};   // ✅ Poora din ka data — memory mein
-
-// ══════════════════════════════════════════════
-//  HELPERS
-// ══════════════════════════════════════════════
-const $  = id => document.getElementById(id);
-const gs = id => document.getElementById(id).value;
-
-function setStatus(type, text) {
-  const el = $('status-pill');
-  el.className = 'status-pill pill-' + type;
-  el.textContent = text;
-}
-
-function setPlayBtn(playing) {
-  $('btn-play').style.display  = playing ? 'none'  : 'flex';
-  $('btn-pause').style.display = playing ? 'flex'  : 'none';
-}
-
-function updateHeaderStats(spot, timestamp) {
-  $('hdr-spot').textContent = spot ? parseFloat(spot).toFixed(2) : '—';
-  if (timestamp) {
-    const t = timestamp.split(' ')[1] || timestamp;
-    $('hdr-time').textContent = t;
-  }
-  $('hdr-tick').textContent  = `${currentTick + 1} / ${timestamps.length}`;
-  $('tc-cur').textContent    = currentTick + 1;
-  $('tc-tot').textContent    = timestamps.length;
-  $('scrubber').value        = currentTick;
-}
-
-function updateTimeline() {
-  if (!timestamps.length) return;
-  const start = timestamps[0].split(' ')[1];
-  const mid   = timestamps[Math.floor(timestamps.length / 2)].split(' ')[1];
-  const end   = timestamps[timestamps.length - 1].split(' ')[1];
-  $('tl-start').textContent = start;
-  $('tl-mid').textContent   = mid;
-  $('tl-end').textContent   = end;
-}
-
-function fmt(val) {
-  if (val === '' || val === null || val === undefined) return '<span style="color:#2a3040">—</span>';
-  return val;
-}
-
-function colorLTP(ltp, cltp) {
-  if (ltp === '' || cltp === '') return fmt(ltp);
-  const diff = parseFloat(ltp) - parseFloat(cltp);
-  const cls  = diff > 0 ? 'pos-val' : diff < 0 ? 'neg-val' : '';
-  return `<span class="${cls}">${ltp}</span>`;
-}
-
-// ══════════════════════════════════════════════
-//  LOAD — timestamps fetch
-// ══════════════════════════════════════════════
-async function loadReplay() {
-  const symbol = gs('sel-symbol');
-  const expiry = gs('sel-expiry');
-  const date   = gs('sel-date');
-
-  if (!symbol || !date) { alert('Symbol aur Date zaroori hain!'); return; }
-
-  stopReplay();
-  setStatus('loading', 'LOADING...');
-  $('empty-state').style.display  = 'flex';
-  $('replay-table').style.display = 'none';
-  $('empty-state').querySelector('.empty-text').textContent = 'Data load ho raha hai...';
-  $('empty-state').querySelector('.empty-hint').textContent = 'Ek baar mein poora din load ho raha hai ⏳';
-
-  try {
-    const params = new URLSearchParams({ symbol, expiry_date: expiry, replay_date: date });
-
-    // ✅ EK HI REQUEST — poore din ka data
-    const res  = await fetch(`{% url 'api_replay_bulk' %}?${params}`);
-    const json = await res.json();
-
-    if (!json.timestamps || !json.timestamps.length) {
-      setStatus('idle', 'NO DATA');
-      $('empty-state').querySelector('.empty-text').textContent = 'Is date ka data nahi mila!';
-      $('empty-state').querySelector('.empty-hint').textContent = 'Dusri date try karein';
-      return;
-    }
-
-    timestamps  = json.timestamps;
-    allTickData = json.ticks;   // ✅ poora data memory mein
-    currentTick = 0;
-
-    $('scrubber').max   = timestamps.length - 1;
-    $('scrubber').value = 0;
-    $('tc-tot').textContent = timestamps.length;
-    updateTimeline();
-    buildTableHead();
-    setStatus('paused', `READY — ${timestamps.length} ticks`);
-
-    // Pehla tick turant dikhao (no fetch needed)
-    renderTick(0);
-
-  } catch(e) {
-    setStatus('idle', 'ERROR');
-    $('empty-state').querySelector('.empty-text').textContent = 'Load failed: ' + e.message;
-  }
-}
-
-// ✅ Ab koi fetch nahi — seedha memory se
-function getTickData(index) {
-  const ts = timestamps[index];
-  return allTickData[ts] || null;
-}
-
-// ══════════════════════════════════════════════
-//  RENDER TICK — synchronous, no await needed
-// ══════════════════════════════════════════════
-function renderTick(index) {
-  if (index < 0 || index >= timestamps.length) return;
-
-  const data = getTickData(index);
-  currentTick = index;
-
-  if (!data || !data.rows || !data.rows.length) {
-    updateHeaderStats(null, timestamps[index]);
-    $('empty-state').style.display  = 'none';
-    $('replay-table').style.display = 'table';
-    return;
-  }
-
-  currentRows = data.rows;
-  updateHeaderStats(data.spot_price, timestamps[index]);
-  buildTableBody(data.rows, data.spot_price);
-
-  $('empty-state').style.display  = 'none';
-  $('replay-table').style.display = 'table';
-}
-
-// ══════════════════════════════════════════════
-//  BUILD TABLE HEAD
-// ══════════════════════════════════════════════
-function buildTableHead() {
-  $('table-head').innerHTML = `
-    <tr>
-      <th colspan="8"  class="th-group-ce">CALL (CE)</th>
-      <th colspan="1"  class="th-group-strike">STRIKE</th>
-      <th colspan="8"  class="th-group-pe">PUT (PE)</th>
-    </tr>
-    <tr>
-      <th class="th-sub-ce">Delta</th>
-      <th class="th-sub-ce">Range</th>
-      <th class="th-sub-ce">IV</th>
-      <th class="th-sub-ce">CHG OI</th>
-      <th class="th-sub-ce">OI</th>
-      <th class="th-sub-ce">Volume</th>
-      <th class="th-sub-ce">LTP</th>
-      <th class="th-sub-ce">Reversal</th>
-      <th class="th-sub-strike">Strike</th>
-      <th class="th-sub-pe">Reversal</th>
-      <th class="th-sub-pe">LTP</th>
-      <th class="th-sub-pe">Volume</th>
-      <th class="th-sub-pe">OI</th>
-      <th class="th-sub-pe">CHG OI</th>
-      <th class="th-sub-pe">IV</th>
-      <th class="th-sub-pe">Range</th>
-      <th class="th-sub-pe">Delta</th>
-    </tr>
-  `;
-}
-
-// ══════════════════════════════════════════════
-//  RANKING LOGIC  (Python dashboard jaisi)
-//  Har metric ke liye rows sort karke top-3 ko
-//  bg-green / bg-red / bg-yellow assign karta hai
-// ══════════════════════════════════════════════
-
-const RANK_METRICS = [
-  'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
-  'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent',
-];
-
-function applyRankingStyles(rows) {
-  // Pehle saari ranking classes reset karo
-  const classKey = m => m.replace('_percent', '_class');
-  rows.forEach(r => RANK_METRICS.forEach(m => delete r[classKey(m)]));
-
-  RANK_METRICS.forEach(metric => {
-    const key = classKey(metric);
-
-    // Sort descending by metric value
-    const ranked = [...rows]
-      .sort((a, b) => (parseFloat(b[metric]) || 0) - (parseFloat(a[metric]) || 0));
-
-    const val0 = parseFloat(ranked[0]?.[metric]) || 0;
-    const val1 = parseFloat(ranked[1]?.[metric]) || 0;
-    const val2 = parseFloat(ranked[2]?.[metric]) || 0;
-
-    // Rank 1 → green (agar positive hai)
-    if (val0 > 0 && ranked[0]) ranked[0][key] = 'bg-green';
-
-    // Rank 2 → red (>=75) ya yellow (65-74)
-    if (ranked[1]) {
-      if      (val1 >= 75) ranked[1][key] = 'bg-red';
-      else if (val1 >= 65) ranked[1][key] = 'bg-yellow';
-    }
-
-    // Rank 3 → yellow sirf tab jab rank-2 >=75 aur ye >=65
-    if (ranked[2] && val1 >= 75 && val2 >= 65) {
-      ranked[2][key] = 'bg-yellow';
-    }
-  });
-
-  return rows;
-}
-
-// ══════════════════════════════════════════════
-//  BUILD TABLE BODY
-// ══════════════════════════════════════════════
-
-/* Value + % neeche — screenshot jaisa format
-   e.g.   2932
-          (100.0 %)                              */
-function withPct(val, pct) {
-  if (val === '' && pct === '') return '<span style="color:#2a3040">—</span>';
-  const mainHtml = `<span class="cell-main">${val !== '' ? val : '—'}</span>`;
-  if (pct === '') return mainHtml;
-  const p    = parseFloat(pct);
-  const cls  = !isNaN(p) ? (p > 0 ? 'pos-pct' : p < 0 ? 'neg-pct' : '') : '';
-  return `${mainHtml}<span class="cell-pct ${cls}">(${pct} %)</span>`;
-}
-
-/* CHG OI: value ke saath % — value color bhi hogi */
-function withPctColored(val, pct) {
-  if (val === '' && pct === '') return '<span style="color:#2a3040">—</span>';
-  const v   = parseFloat(val);
-  const cls = !isNaN(v) ? (v > 0 ? 'pos-val' : v < 0 ? 'neg-val' : '') : '';
-  const mainHtml = `<span class="cell-main ${cls}">${val !== '' ? val : '—'}</span>`;
-  if (pct === '') return mainHtml;
-  const p    = parseFloat(pct);
-  const pcls = !isNaN(p) ? (p > 0 ? 'pos-pct' : p < 0 ? 'neg-pct' : '') : '';
-  return `${mainHtml}<span class="cell-pct ${pcls}">(${pct} %)</span>`;
-}
-
-function buildTableBody(rows, spotPrice) {
-  const spot       = parseFloat(spotPrice) || 0;
-  let   spotMarked = false;
-  const tbody      = $('table-body');
-
-  // ── Ranking styles apply karo (dashboard jaisi) ──
-  applyRankingStyles(rows);
-
-  const html = rows.map((r) => {
-    const strike    = parseFloat(r.Strike_Price) || 0;
-    const isITM_CE  = strike < spot;
-    const isITM_PE  = strike > spot;
-    const isSpotRow = !spotMarked && strike >= spot;
-
-    if (isSpotRow) spotMarked = true;
-    const spotLabel = isSpotRow
-      ? `<span class="spot-label">${spot.toFixed(0)}</span>` : '';
-
-    const ceCls = isITM_CE ? 'td-ce td-itm-ce' : 'td-ce';
-    const peCls = isITM_PE ? 'td-pe td-itm-pe' : 'td-pe';
-
-    // Ranking class helpers
-    const rk = (metric) => r[metric.replace('_percent','_class')] || '';
-
-    /* LTP: value ऊपर, change नीचे */
-    function ltpCell(ltp, cltp) {
-      if (ltp === '') return '<span style="color:#2a3040">—</span>';
-      const diff = (ltp !== '' && cltp !== '')
-                   ? parseFloat(ltp) - parseFloat(cltp) : 0;
-      const cls  = diff > 0 ? 'pos-val' : diff < 0 ? 'neg-val' : '';
-      const chg  = (cltp !== '' && diff !== 0)
-                   ? `<span class="cell-pct ${diff>0?'pos-pct':'neg-pct'}">(${diff>0?'+':''}${diff.toFixed(1)})</span>`
-                   : '';
-      return `<span class="cell-main ${cls}">${ltp}</span>${chg}`;
-    }
-
-    return `<tr class="${isSpotRow ? 'spot-line' : ''}">
-      <td class="${ceCls}">${fmt(r.CE_Delta)}</td>
-      <td class="${ceCls}">${fmt(r.CE_RANGE)}</td>
-      <td class="${ceCls}">${fmt(r.CE_IV)}</td>
-      <td class="${ceCls} ${rk('CE_COI_percent')}">${withPctColored(fmt(r.CE_COI), fmt(r.CE_COI_percent))}</td>
-      <td class="${ceCls} ${rk('CE_OI_percent')}">${withPct(fmt(r.CE_OI), fmt(r.CE_OI_percent))}</td>
-      <td class="${ceCls} ${rk('CE_Volume_percent')}">${withPct(fmt(r.CE_Volume), fmt(r.CE_Volume_percent))}</td>
-      <td class="${ceCls} flash-ce">${ltpCell(fmt(r.CE_LTP), fmt(r.CE_CLTP))}</td>
-      <td class="${ceCls}">${fmt(r.Reversl_Ce)}</td>
-
-      <td class="td-strike">${spotLabel}${fmt(r.Strike_Price)}</td>
-
-      <td class="${peCls}">${fmt(r.Reversl_Pe)}</td>
-      <td class="${peCls} flash-pe">${ltpCell(fmt(r.PE_LTP), fmt(r.PE_CLTP))}</td>
-      <td class="${peCls} ${rk('PE_Volume_percent')}">${withPct(fmt(r.PE_Volume), fmt(r.PE_Volume_percent))}</td>
-      <td class="${peCls} ${rk('PE_OI_percent')}">${withPct(fmt(r.PE_OI), fmt(r.PE_OI_percent))}</td>
-      <td class="${peCls} ${rk('PE_COI_percent')}">${withPctColored(fmt(r.PE_COI), fmt(r.PE_COI_percent))}</td>
-      <td class="${peCls}">${fmt(r.PE_IV)}</td>
-      <td class="${peCls}">${fmt(r.PE_RANGE)}</td>
-      <td class="${peCls}">${fmt(r.PE_Delta)}</td>
-    </tr>`;
-  }).join('');
-
-  tbody.innerHTML = html;
-
-  const spotRow = tbody.querySelector('.spot-line');
-  if (spotRow) {
-    requestAnimationFrame(() => {
-      spotRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-  }
-}
-
-// ══════════════════════════════════════════════
-//  PLAYBACK CONTROLS
-// ══════════════════════════════════════════════
-function playReplay() {
-  if (!timestamps.length) { alert('Pehle data load karein!'); return; }
-  if (currentTick >= timestamps.length - 1) { currentTick = 0; } // restart
-  isPlaying = true;
-  setPlayBtn(true);
-  setStatus('playing', '▶ PLAYING');
-  tick();
-}
-
-function tick() {
-  if (!isPlaying || currentTick >= timestamps.length - 1) {
-    if (currentTick >= timestamps.length - 1) doneReplay();
-    return;
-  }
-  currentTick++;
-  renderTick(currentTick);  // ✅ synchronous — instant
-  const delay = parseInt($('sel-speed').value) || 1500;
-  playTimer = setTimeout(tick, delay);
-}
-
-function pauseReplay() {
-  isPlaying = false;
-  clearTimeout(playTimer);
-  setPlayBtn(false);
-  setStatus('paused', '⏸ PAUSED');
-}
-
-function stopReplay() {
-  isPlaying = false;
-  clearTimeout(playTimer);
-  setPlayBtn(false);
-  if (timestamps.length) {
-    setStatus('paused', 'STOPPED');
-    currentTick = 0;
-    renderTick(0);
-  } else {
-    setStatus('idle', 'IDLE');
-  }
-}
-
-function doneReplay() {
-  isPlaying = false;
-  clearTimeout(playTimer);
-  setPlayBtn(false);
-  setStatus('done', '✓ DONE');
-}
-
-function stepForward() {
-  if (currentTick < timestamps.length - 1) {
-    pauseReplay();
-    currentTick++;
-    renderTick(currentTick);
-  }
-}
-
-function stepBackward() {
-  if (currentTick > 0) {
-    pauseReplay();
-    currentTick--;
-    renderTick(currentTick);
-  }
-}
-
-function scrubTo(val) {
-  pauseReplay();
-  const idx = parseInt(val);
-  if (idx >= 0 && idx < timestamps.length) {
-    currentTick = idx;
-    renderTick(idx);
-  }
-}
-
-// ══════════════════════════════════════════════
-//  SYMBOL CHANGE → Dates fetch
-// ══════════════════════════════════════════════
-async function onSymbolChange() {
-  const symbol = gs('sel-symbol');
-  if (!symbol) return;
-  const res  = await fetch(`{% url 'api_replay_dates' %}?symbol=${symbol}`);
-  const json = await res.json();
-  // Last available date set karo
-  if (json.dates && json.dates.length) {
-    $('sel-date').value = json.dates[json.dates.length - 1];
-    $('sel-date').min   = json.dates[0];
-    $('sel-date').max   = json.dates[json.dates.length - 1];
-  }
-}
-
-// ══════════════════════════════════════════════
-//  KEYBOARD SHORTCUTS
-// ══════════════════════════════════════════════
-document.addEventListener('keydown', e => {
-  if (['INPUT','SELECT'].includes(document.activeElement.tagName)) return;
-  if (e.key === ' ')           { e.preventDefault(); isPlaying ? pauseReplay() : playReplay(); }
-  if (e.key === 'ArrowRight')  stepForward();
-  if (e.key === 'ArrowLeft')   stepBackward();
-  if (e.key === 'Escape')      stopReplay();
-});
-
-// ══════════════════════════════════════════════
-//  INIT
-// ══════════════════════════════════════════════
-window.onload = () => {
-  onSymbolChange();
-};
-</script>
+
+    <div class="player-bar">
+        <button class="play-btn" id="btn-play" onclick="togglePlay()">▶</button>
+        <button class="stop-btn" onclick="resetReplay()">◼</button>
+        <button class="step-btn" onclick="stepBackward()">← -1</button>
+        <button class="step-btn" onclick="stepForward()">+1 →</button>
+        
+        <select id="sim-speed" onchange="changeSpeed()">
+            <option value="1000">Speed: 1x</option>
+            <option value="500">Speed: 2x</option>
+            <option value="200">Speed: 5x</option>
+            <option value="50">Speed: MAX</option>
+        </select>
+        
+        <div class="timeline-container">
+            <div id="slider-tooltip">09:15:00</div>
+            
+            <input type="range" id="timeline-slider" min="0" max="100" value="0" oninput="seekTimeline(this.value)" disabled>
+            <span style="font-size: 11px; color: var(--text-secondary);" id="timeline-lbl">IDLE</span>
+        </div>
+    </div>
+
+    <div class="main-content">
+        
+        <div class="left-panel">
+            <div class="sr-header">
+                <div style="color:var(--accent-red)">R: <span id="sr-res-val">—</span> [<span id="sr-res-stat">—</span>]</div>
+                <div style="color:var(--accent-green)">S: <span id="sr-sup-val">—</span> [<span id="sr-sup-stat">—</span>]</div>
+            </div>
+            <div class="oc-container" id="oc-table-div">
+                <div style="text-align:center; margin-top: 20%; color: var(--text-secondary);">
+                    ⏳ Please select a Date and click Load
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <div class="chart-container">
+                <div id="chart"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="loading-overlay">
+        <div class="hourglass">⏳</div>
+        <div>Fetching Historical Data from Database & Upstox...</div>
+    </div>
+
+    <script>
+        let replayData = null;
+        let timelineIndex = 0;
+        let isPlaying = false;
+        let playInterval = null;
+
+        let allCandlesData = [];
+        let ceReversalLine = null;
+        let peReversalLine = null;
+        
+        let mainChart = null;
+        let candleSeries = null;
+        let reversalLines = [];
+       
+
+        // 1. CHART INITIALIZATION
+        function initChart() {
+            const chartDiv = document.getElementById('chart');
+            mainChart = LightweightCharts.createChart(chartDiv, {
+                width: chartDiv.clientWidth,
+                height: chartDiv.clientHeight,
+                layout: { background: { color: "#0f1115" }, textColor: "#8b949e" },
+                grid: { vertLines: { color: "#21262d" }, horzLines: { color: "#21262d" } },
+                timeScale: { timeVisible: true, secondsVisible: false },
+            });
+            candleSeries = mainChart.addCandlestickSeries({
+                upColor: "#00c853", downColor: "#ff1744", borderVisible: false
+            });
+            
+            new ResizeObserver(() => {
+                mainChart.applyOptions({ width: chartDiv.clientWidth, height: chartDiv.clientHeight });
+            }).observe(chartDiv);
+        }
+        initChart();
+
+        // 2. FETCH DATA FROM SERVER
+        async function loadReplayData() {
+            const sym = document.getElementById('sim-symbol').value;
+            const dt = document.getElementById('sim-date').value;
+            if(!dt) { alert("Please select a date first."); return; }
+
+            document.getElementById('loading-overlay').style.display = 'flex';
+            resetReplay(); // Purana clear karo
+
+            try {
+                const response = await fetch(`/api/market-replay-data/?symbol=${sym}&date=${dt}`);
+                const data = await response.json();
+                
+                if(!data.success) {
+                    alert("Error: " + data.error);
+                    document.getElementById('loading-overlay').style.display = 'none';
+                    return;
+                }
+
+                replayData = data;
+                document.getElementById('timeline-slider').max = data.timeline.length - 1;
+                document.getElementById('timeline-slider').disabled = false;
+                
+                // Chart Data को वेरिएबल में सेव करें, लेकिन चार्ट को खाली रखें
+                // Bug 7 Fix: allCandlesData हमेशा reset करें चाहे candles हों या न हों
+                allCandlesData = [];
+                if(data.candles && data.candles.length > 0) {
+                     allCandlesData = data.candles.map(c => {
+                         let d = new Date(c.time);
+                         // टाइम को 09:15:00 फॉर्मेट में बदलें ताकि टिक-बाय-टिक मैच हो सके
+                         let tStr = d.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Kolkata' });
+                         return {
+                             // Bug 2 Fix: IST पहले से Date में है, +19800 double offset था
+                             time: d.getTime() / 1000,
+                             open: c.open, high: c.high, low: c.low, close: c.close,
+                             timeStr: tStr
+                         };
+                     }).sort((a,b) => a.time - b.time);
+                }
+
+                document.getElementById('loading-overlay').style.display = 'none';
+                renderFrame(0); // Pehla frame render karo
+                
+            } catch (error) {
+                alert("Network error: " + error);
+                document.getElementById('loading-overlay').style.display = 'none';
+            }
+        }
+
+        // views.py और trade_logic.py जैसा सटीक लॉजिक
+        function getEffectiveLevels(srRow, symbol) {
+            if (!srRow) return { r: 0, s: 0 };
+
+            let step = (symbol.includes('BANKNIFTY') || symbol.includes('SENSEX')) ? 100 : 50;
+            
+            // Resistance (R) Logic
+            let resStatus = (srRow.resistance_status || "").toUpperCase();
+            let resBase = parseFloat(srRow.resistance_strike) || 0;
+            let mRes = resStatus.match(/(?:WTB|WTT)\s+(\d+)/);
+            let resTarget = mRes ? parseFloat(mRes[1]) : resBase;
+
+            let effRes = resBase + step; // Default logic
+            if (resStatus.includes("SHIFTED WTT")) effRes = resBase + step;
+            else if (resStatus.includes("SHIFTED WTB")) effRes = resBase + step;
+            else if (resStatus.includes("WTT")) effRes = resTarget - step;
+            else if (resStatus.includes("WTB")) effRes = resTarget + step;
+            // Bug 6 Fix: STRONG case Python जैसा जोड़ा
+            else if (resStatus.includes("STRONG")) effRes = resBase + step;
+
+            // Support (S) Logic
+            let supStatus = (srRow.supprt_status || "").toUpperCase();
+            let supBase = parseFloat(srRow.supprt_strike) || 0;
+            let mSup = supStatus.match(/(?:WTB|WTT)\s+(\d+)/);
+            let supTarget = mSup ? parseFloat(mSup[1]) : supBase;
+
+            let effSup = supBase - step; // Default logic
+            if (supStatus.includes("SHIFTED WTT")) effSup = supBase - step;
+            else if (supStatus.includes("SHIFTED WTB")) effSup = supBase - step;
+            else if (supStatus.includes("WTT")) effSup = supTarget - step;
+            else if (supStatus.includes("WTB")) effSup = supTarget + step;
+            // Bug 6 Fix: STRONG case Python जैसा जोड़ा
+            else if (supStatus.includes("STRONG")) effSup = supBase - step;
+
+            return { r: effRes, s: effSup };
+        }
+        // 3. RENDER FRAME (Tick by Tick)
+        // चार्ट लाइनों को ट्रैक करने के लिए ग्लोबल वेरिएबल (Script के टॉप पर रखें)
+        let activePriceLines = []; 
+
+        function renderFrame(index) {
+            // Bug 3 Fix: togglePlay() से restart होने की जगह cleanly stop करें
+            if(!replayData || index >= replayData.timeline.length) {
+                if(isPlaying) {
+                    clearInterval(playInterval);
+                    isPlaying = false;
+                    const btn = document.getElementById('btn-play');
+                    btn.innerHTML = '▶';
+                    btn.style.background = 'var(--accent-green)';
+                }
+                return;
+            }
+            
+            const timeStr = replayData.timeline[index];
+            const dataPoint = replayData.timeline_data[timeStr]; // नया डेटा स्ट्रक्चर
+
+            // 1. टेबल और स्टेट्स 
+            document.getElementById('stat-time').innerText = timeStr;
+            document.getElementById('stat-spot').innerText = dataPoint.oc.spot.toFixed(2);
+            document.getElementById('timeline-slider').value = index;
+            document.getElementById('timeline-lbl').innerText = `Tick ${index+1} / ${replayData.timeline.length}`;
+
+            if(dataPoint.sr) {
+                document.getElementById('sr-res-val').innerText = dataPoint.sr.resistance_strike || "—";
+                document.getElementById('sr-res-stat').innerText = dataPoint.sr.resistance_status || "—";
+                document.getElementById('sr-sup-val').innerText = dataPoint.sr.supprt_strike || "—";
+                document.getElementById('sr-sup-stat').innerText = dataPoint.sr.supprt_status || "—";
+            }
+
+            renderOptionChainTable(dataPoint.oc.chain, dataPoint.oc.spot);
+
+            // 2. रिवर्सल लाइनें (जो पायथन ने भेजी हैं)
+            activePriceLines.forEach(line => candleSeries.removePriceLine(line));
+            activePriceLines = [];
+
+            if (dataPoint.lines) {
+                dataPoint.lines.forEach(rev => {
+                    const line = candleSeries.createPriceLine({
+                        price: rev.price,
+                        color: rev.color,
+                        lineWidth: rev.width,
+                        lineStyle: LightweightCharts.LineStyle.Solid,
+                        axisLabelVisible: true,
+                        title: rev.label,
+                    });
+                    activePriceLines.push(line);
+                });
+            }
+
+            // 3. कैंडल अपडेट 
+            let visibleCandles = allCandlesData.filter(c => c.timeStr <= timeStr);
+            if (visibleCandles.length > 0) {
+                candleSeries.setData(visibleCandles);
+            }
+
+            timelineIndex = index;
+        }
+        // 4. DRAW OPTION CHAIN TABLE (With ±15 Strikes & Color Coding)
+        function renderOptionChainTable(chainData, spot) {
+            // 1. सबसे करीबी स्ट्राइक ढूँढें
+            let closestIdx = 0;
+            let minDiff = Infinity;
+            chainData.forEach((r, i) => {
+                let diff = Math.abs(r.Strike_Price - spot);
+                if(diff < minDiff) { minDiff = diff; closestIdx = i; }
+            });
+
+            // 2. ±15 स्ट्राइक काटें (Slice)
+            let startIdx = Math.max(0, closestIdx - 15);
+            let endIdx = Math.min(chainData.length, closestIdx + 16);
+            let displayData = chainData.slice(startIdx, endIdx);
+
+            // 3. कलर कोडिंग/रैंकिंग लॉजिक (टॉप 1=Green, 2=Red, 3=Yellow)
+            function applyRanking(data, metricField, classField) {
+                let ranked = [...data].sort((a, b) => (b[metricField] || 0) - (a[metricField] || 0));
+                for(let idx = 0; idx < Math.min(3, ranked.length); idx++) {
+                    let row = ranked[idx];
+                    let val = row[metricField] || 0;
+                    if(idx === 0 && val > 0) row[classField] = 'bg-green';
+                    else if(idx === 1) {
+                        if(val >= 75) row[classField] = 'bg-red';
+                        else if(val >= 65) row[classField] = 'bg-yellow';
+                    }
+                    else if(idx === 2) {
+                        let val2nd = ranked[1][metricField] || 0;
+                        if(val2nd >= 75 && val >= 65) row[classField] = 'bg-yellow';
+                    }
+                }
+            }
+
+            // पुराने कलर साफ़ करें
+            displayData.forEach(r => { 
+                r.CE_OI_class = ''; r.PE_OI_class = ''; 
+                r.CE_Vol_class = ''; r.PE_Vol_class = ''; 
+                r.CE_COI_class = ''; r.PE_COI_class = ''; 
+            });
+
+            // कॉलम पर रैंकिंग लागू करें
+            applyRanking(displayData, 'CE_OI_percent', 'CE_OI_class');
+            applyRanking(displayData, 'PE_OI_percent', 'PE_OI_class');
+            applyRanking(displayData, 'CE_Volume_percent', 'CE_Vol_class');
+            applyRanking(displayData, 'PE_Volume_percent', 'PE_Vol_class');
+            applyRanking(displayData, 'CE_COI_percent', 'CE_COI_class');
+            applyRanking(displayData, 'PE_COI_percent', 'PE_COI_class');
+
+            // 4. HTML टेबल बनाना शुरू करें
+            let html = `<table>
+                <thead>
+                    <tr>
+                        <th colspan="4" style="background:#004d40;">RESISTANCE (CE)</th>
+                        <th rowspan="2" style="background:#000066;">STRIKE</th>
+                        <th colspan="4" style="background:#b71c1c;">SUPPORT (PE)</th>
+                    </tr>
+                    <tr>
+                        <th>CHG OI</th><th>OI</th><th>VOL</th><th>REVERSL</th>
+                        <th>REVERSL</th><th>VOL</th><th>OI</th><th>CHG OI</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+                
+            let spotDividerDrawn = false;
+
+            displayData.forEach(r => {
+                // लाल वाली स्पॉट डिवाइडर लाइन खींचें
+                if (!spotDividerDrawn && r.Strike_Price > spot) {
+                    html += `<tr class="spot-line-row">
+                                <td colspan="4" style="border-top:2px solid red; padding:0;"></td>
+                                <td style="background:var(--accent-yellow); color:#000; font-weight:bold; border:2px solid red; font-size:14px;">${spot.toFixed(2)}</td>
+                                <td colspan="4" style="border-top:2px solid red; padding:0;"></td>
+                             </tr>`;
+                    spotDividerDrawn = true;
+                }
+
+                // CHG OI के टेक्स्ट का कलर (Plus=Green, Minus=Red)
+                let ceCoiColor = (r.CE_COI || 0) >= 0 ? 'color:var(--accent-green)' : 'color:var(--accent-red)';
+                let peCoiColor = (r.PE_COI || 0) >= 0 ? 'color:var(--accent-green)' : 'color:var(--accent-red)';
+
+                html += `<tr>
+                    <td class="${r.CE_COI_class}">
+                        <div style="${ceCoiColor}; font-weight:bold;">${r.CE_COI || '-'}</div>
+                        <div class="pct-text">(${r.CE_COI_percent || 0}%)</div>
+                    </td>
+                    <td class="${r.CE_OI_class}">
+                        <div>${r.CE_OI || '-'}</div>
+                        <div class="pct-text">(${r.CE_OI_percent || 0}%)</div>
+                    </td>
+                    <td class="${r.CE_Vol_class}">
+                        <div>${r.CE_Volume || '-'}</div>
+                        <div class="pct-text">(${r.CE_Volume_percent || 0}%)</div>
+                    </td>
+                    <td>${r.Reversl_Ce || 'Breakout'}</td>
+
+                    <td style="font-weight:bold; background:#000066; font-size:13px; color:#fff;">${r.Strike_Price}</td>
+
+                    <td>${r.Reversl_Pe || 'Breakdown'}</td>
+                    <td class="${r.PE_Vol_class}">
+                        <div>${r.PE_Volume || '-'}</div>
+                        <div class="pct-text">(${r.PE_Volume_percent || 0}%)</div>
+                    </td>
+                    <td class="${r.PE_OI_class}">
+                        <div>${r.PE_OI || '-'}</div>
+                        <div class="pct-text">(${r.PE_OI_percent || 0}%)</div>
+                    </td>
+                    <td class="${r.PE_COI_class}">
+                        <div style="${peCoiColor}; font-weight:bold;">${r.PE_COI || '-'}</div>
+                        <div class="pct-text">(${r.PE_COI_percent || 0}%)</div>
+                    </td>
+                </tr>`;
+            });
+            html += `</tbody></table>`;
+            document.getElementById('oc-table-div').innerHTML = html;
+        }
+
+       
+
+
+        // 6. PLAYER CONTROLS
+        function togglePlay() {
+            const btn = document.getElementById('btn-play');
+            if(isPlaying) {
+                clearInterval(playInterval);
+                isPlaying = false;
+                btn.innerHTML = '▶';
+                btn.style.background = 'var(--accent-green)';
+            } else {
+                if(!replayData) return;
+                isPlaying = true;
+                btn.innerHTML = '⏸';
+                btn.style.background = 'var(--accent-yellow)';
+                let speed = parseInt(document.getElementById('sim-speed').value);
+                playInterval = setInterval(() => {
+                    renderFrame(timelineIndex + 1);
+                }, speed);
+            }
+        }
+
+        // 7. TIMELINE HOVER TOOLTIP (माउस ले जाने पर टाइम दिखाना)
+        const timelineSlider = document.getElementById('timeline-slider');
+        const sliderTooltip = document.getElementById('slider-tooltip');
+
+        timelineSlider.addEventListener('mousemove', function(e) {
+            if (!replayData || !replayData.timeline) return;
+            
+            const rect = timelineSlider.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            const clampedPercent = Math.max(0, Math.min(1, percent));
+            
+            const maxIndex = parseInt(timelineSlider.max);
+            const hoverIndex = Math.round(clampedPercent * maxIndex);
+            
+            const hoverTime = replayData.timeline[hoverIndex];
+            if (hoverTime) {
+                sliderTooltip.innerText = hoverTime;
+                sliderTooltip.style.display = 'block';
+
+                // Bug 8 Fix: tooltip को slider की left boundary से relative calculate करें
+                // ताकि right edge पर overflow न हो
+                const sliderContainerRect = timelineSlider.parentElement.getBoundingClientRect();
+                const rawLeft = e.clientX - sliderContainerRect.left;
+                const tooltipHalfWidth = sliderTooltip.offsetWidth / 2;
+                const maxLeft = sliderContainerRect.width - tooltipHalfWidth;
+                const minLeft = tooltipHalfWidth;
+                const clampedLeft = Math.max(minLeft, Math.min(maxLeft, rawLeft));
+                sliderTooltip.style.left = `${clampedLeft}px`;
+            }
+        });
+
+        // जब माउस स्लाइडर से हटे तो टूलटिप छुपा दें
+        timelineSlider.addEventListener('mouseleave', function() {
+            sliderTooltip.style.display = 'none';
+        });
+        
+        function stepForward() { if(isPlaying) togglePlay(); renderFrame(timelineIndex + 1); }
+        function stepBackward() { if(isPlaying) togglePlay(); renderFrame(Math.max(0, timelineIndex - 1)); }
+        function seekTimeline(val) { if(isPlaying) togglePlay(); renderFrame(parseInt(val)); }
+        function changeSpeed() { if(isPlaying) { togglePlay(); togglePlay(); } }
+
+        function resetReplay() {
+            if(isPlaying) togglePlay();
+            timelineIndex = 0;
+            replayData = null;
+
+            // Bug 4 Fix: पुरानी candles और price lines chart से हटाएं
+            allCandlesData = [];
+            if(candleSeries) candleSeries.setData([]);
+            activePriceLines.forEach(line => { try { candleSeries.removePriceLine(line); } catch(e) {} });
+            activePriceLines = [];
+
+            document.getElementById('timeline-slider').value = 0;
+            document.getElementById('timeline-slider').disabled = true;
+            document.getElementById('timeline-lbl').innerText = 'IDLE';
+            document.getElementById('oc-table-div').innerHTML = '';
+            document.getElementById('stat-spot').innerText = '—';
+            document.getElementById('stat-time').innerText = '—';
+            document.getElementById('sr-res-val').innerText = '—';
+            document.getElementById('sr-res-stat').innerText = '—';
+            document.getElementById('sr-sup-val').innerText = '—';
+            document.getElementById('sr-sup-stat').innerText = '—';
+        }
+
+    </script>
 </body>
 </html>
