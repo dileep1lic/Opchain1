@@ -1,7 +1,7 @@
 from django.urls import path
 from . import views, backtest_view
 from . import replay_views
-from . import reversal_chart_views
+# from . import reversal_chart_views
 
 
 
