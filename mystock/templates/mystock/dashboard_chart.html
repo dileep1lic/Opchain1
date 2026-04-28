@@ -26,6 +26,23 @@
     body { background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; margin: 0; height: 100vh; display: flex; flex-direction: column; }
     #chart-wrap { position: relative; width: 100%; flex-grow: 1; overflow: hidden; }
     #chart { position: absolute; width: 100%; height: 100%; top: 0; left: 0; }
+    /* OHLC Legend Styles */
+    #ohlc-legend {
+        position: absolute;
+        top: 10px;
+        left: 12px;
+        z-index: 20;
+        font-size: 13px;
+        font-family: var(--font);
+        background: rgba(22, 27, 34, 0.6);
+        padding: 4px 10px;
+        border-radius: 4px;
+        pointer-events: none; /* ताकि माउस चार्ट पर काम करता रहे */
+        display: none;
+        border: 1px solid var(--border);
+    }
+    .ohlc-lbl { color: var(--muted); font-size: 11px; margin-left: 6px;}
+    .ohlc-val { font-weight: bold; margin-right: 4px; }
   </style>
 </head>
 <body>
@@ -60,9 +77,11 @@
 
 <div id="countdown-bar"><div id="countdown-fill"></div></div>
 
+
 <div id="chart-wrap">
   <div id="loading">⏳ Loading...</div>
   <div id="message"></div>
+  <div id="ohlc-legend"></div>
   <div id="chart"></div>
 </div>
 
@@ -130,6 +149,38 @@
     });
     cdData.sort((a, b) => a.time - b.time);
     candleSeries.setData(cdData);
+
+    // ── OHLC Hover Logic ──
+    const legend = document.getElementById('ohlc-legend');
+    
+    // अपडेट करने का फंक्शन
+    const updateLegend = (data) => {
+        const isUp = data.close >= data.open;
+        const color = isUp ? 'var(--green)' : 'var(--red)';
+        legend.innerHTML = `
+            <span class="ohlc-lbl">O</span> <span class="ohlc-val" style="color:${color}">${data.open.toFixed(2)}</span>
+            <span class="ohlc-lbl">H</span> <span class="ohlc-val" style="color:var(--green)">${data.high.toFixed(2)}</span>
+            <span class="ohlc-lbl">L</span> <span class="ohlc-val" style="color:var(--red)">${data.low.toFixed(2)}</span>
+            <span class="ohlc-lbl">C</span> <span class="ohlc-val" style="color:${color}">${data.close.toFixed(2)}</span>
+        `;
+        legend.style.display = 'block';
+    };
+
+    // डिफ़ॉल्ट रूप से सबसे आखिरी (Latest) कैंडल का डेटा दिखाएं
+    if (cdData.length > 0) {
+        updateLegend(cdData[cdData.length - 1]);
+    }
+
+    // जब माउस चार्ट पर घूमेगा
+    mainChart.subscribeCrosshairMove(param => {
+        if (param.time) {
+            const data = param.seriesData.get(candleSeries);
+            if (data) {
+                updateLegend(data);
+            }
+        }
+    });
+    // ──────────────────────
 
     // ── Reversal Lines draw करना ──
     if (window._reversalSeries) {
