@@ -322,8 +322,11 @@ async def calculate_data_async_optimized(session, symbol, expiry_Date):
             ce_g = ce_obj.get("option_greeks") or {}
             pe_g = pe_obj.get("option_greeks") or {}
             
+            # 1. लूप शुरू होने से पहले एक ही बार टाइम कैलकुलेट कर लें
+            current_time = timezone.now()
+
             rows.append({
-                "Time": timezone.now(),
+                "Time": current_time,
                 "Symbol": symbol,
                 "expiry": expiry_Date,  
                 "Lot_size": lot_size,
@@ -374,6 +377,7 @@ async def calculate_data_async_optimized(session, symbol, expiry_Date):
         df["CE_RANGE"] = ((np.maximum(ce_oi - pe_oi, 0) / ce_oi) * 100).round(2).fillna(0)
         df["PE_RANGE"] = ((np.maximum(pe_oi - ce_oi, 0) / pe_oi) * 100).round(2).fillna(0)
 
+        # OI, Volume, COI के लिए परसेंटेज कॉलम बनाएं (Vectorized)
         for col in ["CE_OI", "PE_OI", "CE_Volume", "PE_Volume", "CE_COI", "PE_COI"]:
             max_v = df[col].max()
             df[f"{col}_percent"] = ((df[col] / max_v) * 100).round(2) if max_v > 0 else 0
@@ -1409,6 +1413,161 @@ def run_live_paper_trading1(df, symbol="NIFTY"):
 
 
 def run_live_paper_trading(df, symbol="NIFTY"):
+    today = timezone.now().date()
+    spot = float(df["Spot_Price"].iloc[0])
+    current_time = df["Time"].iloc[0]
+
+    # ==========================================
+    # ── 1. LIVE ADMIN SETTINGS ──
+    # ==========================================
+    settings, _ = BotSettings.objects.get_or_create(id=1)
+    if not settings.trading_enabled:
+        return "Trading Disabled via Admin"
+    
+    TARGET_PTS = settings.default_target
+    SL_PTS = settings.default_sl
+    BUFFER = settings.reversal_buffer
+
+
+    # ==========================================
+    # ── 2. NEW MASTER LEVEL CALCULATION ──
+    # ==========================================
+    master_levels = get_master_levels(symbol, today)
+    
+    eff_res = master_levels["R"]["strike"]
+    r_level = master_levels["R"]["entry"]
+    r_target_level = master_levels["R"]["target"]
+    r_sl_level = master_levels["R"]["sl"]
+
+    eff_sup = master_levels["S"]["strike"]
+    s_level = master_levels["S"]["entry"]
+    s_target_level = master_levels["S"]["target"]
+    s_sl_level = master_levels["S"]["sl"]
+    
+    if not eff_res or not eff_sup:
+        return "No SR Data"
+    
+    
+    # ==========================================
+    # ── 3. EXIT LOGIC (For ALL Open Trades) ──
+    # ==========================================
+    open_trades = PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="OPEN")
+    
+    for open_trade in open_trades:
+        entry = open_trade.entry_spot
+        ttype = open_trade.trade_type
+        hit_target = hit_sl = False
+
+
+        if ttype == 'PUT':
+            target = r_target_level if r_target_level else (entry - TARGET_PTS) 
+            sl = r_sl_level if r_sl_level else (entry + SL_PTS)
+            
+            # 🚨 सेफ्टी लॉक: PUT का SL हमेशा Entry से बड़ा होना चाहिए
+            if sl <= entry: 
+                sl = entry + SL_PTS
+
+            if spot <= (target + BUFFER): hit_target = True
+            elif spot >= (sl + BUFFER): hit_sl = True
+
+        elif ttype == 'CALL':
+            target = s_target_level if s_target_level else (entry + TARGET_PTS)
+            sl = s_sl_level if s_sl_level else (entry - SL_PTS)
+            
+            # 🚨 सेफ्टी लॉक: CALL का SL हमेशा Entry से छोटा होना चाहिए
+            if sl >= entry: 
+                sl = entry - SL_PTS
+            
+            if spot >= (target - BUFFER): hit_target = True
+            elif spot <= (sl - BUFFER): hit_sl = True
+
+        if hit_target or hit_sl:
+            actual_pnl = (spot - entry) if ttype == 'CALL' else (entry - spot)
+            open_trade.exit_spot = spot
+            open_trade.exit_time = current_time
+            open_trade.result = "TARGET" if hit_target else "SL"
+            open_trade.pnl = round(actual_pnl, 2)
+            open_trade.save()
+            print(f"[{current_time}] 🟢 TRADE CLOSED | {ttype} | Result: {open_trade.result} | PNL: {open_trade.pnl}")
+
+    # 🛑 FIREWALL: अगर डेटाबेस में अभी भी कोई OPEN ट्रेड है, तो यहीं से वापस लौट जाओ! (NO NEW ENTRY)
+    if PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="OPEN").exists():
+        return "Trade is Running"
+
+    # ==========================================
+    # ── 4. MANUAL PENDING TRADES LOGIC ──
+    # ==========================================
+    pending_trades = PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="PENDING")
+    
+    for pt in pending_trades:
+        if pt.trade_type == 'CALL' and spot <= pt.trigger_price:
+            pt.result = 'OPEN'
+            pt.entry_spot = spot
+            pt.entry_time = current_time
+            pt.save()
+            print(f"[{current_time}] 🎯 MANUAL ENTRY: BUY CALL @ {spot}")
+            return "Manual Trade Opened" # तुरंत वापस लौटें
+
+        elif pt.trade_type == 'PUT' and spot >= pt.trigger_price:
+            pt.result = 'OPEN'
+            pt.entry_spot = spot
+            pt.entry_time = current_time
+            pt.save()
+            print(f"[{current_time}] 🎯 MANUAL ENTRY: BUY PUT @ {spot}")
+            return "Manual Trade Opened" # तुरंत वापस लौटें
+
+    # ==========================================
+    # ── 5. AVOID REPEAT & SHIFT TO NEXT LEVEL ──
+    # ==========================================
+    # tolerance = 20.0 
+    
+    # if r_level:
+    #     r_already_traded = PaperTrade.objects.filter(
+    #         symbol=symbol, trade_date=today, trade_type='PUT',
+    #         trigger_price__gte=r_level - tolerance, trigger_price__lte=r_level + tolerance
+    #     ).exists()
+
+    #     if r_already_traded:
+    #         if r_sl_level:
+    #             r_level = r_sl_level  
+    #         else:
+    #             r_level = None  
+
+    # if s_level:
+    #     s_already_traded = PaperTrade.objects.filter(
+    #         symbol=symbol, trade_date=today, trade_type='CALL',
+    #         trigger_price__gte=s_level - tolerance, trigger_price__lte=s_level + tolerance
+    #     ).exists()
+
+    #     if s_already_traded:
+    #         if s_sl_level:
+    #             s_level = s_sl_level  
+    #         else:
+    #             s_level = None  
+
+    # ==========================================
+    # ── 6. AUTOMATIC ENTRY LOGIC ──
+    # ==========================================
+    if r_level and spot >= r_level:
+        PaperTrade.objects.create(
+            symbol=symbol, trade_type='PUT', entry_time=current_time, entry_spot=spot,
+            trigger_level='R', trigger_price=r_level,
+            entry_strike=eff_res  # <--- यह लाइन जोड़ें
+        )
+        print(f"[{current_time}] 🔴 AUTO ENTRY: BUY PUT @ {spot} (R={r_level})")
+        return "Put Trade Opened"
+
+    elif s_level and spot <= s_level:
+        PaperTrade.objects.create(
+            symbol=symbol, trade_type='CALL', entry_time=current_time, entry_spot=spot,
+            trigger_level='S', trigger_price=s_level,
+            entry_strike=eff_sup  # <--- यह लाइन जोड़ें
+        )
+        print(f"[{current_time}] 🟢 AUTO ENTRY: BUY CALL @ {spot} (S={s_level})")
+        return "Call Trade Opened"
+
+
+# def run_live_paper_trading2(df, symbol="NIFTY"):
     today = timezone.now().date()
     spot = float(df["Spot_Price"].iloc[0])
     current_time = df["Time"].iloc[0]
