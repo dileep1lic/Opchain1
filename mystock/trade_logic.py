@@ -1,6 +1,24 @@
 import re
 from django.utils import timezone
 from .models import OptionChain, LiveSRData, PaperTrade
+from django.core.cache import cache
+from django.utils import timezone
+# ─── ACTIVE TRADE OVERRIDE FUNCTION ───
+# इसे मुख्य फंक्शन के बाहर (ऊपर) रखा गया है ताकि कोड साफ रहे
+# ==========================================
+def get_active_trade_data(symbol, selected_date):
+    """
+    अगर कोई ट्रेड OPEN है, तो उसकी एंट्री स्ट्राइक और टाइप (CALL/PUT) रिटर्न करेगा।
+    अगर कोई ट्रेड OPEN नहीं है, तो None रिटर्न करेगा।
+    """
+    open_trade = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date, result__in=["OPEN", "PENDING"]).first()
+    
+    if open_trade and open_trade.entry_strike:
+        saved_entry_strike = float(open_trade.entry_strike)
+        ttype = open_trade.trade_type
+        return saved_entry_strike, ttype
+    
+    return None, None
 
 def get_master_levels(symbol, selected_date=None):
     """
@@ -31,7 +49,7 @@ def get_master_levels(symbol, selected_date=None):
         return float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
     
     # हेल्पर: डेटाबेस से Reversal वैल्यू का Average (SMA) लाने के लिए
-    def get_rev_val(strike, side, period=5):
+    def get_rev_val2(strike, side, period=1):
         """
         period=5 का मतलब है कि यह पिछले 5 डेटा पॉइंट्स का एवरेज निकालेगा।
         आप इसे अपनी सुविधानुसार 3, 5 या 10 कर सकते हैं।
@@ -63,6 +81,54 @@ def get_master_levels(symbol, selected_date=None):
         else:
             return None
 
+    def get_rev_val(strike, side, period=1):
+        """
+        period=5 का मतलब है कि यह पिछले 5 डेटा पॉइंट्स का एवरेज निकालेगा।
+        Hybrid Logic:
+        - अगर period=1 और आज की डेट है -> Cache से लाएगा (0 DB Queries, Super Fast)
+        - अगर period > 1 या पुरानी डेट है -> Database से लाएगा (Fallback)
+        """
+        # 1. 🟢 Cache Logic (सिर्फ आज के लेटेस्ट डेटा के लिए)
+        today = timezone.now().date()
+        # मान लेते हैं selected_date और symbol आपके outer function से आ रहे हैं
+        if period == 1 and selected_date == today:
+            live_data = cache.get(f'live_nifty_data_{symbol.upper()}')
+            
+            if live_data:
+                # Cache (List of Dicts) में से वो row ढूंढें जिसका Strike मैच करता हो
+                for row in live_data:
+                    if row.get('Strike_Price') == strike:
+                        # CE या PE वैल्यू निकालें
+                        val = row.get('Reversl_Ce') if side == 'CE' else row.get('Reversl_Pe')
+                        
+                        if val is not None and float(val) > 0:
+                            return round(float(val), 2)
+                        return None # अगर वैल्यू 0 या None है
+
+        # 2. 🔴 Database Logic (SMA के लिए या पुरानी डेट के लिए)
+        rows = OptionChain.objects.filter(
+            Symbol__iexact=symbol, 
+            Time__date=selected_date, 
+            Strike_Price=strike
+        ).order_by('-Time')[:period]
+        
+        if not rows: 
+            return None
+            
+        total_val = 0.0
+        valid_count = 0
+        
+        for row in rows:
+            val = float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
+            if val and val > 0:
+                total_val += val
+                valid_count += 1
+                
+        if valid_count > 0:
+            return round(total_val / valid_count, 2)
+        else:
+            return None
+    
     # ==========================================
     # ─── RESISTANCE LOGIC (CALL SIDE) ───
     # ==========================================
@@ -93,8 +159,8 @@ def get_master_levels(symbol, selected_date=None):
         # चेक करें कि क्या इस भाव के आस-पास पहले ही PUT ट्रेड हो चुका है?
         r_already_traded = PaperTrade.objects.filter(
             symbol=symbol, trade_date=selected_date, trade_type='PUT',
-            trigger_price__gte=r_entry_val - tolerance, 
-            trigger_price__lte=r_entry_val + tolerance
+            trigger_price__gte=r_entry_val + tolerance, 
+            trigger_price__lte=r_entry_val - tolerance
         ).exists()
         
         if r_already_traded:
@@ -150,6 +216,29 @@ def get_master_levels(symbol, selected_date=None):
     levels["S"]["entry"] = get_rev_val(eff_sup, 'PE')
     levels["S"]["target"] = get_rev_val(eff_sup + step, 'PE') # CALL का टारगेट ऊपर होता है
     levels["S"]["sl"] = get_rev_val(eff_sup - step, 'PE')     # CALL का SL नीचे होता है
+
+    # ==========================================
+    # ─── 🚀 ACTIVE TRADE OVERRIDE EXECUTION ───
+    # ==========================================
+    # यह चेक करेगा कि डेटाबेस में कोई ट्रेड चल रहा है या नहीं
+    saved_entry_strike, ttype = get_active_trade_data(symbol, selected_date)
+
+    if saved_entry_strike is not None:
+        if ttype == 'CALL':
+            # अगर CALL ट्रेड OPEN है, तो पूरा का पूरा 'S' ब्लॉक डेटाबेस वाली स्ट्राइक पर लॉक कर दें
+            # levels["S"]["strike"] = saved_entry_strike
+            # levels["S"]["entry"] = get_rev_val(saved_entry_strike, 'PE')
+            levels["S"]["target"] = get_rev_val(saved_entry_strike + step, 'PE')
+            levels["S"]["sl"] = get_rev_val(saved_entry_strike - step, 'PE')
+            levels["S"]["status"] = f"{sup_status or ''} ACTIVE CALL TRADE [DB LOCKED] {saved_entry_strike}"
+            
+        elif ttype == 'PUT':
+            # अगर PUT ट्रेड OPEN है, तो पूरा का पूरा 'R' ब्लॉक डेटाबेस वाली स्ट्राइक पर लॉक कर दें
+            # levels["R"]["strike"] = saved_entry_strike
+            # levels["R"]["entry"] = get_rev_val(saved_entry_strike, 'CE')
+            levels["R"]["target"] = get_rev_val(saved_entry_strike - step, 'CE')
+            levels["R"]["sl"] = get_rev_val(saved_entry_strike + step, 'CE')
+            levels["R"]["status"] = f"{res_status or ''} ACTIVE PUT TRADE [DB LOCKED] {saved_entry_strike}"
 
     return levels
 
