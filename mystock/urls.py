@@ -1,6 +1,8 @@
 from django.urls import path
 from . import views, backtest_view
 from . import replay_views
+from . import reversal_chart_views
+
 
 
 urlpatterns = [
@@ -26,7 +28,7 @@ urlpatterns = [
     path('chart/view/coi/', views.render_chart_page_coi, name='chart_page_coi'), # HTML पेज
     path('api/coi-data/', views.specific_strike_coi_data, name='coi_data_api'), # JSON डेटा
 
-    path('reversal-chart/', views.reversal_chart_view, name='reversal_chart'),
+    # path('reversal-chart/', views.reversal_chart_view, name='reversal_chart'),
 
 
     path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
@@ -34,7 +36,10 @@ urlpatterns = [
     path('sr-data/', views.support_resistance_view, name='sr_data'),
 
     # ── Market Replay ────────────────────────────────────────
-    path('replay/', replay_views.market_replay_view, name='market_replay'),
+    # path('replay/', replay_views.market_replay_view, name='market_replay'),
+    # test code 
+    path('market-replay/', views.market_replay_view, name='market_replay'),
+    path('api/market-replay-data/', views.market_replay_data_api, name='market_replay_data_api'),
 
     # AJAX endpoints
     path('api/replay/dates/',      replay_views.get_replay_dates,      name='api_replay_dates'),
@@ -45,6 +50,15 @@ urlpatterns = [
     path("chart/",         views.chart_view,   name="chart"),        # मुख्य chart page
     path("api/candle/",    views.candle_api,    name="candle_api"),   # AJAX JSON data
     path("api/symbols/",   views.symbol_search, name="symbol_search"),# Autocomplete
+
+    # test 
+    # path('live-chart/', views.live_chart_page, name='live_chart'),
+    
+    # यह आपका API एंडपॉइंट है जिसे JavaScript fetch() करेगा
+    # path('api/live-reversal-data/', views.live_reversal_data_api, name='live_reversal_api'),
+
+    # path('reversal-chart/', reversal_chart_views.reversal_chart_view, name='reversal_chart'),
+    # path('api/reversal-chart-data/', reversal_chart_views.reversal_chart_data_api, name='reversal_chart_data_api'),
 
     path('dashboard-chart/', views.dashboard_chart_view, name='dashboard_chart'),
 
