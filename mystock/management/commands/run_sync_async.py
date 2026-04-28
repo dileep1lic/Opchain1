@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
 from datetime import timedelta
+from django.core.cache import cache
 from .async_live import (
     save_sr_async_wrapper,
     # get_smart_expiry,
@@ -23,6 +24,9 @@ from .async_live import (
 from .symbol import symbols as all_symbols
 from mystock.models import OptionChain, SyncControl, SupportResistance, InstrumentStore, TempOptionChain, LiveSRData
 from django.db import close_old_connections
+
+# async wrapper बना लें ताकि लूप ब्लॉक ना हो
+set_cache_async = sync_to_async(cache.set)
 
 # Logging setup
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -158,6 +162,38 @@ class Command(BaseCommand):
                 try:
                     df = await calculate_data_async_optimized(session, fixes_sym, expiry)
                     if df is not None and not df.empty:
+                        # 🟢 पूरे डेटा का Totals कैलकुलेट करें
+                        nifty_totals = {
+                            'total_ce_oi': float(df['CE_OI'].sum() or 0),
+                            'total_pe_oi': float(df['PE_OI'].sum() or 0),
+                            'total_ce_coi': float(df['CE_COI'].sum() or 0),
+                            'total_pe_coi': float(df['PE_COI'].sum() or 0),
+                        }
+                        # इसे 60 सेकंड के लिए कैश करें
+                        await set_cache_async(f'live_nifty_totals_{fixes_sym}', nifty_totals, 60)
+                        # 1. DataFrame को Strike_Price के क्रम में Sort करें
+                        df = df.sort_values(by='Strike_Price').reset_index(drop=True)
+
+                        # 2. Spot Price लें (मान कर चल रहे हैं कि एक Expiry/Symbol के लिए यह समान है)
+                        spot_price = df['Spot_Price'].iloc[0]
+
+                        # 3. ATM (At-The-Money) Strike का Index पता करें (जो Spot Price के सबसे करीब हो)
+                        atm_index = (df['Strike_Price'] - spot_price).abs().idxmin()
+
+                        # 4. 30 छोटी और 30 बड़ी स्ट्राइक की रेंज निकालें
+                        # max(0, ...) और min(len(), ...) इसलिए ताकि index out of bounds का error न आए
+                        start_index = max(0, atm_index - 30)
+                        end_index = min(len(df), atm_index + 31) # +31 इसलिए ताकि ATM भी include रहे
+
+                        # 5. DataFrame को फ़िल्टर करें
+                        filtered_df = df.iloc[start_index:end_index]
+
+                        # 🟢 नया कोड: DataFrame को Dictionary में बदलकर Cache में डालें
+                        live_data_dict = filtered_df.to_dict('records')
+                        # 10 सेकंड के लिए कैश में रखें (हर 5 सेकंड में ये रिफ्रेश हो ही जाएगा)
+                        await set_cache_async(f'live_nifty_data_{fixes_sym}', live_data_dict, 60)
+                        await set_cache_async(f'live_nifty_spot_{fixes_sym}', spot_price, 60)
+
                         entries = [OptionChain(
                             Time=row.get('Time'),
                             Symbol=row.get('Symbol'),
@@ -192,7 +228,7 @@ class Command(BaseCommand):
                             PE_IV=row.get('PE_IV'),
                             PE_RANGE=row.get('PE_RANGE'),
                             PE_Delta=row.get('PE_Delta'),
-                        ) for _, row in df.iterrows()]
+                        ) for _, row in filtered_df.iterrows()]
                         await bulk_create_async(entries)
                         print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
                         
