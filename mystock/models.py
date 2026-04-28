@@ -244,6 +244,7 @@ class PaperTrade(models.Model):
     result = models.CharField(max_length=20, default="OPEN", db_index=True)  # OPEN, TARGET, SL
     pnl = models.FloatField(default=0.0)
     entry_strike = models.FloatField(null=True, blank=True)
+    is_replay = models.BooleanField(default=False)
 
     class Meta:
         indexes = [
