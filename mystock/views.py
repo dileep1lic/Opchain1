@@ -1,27 +1,97 @@
-import requests
-import time
-from datetime import datetime, time, timedelta, date, time as dt_time
-from django.shortcuts import render
-from requests.exceptions import SSLError, ConnectionError, Timeout
-from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, LiveSRData, BotSettings, PaperTrade
-from django.utils import timezone
-from django.db.models import OuterRef, Subquery, Q, Sum, F, Count
-from django.views.decorators.cache import never_cache, cache_page
-from django.http import HttpResponse, JsonResponse
-from django.contrib.auth.decorators import login_required
-from django.views.decorators.csrf import csrf_exempt
-from .management.commands.async_live import get_instrument_from_db, update_instrument_store_bulk, run_live_paper_trading 
-from .symbol import symbols as ALL_SYMBOLS
-from django.views.decorators.clickjacking import xframe_options_exempt
-import pytz
-from django.utils.timezone import localtime
+# import requests
+# import time
+# from datetime import datetime, time, timedelta, date, time as dt_time
+# from django.shortcuts import render
+# from requests.exceptions import SSLError, ConnectionError, Timeout
+# from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, LiveSRData, BotSettings, PaperTrade
+# from django.utils import timezone
+# from django.db.models import OuterRef, Subquery, Q, Sum, F, Count
+# from django.views.decorators.cache import never_cache, cache_page
+# from django.http import HttpResponse, JsonResponse
+# from django.contrib.auth.decorators import login_required
+# from django.views.decorators.csrf import csrf_exempt
+# from .management.commands.async_live import get_instrument_from_db, update_instrument_store_bulk, run_live_paper_trading 
+# from .symbol import symbols as ALL_SYMBOLS
+# from django.views.decorators.clickjacking import xframe_options_exempt
+# import pytz
+# from django.utils.timezone import localtime
+# import json
+# from django.db.models.functions import Abs
+# from asgiref.sync import async_to_sync
+# from .trade_logic import get_master_levels
+# from django.core.cache import caches
+
+# from .credentials import access_token
+# from django.views.decorators.clickjacking import xframe_options_exempt
+# import math
+# from django.http import JsonResponse
+# from django.utils.timezone import localtime
+# import re, re as _re
+# from django.views.decorators.csrf import csrf_exempt
+# import json
+# import traceback
+# import logging
+# from datetime import date, datetime, timedelta, time as dt_time, timezone as dt_timezone
+# from django.contrib.auth.decorators import login_required
+# from django.utils import timezone
+# from django.views.decorators.http import require_GET
+# from django.shortcuts import render, redirect, get_object_or_404
+# from django.contrib import messages
+# from .models import TradingJournal, TradeStatus, TradeType, TradeLevel, OptionChain, LiveSRData, PaperTrade, InstrumentStore 
+
+# ── Standard Library ──────────────────────────────────────────────
 import json
-from django.db.models.functions import Abs
+import logging
+import math
+import re
+import time
+import traceback
+from datetime import date, datetime, timedelta, time as dt_time, timezone as dt_timezone
+
+# ── Third-Party ───────────────────────────────────────────────────
+import pytz
+import requests
+from requests.exceptions import ConnectionError, SSLError, Timeout
+
+# ── Django ────────────────────────────────────────────────────────
 from asgiref.sync import async_to_sync
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.core.cache import caches
+from django.db.models import Count, F, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Abs
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.timezone import localtime
+from django.views.decorators.cache import cache_page, never_cache
+from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
+
+# ── Local ─────────────────────────────────────────────────────────
+from .credentials import access_token
+from .management.commands.async_live import (
+    get_instrument_from_db,
+    run_live_paper_trading,
+    update_instrument_store_bulk,
+)
+from .models import (
+    BotSettings,
+    InstrumentStore,
+    LiveSRData,
+    OptionChain,
+    PaperTrade,
+    SupportResistance,
+    SyncControl,
+    TempOptionChain,
+    TradeLevel,
+    TradeStatus,
+    TradeType,
+    TradingJournal,
+)
+from .symbol import symbols as ALL_SYMBOLS
 from .trade_logic import get_master_levels
-from django.core.cache import cache
-
-
 
 def safe_get(url, headers=None, params=None, retries=3, timeout=10):
     """
@@ -48,7 +118,49 @@ def safe_get(url, headers=None, params=None, retries=3, timeout=10):
             print(f"HTTP Error occurred: {e}")
             return None
     return None
+# ========================================================
+# 🚀 SMART CACHE OVERRIDE (FAILOVER MECHANISM)
+# ========================================================
+class SmartCache:
+    def get(self, key, default=None):
+        try:
+            val = caches['default'].get(key)
+            if val is not None:
+                # 🟢 flush=True टर्मिनल को तुरंत प्रिंट दिखाने के लिए मजबूर करेगा
+                # print(f"✅ Cache Hit in REDIS for key: {key}", flush=True)
+                return val
+            print(f"⚠️ Cache Miss in REDIS for key: {key}", flush=True)
+        except Exception as e:
+            print(f"🔴 REDIS SET ERROR: {e}", flush=True)
+            pass 
+        
+        try:
+            val = caches['db_cache'].get(key)
+            if val is not None:
+                # print(f"✅ Cache Hit in DATABASE for key: {key}", flush=True)
+                return val
+            print(f"⚠️ Cache Miss in DATABASE for key: {key}", flush=True)
+        except Exception:
+            pass
+            
+        return default
 
+    def set(self, key, value, timeout=None):
+        try:
+            caches['default'].set(key, value, timeout)
+            # print(f"✅ Cache Set in Redis for key: {key}", flush=True)
+        except Exception as e:
+            print(f"🔴 REDIS SET ERROR ({key}): {e}", flush=True)
+            # pass
+        try:
+            caches['db_cache'].set(key, value, timeout)
+            # print(f"✅ Cache Set in Database for key: {key}", flush=True)
+        except Exception as e:
+            print(f"🔴 DB CACHE SET ERROR ({key}): {e}", flush=True)
+            # pass
+
+cache = SmartCache()
+# ========================================================
 # ── 1. Admin Panel Page ─────────────────────────────────────
 @login_required
 def admin_panel_view(request):
@@ -169,25 +281,6 @@ PAST_WINDOW = timedelta(seconds=2)
 
 def calculate_percentage(change, max_change):
     return (change / max_change) * 100 if max_change > 0 and change else 0
-
-def apply_ranking_styles1(all_data, metric):
-    ranked = sorted(all_data, key=lambda x: getattr(x, metric, 0) or 0, reverse=True)
-    base_class = metric.replace('_pct', '_class').replace('_percent', '_class')
-
-    for idx, row in enumerate(ranked[:3]):
-        val = getattr(row, metric, 0) or 0
-        if idx == 0 and val > 0:
-            setattr(row, base_class, "bg-green")
-        elif idx == 1:
-            if val >= 75:
-                setattr(row, base_class, "bg-red")
-            elif 65 <= val < 75:
-                setattr(row, base_class, "bg-yellow")
-        elif idx == 2:
-            # ✅ तीसरे पर पीला तभी लगेगा जब दूसरे की वैल्यू ≥ 75 हो
-            val_2nd = getattr(ranked[1], metric, 0) or 0
-            if val_2nd >= 75 and val >= 65:
-                setattr(row, base_class, "bg-yellow")
 
 def apply_ranking_styles(all_data, metric):
     if not all_data: 
@@ -737,6 +830,97 @@ def render_chart_page_coi(request):
         'strike': request.GET.get('strike')
     })
 
+# 1. API View (जो सिर्फ डेटा देगा)
+def specific_strike_ltp_data(request):
+    symbol = request.GET.get('symbol', 'NIFTY')
+    strike_price = request.GET.get('strike')
+
+    if not strike_price:
+        return JsonResponse({"error": "Strike required"}, status=400)
+
+    ist = pytz.timezone('Asia/Kolkata')
+    today = timezone.localdate()
+
+    # 1. 9:15 से 15:30 तक 1 मिनट के फिक्स टाइम स्लॉट्स बनाना
+    master_times = []
+    current = datetime.combine(today, dt_time(9, 15))
+    end_time = datetime.combine(today, dt_time(15, 30))
+    
+    while current <= end_time:
+        master_times.append(current.strftime("%H:%M"))
+        current += timedelta(minutes=1) # 1 मिनट का अंतराल
+
+    # 2. डेटाबेस से डेटा निकालना
+    db_data = OptionChain.objects.filter(
+        Symbol=symbol,
+        Strike_Price=strike_price,
+        Time__date=today
+    ).order_by('Time')
+
+    if not db_data.exists():
+        return JsonResponse({"error": "No data found"}, status=404)
+
+    # डेटा में उपलब्ध सबसे आखिरी समय (ताकि भविष्य को खाली रखा जा सके)
+    latest_db_time = timezone.localtime(db_data.last().Time, ist).strftime("%H:%M")
+
+    # 3. डेटा को डिक्शनरी में मैप करना
+    data_map = {}
+    for entry in db_data:
+        t_str = timezone.localtime(entry.Time, ist).strftime("%H:%M")
+        data_map[t_str] = {
+            "ce_ltp": entry.CE_LTP,
+            "pe_ltp": entry.PE_LTP,
+            "ce_cltp": entry.CE_CLTP, # यहाँ मॉडल के हिसाब से फील्ड नाम चेक कर लें
+            "pe_cltp": entry.PE_CLTP,
+        }
+
+    # 4. Forward Fill Logic (पिछली वैल्यू भरना)
+    ce_ltp_list, pe_ltp_list, ce_cltp_list, pe_cltp_list = [], [], [], []
+    
+    last_val = None # पिछली उपलब्ध वैल्यू स्टोर करने के लिए
+    found_first_data = False
+
+    for t in master_times:
+        if t in data_map:
+            # नया डेटा मिला, इसे सेव करें और लिस्ट में डालें
+            last_val = data_map[t]
+            found_first_data = True
+            ce_ltp_list.append(last_val["ce_ltp"])
+            pe_ltp_list.append(last_val["pe_ltp"])
+            ce_cltp_list.append(last_val["ce_cltp"])
+            pe_cltp_list.append(last_val["pe_cltp"])
+        
+        elif found_first_data and t <= latest_db_time:
+            # बीच में डेटा गायब है, तो पिछली वैल्यू (Last Known) भरें
+            ce_ltp_list.append(last_val["ce_ltp"])
+            pe_ltp_list.append(last_val["pe_ltp"])
+            ce_cltp_list.append(last_val["ce_cltp"])
+            pe_cltp_list.append(last_val["pe_cltp"])
+        
+        else:
+            # 9:15 से पहले या भविष्य के समय के लिए None भेजें
+            ce_ltp_list.append(None)
+            pe_ltp_list.append(None)
+            ce_cltp_list.append(None)
+            pe_cltp_list.append(None)
+
+    return JsonResponse({
+        "times": master_times,
+        "ce_ltp": ce_ltp_list,
+        "pe_ltp": pe_ltp_list,
+        "ce_cltp": ce_cltp_list,
+        "pe_cltp": pe_cltp_list,
+    })
+
+# 2. अपने चार्ट पेज वाले फंक्शन के ऊपर यह लाइन लिखें
+@xframe_options_exempt
+def render_chart_page_ltp(request):
+    return render(request, 'mystock/ltp_chart_js.html', {
+        'symbol': request.GET.get('symbol'),
+        'strike': request.GET.get('strike')
+    })
+
+
 def get_dynamic_strikes_and_atm(base_qs, spot_price, symbol, start_time, end_time):
     """ स्पॉट प्राइस के आधार पर 15 CE, 15 PE और ATM स्ट्राइक निकालता है (optimized) """
 
@@ -780,150 +964,7 @@ def get_dynamic_strikes_and_atm(base_qs, spot_price, symbol, start_time, end_tim
 india_tz = pytz.timezone("Asia/Kolkata")
 
 
-# def generate_timestamps(today):
-#     start_dt = timezone.make_aware(datetime.combine(today, time(9, 15)))
-#     end_dt = timezone.make_aware(datetime.combine(today, time(15, 30)))
 
-#     timestamps = []
-#     current = start_dt
-#     while current <= end_dt:
-#         timestamps.append(current.astimezone(india_tz).strftime('%H:%M'))
-#         current += timedelta(minutes=1)
-#     return timestamps
-
-
-# def option_chart_view(request):
-#     today = timezone.localdate()
-#     timestamps = generate_timestamps(today)
-
-#     symbol = "NIFTY"
-
-#     base_qs = OptionChain.objects.filter(
-#         Time__range=(timezone.make_aware(datetime.combine(today, time(9, 15))),
-#                      timezone.make_aware(datetime.combine(today, time(15, 30)))),
-#         Symbol=symbol
-#     ).only(
-#         'Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe'
-#     )
-
-#     latest_row = base_qs.order_by('-Time').values('Spot_Price').first()
-#     latest_spot = latest_row['Spot_Price'] if latest_row else None
-
-#     available_strikes = sorted(set(base_qs.values_list('Strike_Price', flat=True)))
-
-#     ce_selected = request.GET.getlist('ce_strikes')
-#     pe_selected = request.GET.getlist('pe_strikes')
-
-#     ce_selected = list(map(float, ce_selected)) if ce_selected else []
-#     pe_selected = list(map(float, pe_selected)) if pe_selected else []
-
-#     if not ce_selected and not pe_selected and latest_spot:
-#         ce_selected = [s for s in available_strikes if s >= latest_spot][:10]
-#         pe_selected = [s for s in reversed(available_strikes) if s <= latest_spot][:10]
-
-#     selected_strikes = list(set(ce_selected + pe_selected))
-
-#     qs = base_qs.filter(Strike_Price__in=selected_strikes).values(
-#         'Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe'
-#     ).order_by('Time')
-
-#     # Map data by time
-#     data_map = {}
-#     for row in qs:
-#         t = row['Time'].astimezone(india_tz).strftime('%H:%M')
-#         if t not in data_map:
-#             data_map[t] = {'spot': row['Spot_Price']}
-#         data_map[t][str(row['Strike_Price'])] = {
-#             'CE': row['Reversl_Ce'],
-#             'PE': row['Reversl_Pe']
-#         }
-
-#     spot_prices = []
-#     ce_data = {str(s): [] for s in ce_selected}
-#     pe_data = {str(s): [] for s in pe_selected}
-
-#     for t in timestamps:
-#         spot_prices.append(data_map.get(t, {}).get('spot'))
-#         for s in ce_selected:
-#             ce_data[str(s)].append(data_map.get(t, {}).get(str(s), {}).get('CE'))
-#         for s in pe_selected:
-#             pe_data[str(s)].append(data_map.get(t, {}).get(str(s), {}).get('PE'))
-
-#     chart_data = {
-#         "timestamps": timestamps,
-#         "spot_prices": spot_prices,
-#         "ce_reversals": ce_data,
-#         "pe_reversals": pe_data,
-#     }
-
-#     return render(request, "mystock/chart_template.html", {
-#         "chart_data": json.dumps(chart_data),
-#         "available_strikes": available_strikes,
-#         "ce_selected": ce_selected,
-#         "pe_selected": pe_selected,
-#     })
-
-
-# def option_chart_api(request):
-#     today = timezone.localdate()
-#     timestamps = generate_timestamps(today)
-
-#     symbol = request.GET.get("symbol", "NIFTY")
-
-#     ce_selected = request.GET.getlist('ce_strikes[]')
-#     pe_selected = request.GET.getlist('pe_strikes[]')
-
-#     ce_selected = list(map(float, ce_selected)) if ce_selected else []
-#     pe_selected = list(map(float, pe_selected)) if pe_selected else []
-
-#     selected_strikes = list(set(ce_selected + pe_selected))
-
-#     qs = OptionChain.objects.filter(
-#         Time__range=(timezone.make_aware(datetime.combine(today, time(9, 15))),
-#                      timezone.make_aware(datetime.combine(today, time(15, 30)))),
-#         Symbol=symbol,
-#         Strike_Price__in=selected_strikes
-#     ).values(
-#         'Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe'
-#     ).order_by('Time')
-
-#     data_map = {}
-#     for row in qs:
-#         t = row['Time'].astimezone(india_tz).strftime('%H:%M')
-#         if t not in data_map:
-#             data_map[t] = {'spot': row['Spot_Price']}
-#         data_map[t][str(row['Strike_Price'])] = {
-#             'CE': row['Reversl_Ce'],
-#             'PE': row['Reversl_Pe']
-#         }
-
-#     spot_prices = []
-#     ce_data = {str(s): [] for s in ce_selected}
-#     pe_data = {str(s): [] for s in pe_selected}
-
-#     for t in timestamps:
-#         spot_prices.append(data_map.get(t, {}).get('spot'))
-#         for s in ce_selected:
-#             ce_data[str(s)].append(data_map.get(t, {}).get(str(s), {}).get('CE'))
-#         for s in pe_selected:
-#             pe_data[str(s)].append(data_map.get(t, {}).get(str(s), {}).get('PE'))
-
-#     return JsonResponse({
-#         "timestamps": timestamps,
-#         "spot_prices": spot_prices,
-#         "ce_reversals": ce_data,
-#         "pe_reversals": pe_data
-#     })
-
-
-
-
-
-import requests
-from datetime import date, timedelta
-from django.http import JsonResponse
-from .credentials import access_token
-from .models import InstrumentStore, OptionChain, LiveSRData  # अपने app का नाम use करें
 
 # ─────────────────────────────────────────────
 # Helper: Symbol → instrument_key (DB से)
@@ -946,580 +987,182 @@ def get_instrument_key(symbol: str):
 # Helper: OptionChain से Reversal lines fetch
 # सिर्फ Support–Resistance के बीच की strikes
 # ─────────────────────────────────────────────
-
-from django.core.cache import cache
-
-def get_reversal_lines1(symbol: str, from_date: str, to_date: str):
-    cache_key = f"rev_lines_{symbol}_{from_date}_{to_date}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    try:
-        import math, re as _re
-        from datetime import datetime, time as dt_time
-
-        day_start = timezone.make_aware(datetime.combine(
-            datetime.strptime(from_date, '%Y-%m-%d').date(), dt_time.min))
-        day_end   = timezone.make_aware(datetime.combine(
-            datetime.strptime(to_date,   '%Y-%m-%d').date(), dt_time.max))
-
-        sr = LiveSRData.objects.filter(
-            Symbol=symbol,
-            Time__gte=day_start,
-            Time__lte=day_end,
-        ).order_by('-Time').first()
-
-        if not sr or not sr.resistance_strike or not sr.supprt_strike:
-            cache.set(cache_key, [], timeout=60)
-            return []
-
-        step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
-
-        # def effective_strike(status_raw, base, is_resistance):
-        #     status = str(status_raw).upper() if status_raw else ""
-        #     m = _re.search(r'(?:WTB|WTT)\s+(\d+)', status)
-        #     target = float(m.group(1)) if m else base
-        #     # if "SHIFTED WTT" in status: return base 
-        #     # if "SHIFTED WTB" in status: return base + step if is_resistance else base - step
-        #     # if "WTT" in status or "WTB" in status:
-        #     #     return target + step if is_resistance else target - step
-        #     # return base + step if is_resistance else base - step
-
-        #     if is_resistance:
-        #         # Resistance (CE) Side
-        #         if "SHIFTED WTT" in status: return base + step
-        #         if "SHIFTED WTB" in status: return base + step
-        #         if "WTT" in status or "WTB" in status: return target + step
-        #         return base + step
-        #     else:
-        #         # Support (PE) Side - आपकी शर्त यहाँ लागू होती है
-        #         # यदि "Shifted WTT" है, तो base (Support Strike) से एक step नीचे की लाइन
-        #         if "SHIFTED WTT" in status: 
-        #             return base - step  # <--- यहाँ बदलाव किया गया है
-                    
-        #         if "SHIFTED WTB" in status: return base - step
-        #         if "WTT" in status or "WTB" in status: return target - step
-        #         return base - step
-
-        
-        # eff_res = effective_strike(sr.resistance_status, float(sr.resistance_strike), True)
-        # eff_sup = effective_strike(sr.supprt_status,     float(sr.supprt_strike),     False)
-
-        master_levels = get_master_levels(symbol, day_start.date())
-        eff_res = master_levels["R"]["strike"]
-        eff_sup = master_levels["S"]["strike"]
-        
-        # ✅ Original range logic restore — nearby strikes ke liye
-        ce_strikes_list = [eff_res, float(sr.resistance_strike)]
-        pe_strikes_list = [eff_sup, float(sr.supprt_strike)]
-        global_low  = min(pe_strikes_list + ce_strikes_list) - step
-        global_high = max(pe_strikes_list + ce_strikes_list) + step
-
-        # ✅ Performance: .values() + date range + exact match
-        oc_qs = OptionChain.objects.filter(
-            Symbol=symbol,
-            Time__gte=day_start,
-            Time__lte=day_end,
-            Strike_Price__gte=global_low,
-            Strike_Price__lte=global_high,
-        ).values(
-            'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe'
-        ).order_by('-Time')   # latest pehle
-
-        # Har strike ki sirf latest row
-        seen_strikes = {}
-        spot_price   = None
-        for row in oc_qs:
-            s = row['Strike_Price']
-            if s not in seen_strikes:
-                seen_strikes[s] = row
-            if spot_price is None and row['Spot_Price']:
-                spot_price = row['Spot_Price']
-
-        def valid(v):
-            return v is not None and not math.isnan(v) and not math.isinf(v)
-
-        seen_ce, seen_pe = set(), set()
-        lines = []
-
-        for strike, row in sorted(seen_strikes.items()):
-            if not valid(row['Spot_Price']):
-                continue
-            spot = row['Spot_Price']
-            is_top    = (strike == eff_res)
-            is_bottom = (strike == eff_sup)
-
-            # ✅ Original filter logic — spot ke upar/neeche wali lines
-            if valid(row['Reversl_Ce']):
-                if (row['Reversl_Ce'] >= spot or is_top) and row['Reversl_Ce'] not in seen_ce:
-                    seen_ce.add(row['Reversl_Ce'])
-                    lines.append({
-                        "price":  float(row['Reversl_Ce']),
-                        "strike": float(strike),
-                        "type":   "CE",
-                        "color":  "#ff8c00" if is_top else "#f85149",
-                        "width":  4 if is_top else 1,
-                        "dash":   0,
-                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
-                    })
-
-            if valid(row['Reversl_Pe']):
-                if (row['Reversl_Pe'] < spot or is_bottom) and row['Reversl_Pe'] not in seen_pe:
-                    seen_pe.add(row['Reversl_Pe'])
-                    lines.append({
-                        "price":  float(row['Reversl_Pe']),
-                        "strike": float(strike),
-                        "type":   "PE",
-                        "color":  "#00bfff" if is_bottom else "#3fb950",
-                        "width":  4 if is_bottom else 1,
-                        "dash":   0,
-                        "label":  f"S {strike:.0f}" if is_bottom else f"P {strike:.0f}",
-                    })
-
-        lines.sort(key=lambda x: x["price"], reverse=True)
-        cache.set(cache_key, lines, timeout=300)
-        return lines
-
-    except Exception as e:
-        print(f"Reversal lines error: {e}")
-        return []
-
-def get_reversal_lines2(symbol: str, from_date: str, to_date: str):
-    from datetime import date as _date
-    today_str = _date.today().isoformat()
- 
-    cache_key = f"rev_lines_{symbol}_{from_date}_{to_date}"
- 
-    # आज की date है तो cache use मत करो — हमेशा fresh data चाहिए
-    if from_date != today_str:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
- 
-    try:
-        import math, re as _re
-        from datetime import datetime, time as dt_time
- 
-        day_start = timezone.make_aware(datetime.combine(
-            datetime.strptime(from_date, '%Y-%m-%d').date(), dt_time.min))
-        day_end   = timezone.make_aware(datetime.combine(
-            datetime.strptime(to_date,   '%Y-%m-%d').date(), dt_time.max))
- 
-        sr = LiveSRData.objects.filter(
-            Symbol=symbol,
-            Time__gte=day_start,
-            Time__lte=day_end,
-        ).order_by('-Time').first()
- 
-        if not sr or not sr.resistance_strike or not sr.supprt_strike:
-            # आज नहीं मिला → थोड़ी देर cache (60s) ताकि हर request पर DB hit न हो
-            if from_date != today_str:
-                cache.set(cache_key, [], timeout=60)
-            return []
- 
-        step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
- 
-        master_levels = get_master_levels(symbol, day_start.date())
-        eff_res = master_levels["R"]["strike"]
-        eff_sup = master_levels["S"]["strike"]
- 
-        ce_strikes_list = [eff_res, float(sr.resistance_strike)]
-        pe_strikes_list = [eff_sup, float(sr.supprt_strike)]
-        global_low  = min(pe_strikes_list + ce_strikes_list) - step
-        global_high = max(pe_strikes_list + ce_strikes_list) + step
- 
-        oc_qs = OptionChain.objects.filter(
-            Symbol=symbol,
-            Time__gte=day_start,
-            Time__lte=day_end,
-            Strike_Price__gte=global_low,
-            Strike_Price__lte=global_high,
-        ).values(
-            'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe'
-        ).order_by('-Time')
- 
-        seen_strikes = {}
-        spot_price   = None
-        for row in oc_qs:
-            s = row['Strike_Price']
-            if s not in seen_strikes:
-                seen_strikes[s] = row
-            if spot_price is None and row['Spot_Price']:
-                spot_price = row['Spot_Price']
- 
-        def valid(v):
-            return v is not None and not math.isnan(v) and not math.isinf(v)
- 
-        seen_ce, seen_pe = set(), set()
-        lines = []
- 
-        for strike, row in sorted(seen_strikes.items()):
-            if not valid(row['Spot_Price']):
-                continue
-            spot = row['Spot_Price']
-            is_top    = (strike == eff_res)
-            is_bottom = (strike == eff_sup)
- 
-            if valid(row['Reversl_Ce']):
-                if (row['Reversl_Ce'] >= spot or is_top) and row['Reversl_Ce'] not in seen_ce:
-                    seen_ce.add(row['Reversl_Ce'])
-                    lines.append({
-                        "price":  float(row['Reversl_Ce']),
-                        "strike": float(strike),
-                        "type":   "CE",
-                        "color":  "#ff8c00" if is_top else "#f85149",
-                        "width":  4 if is_top else 1,
-                        "dash":   0,
-                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
-                    })
- 
-            if valid(row['Reversl_Pe']):
-                if (row['Reversl_Pe'] < spot or is_bottom) and row['Reversl_Pe'] not in seen_pe:
-                    seen_pe.add(row['Reversl_Pe'])
-                    lines.append({
-                        "price":  float(row['Reversl_Pe']),
-                        "strike": float(strike),
-                        "type":   "PE",
-                        "color":  "#00bfff" if is_bottom else "#3fb950",
-                        "width":  4 if is_bottom else 1,
-                        "dash":   0,
-                        "label":  f"S {strike:.0f}" if is_bottom else f"P {strike:.0f}",
-                    })
- 
-        lines.sort(key=lambda x: x["price"], reverse=True)
- 
-        # ✅ Historical dates → 5 मिनट cache (नहीं बदलता)
-        # ✅ आज की date → cache नहीं (हर request पर fresh)
-        if from_date != today_str:
-            cache.set(cache_key, lines, timeout=300)
- 
-        return lines
- 
-    except Exception as e:
-        print(f"Reversal lines error: {e}")
-        return []
-
-def get_reversal_lines3(symbol: str, from_date: str, to_date: str):
-    from datetime import date as _date
-    today_str = _date.today().isoformat()
-    cache_key = f"rev_lines_{symbol}_{from_date}_{to_date}"
- 
-    # 1. 🟢 पहले कैश चेक करें (आज के लिए 3s, हिस्ट्री के लिए 5m)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
- 
-    try:
-        import math, re as _re
-        from datetime import datetime, time as dt_time
- 
-        day_start = timezone.make_aware(datetime.combine(
-            datetime.strptime(from_date, '%Y-%m-%d').date(), dt_time.min))
-        day_end   = timezone.make_aware(datetime.combine(
-            datetime.strptime(to_date,   '%Y-%m-%d').date(), dt_time.max))
- 
-        sr = LiveSRData.objects.filter(
-            Symbol=symbol,
-            Time__gte=day_start,
-            Time__lte=day_end,
-        ).order_by('-Time').first()
- 
-        if not sr or not sr.resistance_strike or not sr.supprt_strike:
-            if from_date != today_str:
-                cache.set(cache_key, [], timeout=60)
-            return []
- 
-        step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
- 
-        master_levels = get_master_levels(symbol, day_start.date())
-        eff_res = master_levels["R"]["strike"]
-        eff_sup = master_levels["S"]["strike"]
- 
-        ce_strikes_list = [eff_res, float(sr.resistance_strike)]
-        pe_strikes_list = [eff_sup, float(sr.supprt_strike)]
-        global_low  = min(pe_strikes_list + ce_strikes_list) - step
-        global_high = max(pe_strikes_list + ce_strikes_list) + step
- 
-        seen_strikes = {}
-        spot_price   = None
-
-        # =======================================================
-        # 2. 🟢 HYBRID LOGIC: आज का डेटा सीधा मेमोरी (Cache) से लें
-        # =======================================================
-        is_live_data_used = False
-        if from_date == today_str:
-            live_data = cache.get(f'live_nifty_data_{symbol}')
-            if live_data:
-                is_live_data_used = True
-                for row in live_data:
-                    s = float(row.get('Strike_Price', 0))
-                    if global_low <= s <= global_high:
-                        seen_strikes[s] = row
-                        if spot_price is None and row.get('Spot_Price'):
-                            spot_price = float(row['Spot_Price'])
-
-        # 3. 🔴 FALLBACK / HISTORY: अगर आज का कैश खाली है, या पुरानी डेट है
-        # =======================================================
-        if not is_live_data_used:
-            oc_qs = OptionChain.objects.filter(
-                Symbol=symbol,
-                Time__gte=day_start,
-                Time__lte=day_end,
-                Strike_Price__gte=global_low,
-                Strike_Price__lte=global_high,
-            ).values(
-                'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe'
-            ).order_by('-Time')
-            
-            for row in oc_qs:
-                s = float(row['Strike_Price'])
-                if s not in seen_strikes:
-                    seen_strikes[s] = row
-                if spot_price is None and row.get('Spot_Price'):
-                    spot_price = float(row['Spot_Price'])
- 
-        def valid(v):
-            return v is not None and not math.isnan(float(v)) and not math.isinf(float(v))
- 
-        seen_ce, seen_pe = set(), set()
-        lines = []
- 
-        for strike, row in sorted(seen_strikes.items()):
-            s_price = row.get('Spot_Price')
-            if not valid(s_price):
-                continue
-            
-            spot = float(s_price)
-            is_top    = (strike == eff_res)
-            is_bottom = (strike == eff_sup)
- 
-            rev_ce = row.get('Reversl_Ce')
-            if valid(rev_ce):
-                rev_ce = float(rev_ce)
-                if (rev_ce >= spot or is_top) and rev_ce not in seen_ce:
-                    seen_ce.add(rev_ce)
-                    lines.append({
-                        "price":  rev_ce,
-                        "strike": float(strike),
-                        "type":   "CE",
-                        "color":  "#ff8c00" if is_top else "#f85149",
-                        "width":  4 if is_top else 1,
-                        "dash":   0,
-                        "label":  f"R {strike:.0f}" if is_top else f"CE {strike:.0f}",
-                    })
- 
-            rev_pe = row.get('Reversl_Pe')
-            if valid(rev_pe):
-                rev_pe = float(rev_pe)
-                if (rev_pe < spot or is_bottom) and rev_pe not in seen_pe:
-                    seen_pe.add(rev_pe)
-                    lines.append({
-                        "price":  rev_pe,
-                        "strike": float(strike),
-                        "type":   "PE",
-                        "color":  "#00bfff" if is_bottom else "#3fb950",
-                        "width":  4 if is_bottom else 1,
-                        "dash":   0,
-                        "label":  f"S {strike:.0f}" if is_bottom else f"P {strike:.0f}",
-                    })
- 
-        lines.sort(key=lambda x: x["price"], reverse=True)
- 
-        # =======================================================
-        # 4. ✅ SMART CACHING (3s vs 5m)
-        # =======================================================
-        if from_date == today_str:
-            # आज के लाइव डेटा को 3 सेकंड के लिए कैश करें (हज़ारों Requests हैंडल करने के लिए)
-            cache.set(cache_key, lines, timeout=3)
-        else:
-            # पुराने डेटा को 5 मिनट तक कैश में रखें
-            cache.set(cache_key, lines, timeout=300)
- 
-        return lines
- 
-    except Exception as e:
-        print(f"Reversal lines error: {e}")
-        return []
-
-import math, re as _re
 def get_reversal_lines(symbol: str, from_date: str, to_date: str):
     from datetime import date as _date
     today_str = _date.today().isoformat()
-    
-    # 1. Cache Key
-    cache_key = f"rev_lines_with_history_all_{symbol}_{from_date}_{to_date}"
- 
+    cache_key = f"final_rev_lines_v4_{symbol}_{from_date}_{to_date}"
+
     cached_lines = cache.get(cache_key)
     if cached_lines is not None:
         return cached_lines
- 
+
     try:
+        step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
+        def valid(v): return v is not None and not math.isnan(float(v)) and not math.isinf(float(v))
+
         day_start = timezone.make_aware(datetime.combine(
             datetime.strptime(from_date, '%Y-%m-%d').date(), dt_time.min))
         day_end   = timezone.make_aware(datetime.combine(
             datetime.strptime(to_date,   '%Y-%m-%d').date(), dt_time.max))
- 
-        step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
-        
+
         # =======================================================
-        # PART A: SR Data से R और S की History बनाना
+        # 1. 🟢 मास्टर S/R स्ट्राइक निकालना (trade_logic से, सही logic)
+        #    पुराना sr_timeline loop हटाया — वो simplified था और mismatch देता था
         # =======================================================
-        all_sr_data = list(LiveSRData.objects.filter(
+        latest_sr = LiveSRData.objects.filter(
             Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-        ).order_by('Time'))
+        ).order_by('-Time').first()
 
-        res_history, sup_history = [], []
-        current_res, current_sup = 0, 0
-        eff_res_strike, eff_sup_strike = 0, 0
+        if not latest_sr:
+            return []
 
-        if all_sr_data:
-            for sr in all_sr_data:
-                t_str = sr.Time.isoformat()
-                
-                # Resistance History
-                r_status = str(sr.resistance_status or "").upper()
-                r_base = float(sr.resistance_strike or 0)
-                m_res = _re.search(r'(?:WTB|WTT)\s+(\d+)', r_status)
-                r_target = float(m_res.group(1)) if m_res else r_base
-                
-                if "SHIFTED" in r_status: eff_res = r_base + step
-                elif "WTT" in r_status: eff_res = r_target - step
-                elif "WTB" in r_status: eff_res = r_target + step
-                else: eff_res = r_base + step
-                res_history.append({"time": t_str, "value": eff_res})
+        master_levels = get_master_levels(symbol, day_start.date())
+        if not master_levels:
+            return []
 
-                # Support History
-                s_status = str(sr.supprt_status or "").upper()
-                s_base = float(sr.supprt_strike or 0)
-                m_sup = _re.search(r'(?:WTB|WTT)\s+(\d+)', s_status)
-                s_target = float(m_sup.group(1)) if m_sup else s_base
-                
-                if "SHIFTED" in s_status: eff_sup = s_base - step
-                elif "WTT" in s_status: eff_sup = s_target - step
-                elif "WTB" in s_status: eff_sup = s_target + step
-                else: eff_sup = s_base - step
-                sup_history.append({"time": t_str, "value": eff_sup})
+        # ✅ FIX 1: eff_res_strike और eff_sup_strike सिर्फ master_levels से लो
+        # (trade_logic.py का full 25+ condition वाला logic यहाँ पहले से run हो चुका है)
+        eff_res_strike = master_levels["R"]["strike"]
+        eff_sup_strike = master_levels["S"]["strike"]
 
-            latest_sr = all_sr_data[-1]
-            current_res = res_history[-1]["value"] if res_history else 0
-            current_sup = sup_history[-1]["value"] if sup_history else 0
-            
-            master_levels = get_master_levels(symbol, day_start.date())
-            eff_res_strike = master_levels["R"]["strike"] if master_levels else float(latest_sr.resistance_strike or 0)
-            eff_sup_strike = master_levels["S"]["strike"] if master_levels else float(latest_sr.supprt_strike or 0)
-        else:
-            return [] # अगर SR डेटा नहीं है तो चार्ट पर कुछ नहीं बनेगा
+        # ✅ FIX 2: Reversal entry value भी master_levels से लो
+        # (get_rev_val() → Redis last-10 average → सबसे accurate value)
+        current_res_val = master_levels["R"]["entry"] or 0
+        current_sup_val = master_levels["S"]["entry"] or 0
+
+        # DB query range: effective strikes के आसपास की सभी strikes
+        global_low  = min(eff_sup_strike, eff_res_strike) - step
+        global_high = max(eff_sup_strike, eff_res_strike) + step
 
         # =======================================================
-        # PART B: Option Chain से बाकी CE/PE लाइनों का ताज़ा डेटा
+        # 2. 🟢 आसपास की strikes की Latest Reversal Value निकालना
+        #    (secondary CE/PE lines के लिए)
         # =======================================================
-        ce_strikes_list = [eff_res_strike, float(latest_sr.resistance_strike or 0)]
-        pe_strikes_list = [eff_sup_strike, float(latest_sr.supprt_strike or 0)]
-        global_low  = min(pe_strikes_list + ce_strikes_list) - step
-        global_high = max(pe_strikes_list + ce_strikes_list) + step
+        strike_history = {}
+        spot_price = None
 
-        seen_strikes = {}
-        spot_price   = None
-
-        # 🟢 SMART CACHE: आज का डेटा सीधा मेमोरी से
-        is_live_data_used = False
         if from_date == today_str:
-            live_data = cache.get(f'live_nifty_data_{symbol}')
-            if live_data:
-                is_live_data_used = True
-                for row in live_data:
-                    s = float(row.get('Strike_Price', 0))
-                    if global_low <= s <= global_high:
-                        seen_strikes[s] = row
-                        if spot_price is None and row.get('Spot_Price'):
-                            spot_price = float(row['Spot_Price'])
+            # 🚀 Redis से पढ़ें (0 DB Query)
+            history_key = f"moving_history_all_{symbol.upper()}"
+            redis_data = cache.get(history_key)
+            if redis_data:
+                for k, v in redis_data.items():
+                    try:
+                        s = float(k)
+                        if global_low <= s <= global_high:
+                            # Redis में ce_hist/pe_hist का last value ही latest है
+                            ce_hist = v.get('ce_hist', [])
+                            pe_hist = v.get('pe_hist', [])
+                            strike_history[s] = {
+                                'latest_ce': float(ce_hist[-1]['value']) if ce_hist else v.get('latest_ce'),
+                                'latest_pe': float(pe_hist[-1]['value']) if pe_hist else v.get('latest_pe'),
+                            }
+                    except (ValueError, TypeError, KeyError):
+                        continue
+                spot_price = cache.get(f'live_nifty_spot_{symbol.upper()}') or 0
 
-        # 🔴 FALLBACK: अगर कैश खाली है या पुरानी डेट है
-        if not is_live_data_used:
+        # अगर Redis खाली है या पुरानी डेट है → Database से लें
+        if not strike_history:
             oc_qs = OptionChain.objects.filter(
                 Symbol=symbol, Time__gte=day_start, Time__lte=day_end,
                 Strike_Price__gte=global_low, Strike_Price__lte=global_high
-            ).values('Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('-Time')
-            
+            ).values('Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe').order_by('Time')
+
             for row in oc_qs:
                 s = float(row['Strike_Price'])
-                if s not in seen_strikes:
-                    seen_strikes[s] = row
-                if spot_price is None and row.get('Spot_Price'):
+                if s not in strike_history:
+                    strike_history[s] = {'latest_ce': None, 'latest_pe': None}
+
+                if row.get('Spot_Price'):
                     spot_price = float(row['Spot_Price'])
 
-        def valid(v): return v is not None and not math.isnan(float(v)) and not math.isinf(float(v))
+                rev_ce = row.get('Reversl_Ce')
+                if valid(rev_ce):
+                    strike_history[s]['latest_ce'] = float(rev_ce)
+
+                rev_pe = row.get('Reversl_Pe')
+                if valid(rev_pe):
+                    strike_history[s]['latest_pe'] = float(rev_pe)
 
         # =======================================================
-        # PART C: सारी लाइनें (Moving + Straight) कंबाइन करना
+        # 3. 🎨 फाइनल लाइनें जनरेट करना
         # =======================================================
         lines = []
         seen_ce, seen_pe = set(), set()
-        
-        # 1. मुख्य R और S को History (Moving) के साथ जोड़ें
-        if current_res > 0:
-            lines.append({
-                "price": current_res, "strike": eff_res_strike, "type": "CE",
-                "color": "#ff8c00", "width": 4, "dash": 0,
-                "label": f"R {eff_res_strike:.0f}", "history": res_history
-            })
-            seen_ce.add(current_res)
-            
-        if current_sup > 0:
-            lines.append({
-                "price": current_sup, "strike": eff_sup_strike, "type": "PE",
-                "color": "#00bfff", "width": 4, "dash": 0,
-                "label": f"S {eff_sup_strike:.0f}", "history": sup_history
-            })
-            seen_pe.add(current_sup)
 
-        # 2. बाकी CE/PE को बिना History (Straight) के जोड़ें
-        for strike, row in sorted(seen_strikes.items()):
-            s_price = row.get('Spot_Price')
-            if not valid(s_price): continue
-            spot = float(s_price)
+        # ✅ मुख्य R लाइन — master_levels का सही entry value
+        if current_res_val > 0:
+            lines.append({
+                "price": current_res_val,
+                "strike": eff_res_strike,
+                "type": "CE",
+                "color": "#ff8c00",
+                "width": 4,
+                "dash": 0,
+                "label": f"R {eff_res_strike:.0f}",
+            })
+            seen_ce.add(current_res_val)
 
+        # ✅ मुख्य S लाइन — master_levels का सही entry value
+        if current_sup_val > 0:
+            lines.append({
+                "price": current_sup_val,
+                "strike": eff_sup_strike,
+                "type": "PE",
+                "color": "#00bfff",
+                "width": 4,
+                "dash": 0,
+                "label": f"S {eff_sup_strike:.0f}",
+            })
+            seen_pe.add(current_sup_val)
+
+        # Secondary CE/PE lines (spot के आसपास की बाकी strikes)
+        for strike, data in sorted(strike_history.items()):
+            if not spot_price:
+                continue
             is_top    = (strike == eff_res_strike)
             is_bottom = (strike == eff_sup_strike)
 
-            rev_ce = row.get('Reversl_Ce')
-            if valid(rev_ce):
-                rev_ce = float(rev_ce)
-                if (rev_ce >= spot or is_top) and rev_ce not in seen_ce:
-                    seen_ce.add(rev_ce)
+            latest_ce = data.get('latest_ce')
+            if latest_ce is not None and latest_ce not in seen_ce:
+                if latest_ce >= spot_price or is_top:
+                    seen_ce.add(latest_ce)
                     lines.append({
-                        "price": rev_ce, "strike": float(strike), "type": "CE",
-                        "color": "#f85149", "width": 1, "dash": 0,
-                        "label": f"CE {strike:.0f}"
-                    }) # इसमें history नहीं है, तो JS इसे Straight खींचेगा
+                        "price": latest_ce,
+                        "strike": float(strike),
+                        "type": "CE",
+                        "color": "#f85149",
+                        "width": 1,
+                        "dash": 0,
+                        "label": f"CE {strike:.0f}",
+                    })
 
-            rev_pe = row.get('Reversl_Pe')
-            if valid(rev_pe):
-                rev_pe = float(rev_pe)
-                if (rev_pe < spot or is_bottom) and rev_pe not in seen_pe:
-                    seen_pe.add(rev_pe)
+            latest_pe = data.get('latest_pe')
+            if latest_pe is not None and latest_pe not in seen_pe:
+                if latest_pe < spot_price or is_bottom:
+                    seen_pe.add(latest_pe)
                     lines.append({
-                        "price": rev_pe, "strike": float(strike), "type": "PE",
-                        "color": "#3fb950", "width": 1, "dash": 0,
-                        "label": f"P {strike:.0f}"
-                    }) # इसमें भी history नहीं है
+                        "price": latest_pe,
+                        "strike": float(strike),
+                        "type": "PE",
+                        "color": "#3fb950",
+                        "width": 1,
+                        "dash": 0,
+                        "label": f"P {strike:.0f}",
+                    })
 
         lines.sort(key=lambda x: x["price"], reverse=True)
 
-        # =======================================================
-        # PART D: 60 सेकंड का Cache
-        # =======================================================
-        if from_date == today_str:
-            cache.set(cache_key, lines, timeout=60)
-        else:
-            cache.set(cache_key, lines, timeout=86400)
- 
+        timeout = 45 if from_date == today_str else 86400
+        cache.set(cache_key, lines, timeout=timeout)
+
         return lines
- 
+
     except Exception as e:
-        print(f"Reversal lines history error: {e}")
-        return []    
+        import traceback
+        print(f"Reversal lines error: {e}")
+        traceback.print_exc()
+        return []
 # ─────────────────────────────────────────────
 # Helper: Upstox API से candle data fetch
 # ─────────────────────────────────────────────
@@ -1583,40 +1226,78 @@ def parse_candles(api_response: dict):
     candles.reverse()
     return candles
 
-
 # ─────────────────────────────────────────────
 # View 1: Chart Page (HTML render)
 # ─────────────────────────────────────────────
 @xframe_options_exempt
 def chart_view(request):
-    today     = date.today()
+    today_str = date.today().isoformat()
     symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
     unit      = request.GET.get("unit",      "minutes")
     interval  = request.GET.get("interval",  "5")
-    from_date = request.GET.get("from_date", today.isoformat())
-    to_date   = request.GET.get("to_date",   today.isoformat())
+    from_date = request.GET.get("from_date", today_str)
+    to_date   = request.GET.get("to_date",   today_str)
+    show_reversal = request.GET.get("reversal", "1") != "0"
 
-    candles        = []
-    error          = None
-    instrument_key = None
+    # ==========================================
+    # 1. 🟢 Cache Key
+    #    ✅ FIX: show_reversal हटाया — candle_api से match करने के लिए
+    #    (reversal lines का अपना अलग cache है get_reversal_lines में)
+    # ==========================================
+    cache_key = f"upstox_chart_{symbol}_{unit}_{interval}_{from_date}_{to_date}"
 
-    # Step 1: DB से instrument_key लो  (same as before)
-    instrument_key = get_instrument_key(symbol)
+    # 2. 🟢 Cache चेक करना
+    cached_data = cache.get(cache_key)
 
-    if not instrument_key:
-        error = f"'{symbol}' symbol DB में नहीं मिला।"
+    if cached_data:
+        candles        = cached_data.get("candles", [])
+        instrument_key = cached_data.get("instrument_key", "—")
+        # ✅ FIX: Reversal lines cache से नहीं — हर बार fresh (उनका अपना 60s cache है)
+        reversal_lines = get_reversal_lines(symbol, from_date, to_date) if show_reversal else []
+        error = None
+        print(f"⚡ FAST PAGE LOAD: {symbol} Chart Page served from CACHE 🚀")
     else:
-        # Upstox API से directly fetch (Redis हटाया)
-        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
-        if not result["success"]:
-            error = result["error"]
-        else:
-            candles = parse_candles(result["data"])
-            if not candles:
-                error = "इस date range में कोई candle data नहीं मिली।"
+        # 3. 🔴 Fallback: Upstox API से लाएं
+        candles        = []
+        reversal_lines = []
+        error          = None
+        instrument_key = get_instrument_key(symbol)
 
-    # Step 3: Reversal lines  (same as before)
-    reversal_lines = get_reversal_lines(symbol, from_date, to_date)
+        if not instrument_key:
+            error = f"'{symbol}' symbol DB में नहीं मिला।"
+        else:
+            result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
+            if not result["success"]:
+                error = result["error"]
+            else:
+                candles = parse_candles(result["data"])
+                if not candles:
+                    error = "इस date range में कोई candle data नहीं मिली।"
+                else:
+                    # ✅ FIX: get_reversal_lines की जगह get_reversal_lines
+                    reversal_lines = get_reversal_lines(symbol, from_date, to_date) if show_reversal else []
+
+                    # ✅ FIX: Cache में सिर्फ candles save करो (reversal नहीं)
+                    candles_only = {
+                        "symbol": symbol, "instrument_key": instrument_key,
+                        "interval": interval, "unit": unit,
+                        "from_date": from_date, "to_date": to_date,
+                        "count": len(candles), "candles": candles,
+                    }
+
+                    if from_date == today_str:
+                        current_time    = datetime.now().time()
+                        market_end_time = dt_time(15, 30)
+
+                        if current_time > market_end_time:
+                            cache.set(cache_key, candles_only, timeout=28800)
+                            print(f"✅ SAVED PAGE: {symbol} cached for 8 hours.")
+                        else:
+                            cache.set(cache_key, candles_only, timeout=60)
+                            print(f"✅ SAVED PAGE: {symbol} cached for 60 seconds.")
+                    else:
+                        cache.set(cache_key, candles_only, timeout=86400)
+                        print(f"✅ SAVED PAGE: {symbol} Historical cached for 24 hours.")
 
     context = {
         "candles":        candles,
@@ -1631,19 +1312,10 @@ def chart_view(request):
     }
     return render(request, "mystock/chart.html", context)
 
-
 # ─────────────────────────────────────────────
 # View 2: AJAX JSON API endpoint
 # ─────────────────────────────────────────────
 def candle_api(request):
-    """
-    Chart AJAX endpoint।
-
-    Logic:
-      आज की date + cache hit  → Redis से serve  (0 Upstox calls ✅)
-      आज की date + cache miss → Upstox fetch करो, Redis में save करो
-      पुरानी date              → Upstox से direct (historical, rarely called)
-    """
     today_str = date.today().isoformat()
 
     symbol    = request.GET.get("symbol",    "").strip().upper()
@@ -1656,20 +1328,30 @@ def candle_api(request):
     if not symbol:
         return JsonResponse({"error": "symbol parameter जरूरी है।"}, status=400)
 
+    cache_key = f"upstox_chart_{symbol}_{unit}_{interval}_{from_date}_{to_date}"
+
+    cached_data = cache.get(cache_key)
+    if cached_data:
+        if show_reversal:
+            cached_data = dict(cached_data)
+            cached_data["reversal_lines"] = get_reversal_lines(symbol, from_date, to_date)
+        print(f"⚡ FAST CHART: {symbol} ({interval}m) served from CACHE 🚀")
+        return JsonResponse(cached_data)
+
+    print(f"🔴 MISS: {symbol} ({interval}m) Fetching from UPSTOX 🌐")
+
     instrument_key = get_instrument_key(symbol)
     if not instrument_key:
         return JsonResponse({"error": f"'{symbol}' symbol DB में नहीं मिला।"}, status=404)
 
-    # Upstox API से directly fetch
     result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
     if not result["success"]:
         return JsonResponse({"error": result["error"]}, status=400)
-    candles = parse_candles(result["data"])
 
-    # ── Reversal lines ──────────────────────────────────────
+    candles = parse_candles(result["data"])
     reversal_lines = get_reversal_lines(symbol, from_date, to_date) if show_reversal else []
 
-    return JsonResponse({
+    response_data = {
         "symbol":         symbol,
         "instrument_key": instrument_key,
         "interval":       interval,
@@ -1679,9 +1361,42 @@ def candle_api(request):
         "count":          len(candles),
         "candles":        candles,
         "reversal_lines": reversal_lines,
-        # Debug info (चाहें तो हटा दें production में)
+    }
 
-    })
+    candles_only = {k: v for k, v in response_data.items() if k != "reversal_lines"}
+
+    # ✅ FIX: Empty candles को cache मत करो
+    if len(candles) == 0:
+        print(f"⚠️ SKIP CACHE: {symbol} — candles empty, not caching.")
+        return JsonResponse(response_data)
+
+    if from_date == today_str:
+        current_time = datetime.now().time()
+        market_open_time = dt_time(9, 15)   # ✅ NEW: Market open time
+        market_end_time  = dt_time(15, 30)
+
+        if current_time < market_open_time:
+            # ✅ Pre-market: बहुत कम cache (जल्दी refresh होगा)
+            cache_timeout = 30
+            time_msg = "30 seconds (Pre-Market)"
+
+        elif current_time > market_end_time:
+            cache_timeout = 28800
+            time_msg = "8 hours (Market Closed)"
+
+        else:
+            # ✅ Live Market: 30s cache — refresh interval से आधा रखो
+            cache_timeout = 50
+            time_msg = "50 seconds (Live Market)"
+
+        cache.set(cache_key, candles_only, timeout=cache_timeout)
+        print(f"✅ CACHED: {symbol} ({interval}m) for {time_msg}.")
+    else:
+        cache.set(cache_key, candles_only, timeout=86400)
+        print(f"✅ CACHED: {symbol} ({interval}m) Historical for 24h.")
+
+    return JsonResponse(response_data)
+
 
 
 # ─────────────────────────────────────────────
@@ -1703,18 +1418,19 @@ def symbol_search(request):
     return JsonResponse({"results": list(results)})
 
 
-
-
-from django.views.decorators.clickjacking import xframe_options_exempt
-
 @xframe_options_exempt
 def dashboard_chart_view(request):
     today     = date.today()
     symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
     unit      = request.GET.get("unit",      "minutes")
     interval  = request.GET.get("interval",  "5")
-    from_date = request.GET.get("from_date", today.isoformat()) 
-    to_date   = request.GET.get("to_date",   today.isoformat())  
+    
+    # URL से डेट लें, अगर नहीं है तो आज की डेट (today) सेट करें
+    req_from  = request.GET.get("from_date")
+    req_to    = request.GET.get("to_date")
+    
+    from_date = req_from if req_from else today.isoformat()
+    to_date   = req_to if req_to else today.isoformat()
 
     candles = []
     error = None
@@ -1728,6 +1444,32 @@ def dashboard_chart_view(request):
             error = result["error"]
         else:
             candles = parse_candles(result["data"])
+
+        # =========================================================
+        # 🟢 FALLBACK LOGIC: अगर आज का चार्ट नहीं मिला (कैंडल्स खाली हैं) 
+        # और यूज़र ने कोई विशेष पुरानी डेट नहीं माँगी थी
+        # =========================================================
+        if not candles and not req_from and from_date == today.isoformat():
+            # पिछले 7 दिनों का डेटा मंगा लें (ताकि वीकेंड और छुट्टियाँ कवर हो जाएं)
+            fallback_from = (today - timedelta(days=7)).isoformat()
+            fallback_to   = (today - timedelta(days=1)).isoformat()
+            
+            fb_result = fetch_candle_data(instrument_key, unit, interval, fallback_to, fallback_from)
+            if fb_result["success"]:
+                fb_candles = parse_candles(fb_result["data"])
+                
+                if fb_candles:
+                    # सबसे आखिरी कैंडल की डेट (Last Trading Day) निकालें
+                    # fb_candles[-1] सबसे ताज़ा कैंडल होती है
+                    last_date_str = fb_candles[-1]['time'][:10] # 'YYYY-MM-DD' फॉर्मेट में
+                    
+                    # सिर्फ उस आखिरी दिन की कैंडल्स को फ़िल्टर करें
+                    candles = [c for c in fb_candles if c['time'].startswith(last_date_str)]
+                    
+                    # Reversal Lines और Frontend HTML के लिए डेट को अपडेट कर दें
+                    from_date = last_date_str
+                    to_date   = last_date_str
+                    error = None # एरर हटा दें
 
     reversal_lines = get_reversal_lines(symbol, from_date, to_date)
 
@@ -1751,10 +1493,7 @@ URLs:
     path('resistance/',     views.resistance_dashboard, name='resistance_dashboard'),
 """
 
-from datetime import datetime, timedelta, timezone as dt_timezone
-from django.http import JsonResponse
-from django.views.decorators.http import require_GET
-from .models import LiveSRData
+
 
 
 # ─────────────────────────────────────────────────────
@@ -1783,7 +1522,7 @@ WTT    = "WTT"
 WTB    = "WTB"
 STRONG = "STRONG"
 
-
+"""""
 # ─────────────────────────────────────────────────────
 # State Machine:
 #
@@ -1804,7 +1543,7 @@ STRONG = "STRONG"
 #  IN_SHIFTED → strike changed, WTT/WTB, no p2nd   → NORMAL     (emit "WTT/WTB pS")
 #  IN_SHIFTED → strike changed, STR                → NORMAL     (emit "strong pS")
 # ─────────────────────────────────────────────────────
-
+"""
 def _fmt(v):
     """Float → int string if whole number, else float string"""
     if v is None:
@@ -2313,12 +2052,8 @@ def support_resistance_view(request):
         'selected_date': selected_date.strftime('%Y-%m-%d') 
     }
     
-    return render(request, 'sr_data_page.html', context)
+    return render(request, 'mystock/sr_data_page.html', context)
 
-
-from django.shortcuts import render
-from django.utils import timezone
-from .models import PaperTrade
 
 
 def live_trades_view(request):
@@ -2373,18 +2108,17 @@ def live_trades_view(request):
 
     return render(request, 'mystock/live_trades.html', context)
 
-from django.utils.timezone import localtime
-import re
+
 
 def dashboard_data_api(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
-    date_str = request.GET.get('date') 
-    
+    date_str = request.GET.get('date')
+
     if date_str:
         selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
     else:
         selected_date = timezone.now().date()
-    
+
     day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
     day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
 
@@ -2394,64 +2128,83 @@ def dashboard_data_api(request):
     ).only('Spot_Price', 'Time').order_by('-Time').first()
     current_spot = latest_oc.Spot_Price if latest_oc else None
 
-    # ==========================================
-    # 2. MASTER LEVELS (सब कुछ एक जगह से)
-    # ==========================================
+    # 2. MASTER LEVELS
     master_levels = get_master_levels(symbol, selected_date)
+    step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
 
     # 3. Trades Query
-    trades_qs = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date).order_by('-entry_time')
-    
+    trades_qs = PaperTrade.objects.filter(
+        symbol=symbol, trade_date=selected_date
+    ).order_by('-entry_time')
+
     total_pnl = 0.0
     trades_list = []
 
     for tr in trades_qs:
         current_pnl = float(tr.pnl) if tr.pnl else 0.0
-        
+
         if tr.result == 'OPEN' and current_spot:
             if tr.trade_type == 'PUT':
                 current_pnl = float(tr.entry_spot) - float(current_spot)
             elif tr.trade_type == 'CALL':
                 current_pnl = float(current_spot) - float(tr.entry_spot)
-                
+
         total_pnl += current_pnl
 
-        # 👇 डायनामिक टारगेट और स्टॉपलॉस अब सीधे मास्टर लेवल से आएंगे (नो एक्स्ट्रा डेटाबेस क्वेरी)
         trade_side = "R" if tr.trade_type == "PUT" else "S"
-        
-        if master_levels[trade_side]["target"] is not None:
+
+        # ✅ FIX Bug 3: Trade की actual entry_strike से target/SL निकालो
+        # master_levels में current shifted strike हो सकती है — वो इस trade की नहीं
+        entry_strike = float(tr.entry_strike) if tr.entry_strike else None
+
+        if entry_strike:
+            if tr.trade_type == 'PUT':
+                # PUT trade: R side, CE option
+                trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'CE')
+                trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'CE')
+            else:
+                # CALL trade: S side, PE option
+                trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'PE')
+                trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'PE')
+
+            # Fallback: अगर DB में भी न मिले तो master_levels का use करो
+            if trade_target is None:
+                trade_target = master_levels[trade_side]["target"]
+            if trade_sl is None:
+                trade_sl = master_levels[trade_side]["sl"]
+        else:
+            # entry_strike नहीं है तो master_levels से लो
             trade_target = master_levels[trade_side]["target"]
-        else:
-            trade_target = (tr.entry_spot - 50) if tr.trade_type == 'PUT' else (tr.entry_spot + 50)
-            
-        if master_levels[trade_side]["sl"] is not None:
-            trade_sl = master_levels[trade_side]["sl"]
-        else:
-            trade_sl = (tr.entry_spot + 50) if tr.trade_type == 'PUT' else (tr.entry_spot - 50)
+            trade_sl     = master_levels[trade_side]["sl"]
+
+        # अगर फिर भी None हो तो safe default
+        if trade_target is None:
+            trade_target = (float(tr.entry_spot) - step) if tr.trade_type == 'PUT' else (float(tr.entry_spot) + step)
+        if trade_sl is None:
+            trade_sl = (float(tr.entry_spot) + step) if tr.trade_type == 'PUT' else (float(tr.entry_spot) - step)
 
         trades_list.append({
             'type': tr.trade_type,
             'entry_time': localtime(tr.entry_time).strftime('%H:%M:%S') if tr.entry_time else '—',
             'trigger_level': tr.trigger_level,
-            'trigger_price': round(tr.trigger_price, 2) if tr.trigger_price else 0,
-            'entry_spot': round(tr.entry_spot, 2) if tr.entry_spot else 0,
+            'trigger_price': round(float(tr.trigger_price), 2) if tr.trigger_price else 0,
+            'entry_spot': round(float(tr.entry_spot), 2) if tr.entry_spot else 0,
             'exit_time': localtime(tr.exit_time).strftime('%H:%M:%S') if tr.exit_time else '—',
-            'exit_spot': round(tr.exit_spot, 2) if tr.exit_spot else None,
+            'exit_spot': round(float(tr.exit_spot), 2) if tr.exit_spot else None,
             'result': tr.result,
             'pnl': round(current_pnl, 2),
-            'target': round(trade_target, 2), # ✨ डायनामिक टारगेट
-            'sl': round(trade_sl, 2),         # ✨ डायनामिक स्टॉपलॉस
-            'entry_strike': tr.entry_strike
+            'target': round(trade_target, 2),
+            'sl': round(trade_sl, 2),
+            'entry_strike': tr.entry_strike,
         })
 
     # 4. Bot Status
     try:
-        ctrl, created = SyncControl.objects.get_or_create(name="bot_loop") 
+        ctrl, _ = SyncControl.objects.get_or_create(name="bot_loop")
         bot_active = ctrl.is_active
-    except Exception as e:
+    except Exception:
         bot_active = False
 
-    # 5. JSON Response
     return JsonResponse({
         'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
         'bot_active': bot_active,
@@ -2464,13 +2217,56 @@ def dashboard_data_api(request):
             's_trigger': master_levels["S"]["entry"],
             's_strike': master_levels["S"]["strike"],
             's_status': master_levels["S"]["status"] or '—',
-            'data_time': latest_oc.Time.isoformat() if latest_oc else None
+            'data_time': latest_oc.Time.isoformat() if latest_oc else None,
         },
-        'trades': trades_list
+        'trades': trades_list,
     })
 
-from django.views.decorators.csrf import csrf_exempt
-import json
+
+def get_rev_val_for_dashboard(symbol, selected_date, strike, side):
+    """
+    Dashboard के लिए किसी specific strike की reversal value निकालना।
+    Trade की actual entry_strike पर target/SL दिखाने के लिए।
+    """
+    try:
+        today = timezone.now().date()
+
+        # आज है तो Redis से
+        if selected_date == today:
+            from django.core.cache import cache as django_cache
+            history_key = f"moving_history_all_{symbol.upper()}"
+            history_data = django_cache.get(history_key)
+            if history_data:
+                strike_float = float(strike)
+                if strike_float in history_data:
+                    hist_key = 'ce_hist' if side == 'CE' else 'pe_hist'
+                    full_hist = history_data[strike_float].get(hist_key, [])
+                    last_ticks = full_hist[-10:]
+                    vals = [float(t['value']) for t in last_ticks if float(t.get('value', 0)) > 0]
+                    if vals:
+                        return round(sum(vals) / len(vals), 2)
+
+        # पुरानी date या cache miss → DB से
+        rows = (
+            OptionChain.objects
+            .filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=strike)
+            .order_by('-Time')[:10]
+        )
+        total_val, valid_count = 0.0, 0
+        for row in rows:
+            val = float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
+            if val and val > 0:
+                total_val += val
+                valid_count += 1
+        if valid_count > 0:
+            return round(total_val / valid_count, 2)
+
+    except Exception:
+        pass
+
+    return None
+
+
 @login_required
 @csrf_exempt
 def skip_trade_api(request):
@@ -2726,8 +2522,7 @@ def trade_dashboard(request):
     })
 
 
-from django.views.decorators.csrf import csrf_exempt
-import json
+
 
 # यह API डैशबोर्ड से मैन्युअल ट्रेड (PENDING) जोड़ने के लिए है, ताकि आप चार्ट पर लाइन के हिसाब से तुरंत ट्रेड डाल सकें
 @login_required
@@ -2767,246 +2562,7 @@ def add_manual_trade_api(request):
 
 # test code 
 
-# views.py में जोड़ें
 
-from django.http import JsonResponse
-from django.shortcuts import render
-from django.utils import timezone
-from datetime import datetime, time as dt_time
-import json
-
-# @login_required
-# def market_replay_view(request):
-#     """सिर्फ HTML पेज रेंडर करेगा"""
-#     context = {
-#         'symbols': ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX'],
-#     }
-#     return render(request, 'mystock/market_replay.html', context)
-
-
-# import traceback  # Bug 9 Fix: सिर्फ एक बार, यहाँ import करें
-# import re
-
-
-# @login_required
-# def market_replay_data_api(request):
-#     """
-#     चुनी गई Date का सारा Option Chain और SR Data एक साथ (Bulk)
-#     Frontend को भेजेगा ताकि JS उसे अपने हिसाब से (Play/Pause) चला सके।
-#     (बिना ऑटो-ट्रेडिंग के)
-#     """
-#     symbol = request.GET.get('symbol', 'NIFTY').upper()
-#     date_str = request.GET.get('date')
-
-#     if not date_str:
-#         return JsonResponse({'error': 'Date is required'}, status=400)
-
-#     try:
-#         selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-#         day_start = timezone.make_aware(datetime.combine(selected_date, dt_time(9, 15)))
-#         day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time(15, 30)))
-
-#         # 1. Option Chain Data
-#         oc_data = OptionChain.objects.filter(
-#             Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-#         ).values(
-#             'Time', 'Strike_Price', 'Spot_Price',
-#             'CE_OI', 'PE_OI', 'CE_OI_percent', 'PE_OI_percent',
-#             'CE_Volume', 'PE_Volume', 'CE_Volume_percent', 'PE_Volume_percent',
-#             'CE_COI', 'PE_COI', 'CE_COI_percent', 'PE_COI_percent',
-#             'Reversl_Ce', 'Reversl_Pe'
-#         ).order_by('Time', 'Strike_Price')
-
-#         if not oc_data.exists():
-#             return JsonResponse({'error': 'इस तारीख का कोई Option Chain डेटा नहीं है।'}, status=404)
-
-#         # Time के हिसाब से डेटा को ग्रुप करना
-#         grouped_oc = {}
-#         for row in oc_data:
-#             t_str = timezone.localtime(row['Time']).strftime('%H:%M:%S')
-#             if t_str not in grouped_oc:
-#                 grouped_oc[t_str] = {
-#                     'spot': float(row['Spot_Price']) if row['Spot_Price'] else 0.0,
-#                     'chain': []
-#                 }
-#             # Bug 1 Fix: Time datetime object को string में convert करें
-#             # वरना JsonResponse serialize नहीं कर पाता और 500 error आती है
-#             row_serializable = dict(row)
-#             row_serializable['Time'] = t_str
-#             grouped_oc[t_str]['chain'].append(row_serializable)
-
-#         # 2. SR Data
-#         sr_data_qs = LiveSRData.objects.filter(
-#             Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-#         ).values(
-#             'Time', 'resistance_strike', 'resistance_status', 'supprt_strike', 'supprt_status'
-#         ).order_by('Time')
-
-#         sr_data_list = []
-#         for row in sr_data_qs:
-#             t_str = timezone.localtime(row['Time']).strftime('%H:%M:%S')
-#             # Bug 1 Fix: SR में भी Time को string बनाएं
-#             row_serializable = dict(row)
-#             row_serializable['Time'] = t_str
-#             sr_data_list.append((t_str, row_serializable))
-
-#         # 3. Master Levels
-#         master_levels = get_master_levels(symbol, selected_date)
-
-#         # 4. रिवर्सल लाइनें (बिना बॉट के)
-#         final_timeline = {}
-#         sorted_oc_times = sorted(list(grouped_oc.keys()))
-
-#         last_known_sr = {}
-#         sr_idx = 0
-
-#         for t_str in sorted_oc_times:
-#             data = grouped_oc[t_str]
-
-#             # SR डेटा का Forward Fill
-#             while sr_idx < len(sr_data_list) and sr_data_list[sr_idx][0] <= t_str:
-#                 last_known_sr = sr_data_list[sr_idx][1]
-#                 sr_idx += 1
-
-#             current_sr_dict = last_known_sr
-#             current_lines = get_reversal_lines_for_replay(symbol, date_str, current_sr_dict, data['chain'])
-
-#             final_timeline[t_str] = {
-#                 'oc': data,
-#                 'sr': current_sr_dict,
-#                 'lines': current_lines
-#             }
-
-#         # 5. Upstox Chart Data Fetch
-#         instrument_key = get_instrument_key(symbol)
-#         candles = []
-#         if instrument_key:
-#             chart_res = fetch_candle_data(instrument_key, "minutes", "1", date_str, date_str)
-#             if chart_res and chart_res.get("success"):
-#                 candles = parse_candles(chart_res["data"])
-
-#         return JsonResponse({
-#             'success': True,
-#             'symbol': symbol,
-#             'date': date_str,
-#             'master_levels': master_levels,
-#             'timeline': sorted_oc_times,
-#             'timeline_data': final_timeline,
-#             'candles': candles
-#         })
-
-#     except Exception as e:
-#         print(traceback.format_exc())
-#         return JsonResponse({'error': str(e)}, status=500)
-
-
-# def get_reversal_lines_for_replay(symbol, date_str, sr_dict, oc_list):
-#     """
-#     यह फंक्शन हर एक टिक (Tick) के SR Data के अनुसार डायनामिक तरीके से
-#     मास्टर R और Master S निकालता है और सिर्फ काम की लाइनें ड्रा करता है।
-#     """
-#     try:
-#         if not sr_dict or not oc_list:
-#             return []
-
-#         step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
-#         spot = float(oc_list[0].get('Spot_Price', 0)) if oc_list else 0
-
-#         # 1. डायनामिक मास्टर लेवल निकालें (CURRENT Tick के SR Data से)
-#         res_status = str(sr_dict.get('resistance_status', '')).upper()
-#         res_base = float(sr_dict.get('resistance_strike') or 0)
-#         m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-#         res_target = float(m_res.group(1)) if m_res else res_base
-
-#         if "SHIFTED WTT" in res_status:   eff_res = res_base + step
-#         elif "SHIFTED WTB" in res_status:  eff_res = res_base + step
-#         elif "WTT" in res_status:          eff_res = res_target - step
-#         elif "WTB" in res_status:          eff_res = res_target + step
-#         elif "STRONG" in res_status:       eff_res = res_base + step
-#         else:                              eff_res = res_base + step
-
-#         sup_status = str(sr_dict.get('supprt_status', '')).upper()
-#         sup_base = float(sr_dict.get('supprt_strike') or 0)
-#         m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-#         sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-#         if "SHIFTED WTT" in sup_status:    eff_sup = sup_base - step
-#         elif "SHIFTED WTB" in sup_status:  eff_sup = sup_base - step
-#         elif "WTT" in sup_status:          eff_sup = sup_target - step
-#         elif "WTB" in sup_status:          eff_sup = sup_target + step
-#         elif "STRONG" in sup_status:       eff_sup = sup_base - step
-#         else:                              eff_sup = sup_base - step
-
-#         # अगर शुरुआत में SR डेटा नहीं है तो स्पॉट के हिसाब से सेट करें
-#         if eff_res == 0: eff_res = spot + step
-#         if eff_sup == 0: eff_sup = spot - step
-#         if res_base == 0: res_base = spot
-#         if sup_base == 0: sup_base = spot
-
-#         # 2. लिमिट तय करें
-#         ce_strikes_list = [eff_res, res_base]
-#         pe_strikes_list = [eff_sup, sup_base]
-
-#         global_low  = min(pe_strikes_list + ce_strikes_list) - step
-#         global_high = max(pe_strikes_list + ce_strikes_list) + step
-
-#         lines = []
-#         seen_ce, seen_pe = set(), set()
-
-#         # 3. FIRST PASS: Master R/S लाइनें
-#         for row in oc_list:
-#             strike = float(row.get('Strike_Price', 0))
-#             if strike < global_low or strike > global_high: continue
-
-#             is_top = (strike == eff_res)
-#             is_bottom = (strike == eff_sup)
-
-#             if is_top and row.get('Reversl_Ce') and float(row['Reversl_Ce']) > 0:
-#                 val = float(row['Reversl_Ce'])
-#                 lines.append({"price": val, "color": "#ff8c00", "width": 3, "label": f"R {strike:.0f}"})
-#                 seen_ce.add(val)
-
-#             if is_bottom and row.get('Reversl_Pe') and float(row['Reversl_Pe']) > 0:
-#                 val = float(row['Reversl_Pe'])
-#                 lines.append({"price": val, "color": "#00bfff", "width": 3, "label": f"S {strike:.0f}"})
-#                 seen_pe.add(val)
-
-#         # 4. SECOND PASS: बाकी लाइनें
-#         for row in oc_list:
-#             strike = float(row.get('Strike_Price', 0))
-#             if strike < global_low or strike > global_high: continue
-
-#             is_top = (strike == eff_res)
-#             is_bottom = (strike == eff_sup)
-
-#             if not is_top and row.get('Reversl_Ce') and float(row['Reversl_Ce']) > 0:
-#                 val = float(row['Reversl_Ce'])
-#                 if val >= spot and val not in seen_ce:
-#                     seen_ce.add(val)
-#                     lines.append({"price": val, "color": "#f85149", "width": 1, "label": f"CE {strike:.0f}"})
-
-#             if not is_bottom and row.get('Reversl_Pe') and float(row['Reversl_Pe']) > 0:
-#                 val = float(row['Reversl_Pe'])
-#                 if val < spot and val not in seen_pe:
-#                     seen_pe.add(val)
-#                     lines.append({"price": val, "color": "#3fb950", "width": 1, "label": f"P {strike:.0f}"})
-
-#         lines.sort(key=lambda x: x["price"], reverse=True)
-#         return lines
-
-#     except Exception as e:
-#         print(f"Replay Line Error: {e}")
-#         return []
-
-
-import traceback
-import re
-import logging
-from datetime import datetime, time as dt_time
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from django.utils import timezone
-from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -3052,7 +2608,7 @@ def _serialize_row(row: dict, time_str: str) -> dict:
     return serialized
 
 
-@login_required
+# @login_required
 def market_replay_view(request):
     """सिर्फ HTML पेज रेंडर करेगा"""
     context = {
@@ -3061,7 +2617,7 @@ def market_replay_view(request):
     return render(request, 'mystock/market_replay.html', context)
 
 
-@login_required
+# @login_required
 def market_replay_data_api(request):
     """
     चुनी गई Date का सारा Option Chain और SR Data एक साथ (Bulk)
@@ -3187,120 +2743,614 @@ def market_replay_data_api(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+def _calc_eff_strikes_from_dict(sr_dict: dict, symbol: str) -> tuple:
+    """
+    ✅ get_master_levels का lightweight version — DB query नहीं।
+    Replay के लिए: हर tick का sr_dict पहले से loaded है।
+    trade_logic.py का exact same 25+ condition matrix use करता है।
+    """
+    step = STEP_MAP.get(symbol, DEFAULT_STEP)
+
+    res_status = str(sr_dict.get('resistance_status', '')).upper()
+    sup_status = str(sr_dict.get('supprt_status', '')).upper()
+    res_base   = _safe_float(sr_dict.get('resistance_strike'))
+    sup_base   = _safe_float(sr_dict.get('supprt_strike'))
+
+    # Number निकालो
+    m_res = re.search(r'(\d{4,6})', res_status)
+    m_sup = re.search(r'(\d{4,6})', sup_status)
+    res_target = float(m_res.group(1)) if m_res else res_base
+    sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
+    # ✅ parse_status_type — SHIFTED WTB को WTB से अलग करता है
+    def _type(s):
+        if "SHIFTED" in s and "WTT" in s: return "SHIFTED WTT"
+        if "SHIFTED" in s and "WTB" in s: return "SHIFTED WTB"
+        if "WTT" in s:                    return "WTT"
+        if "WTB" in s:                    return "WTB"
+        if "STRONG" in s:                 return "STRONG"
+        return ""
+
+    res_type = _type(res_status)
+    sup_type = _type(sup_status)
+
+    # ── Resistance (trade_logic.py की exact copy) ──
+    # --------res wtb-------------
+    if res_type == "WTB"            and sup_type == "WTB"           : eff_res = res_target + step # test ok
+    elif res_type == "WTB"          and sup_type == "WTT"           : eff_res = res_base 
+    elif res_type == "WTB"          and sup_type == "STRONG"        : eff_res = res_base - step # test ok
+    elif res_type == "WTB"          and sup_type == "SHIFTED WTB"   : eff_res = res_base + step # test ok
+    elif res_type == "WTB"          and sup_type == "SHIFTED WTT"   : eff_res = res_base # test ok
+    #--------res wtt-------------
+    elif res_type == "WTT"          and sup_type == "WTB"           : eff_res = res_target - step
+    elif res_type == "WTT"          and sup_type == "WTT"           : eff_res = res_target + step
+    elif res_type == "WTT"          and sup_type == "STRONG"        : eff_res = res_target - step
+    elif res_type == "WTT"          and sup_type == "SHIFTED WTB"   : eff_res = res_target + step
+    elif res_type == "WTT"          and sup_type == "SHIFTED WTT"   : eff_res = res_base 
+    #--------res strong-------------
+    elif res_type == "STRONG"       and sup_type == "WTB"           : eff_res = res_base 
+    elif res_type == "STRONG"       and sup_type == "WTT"           : eff_res = res_base + step
+    elif res_type == "STRONG"       and sup_type == "STRONG"        : eff_res = res_base + step
+    elif res_type == "STRONG"       and sup_type == "SHIFTED WTB"   : eff_res = res_base + step
+    elif res_type == "STRONG"       and sup_type == "SHIFTED WTT"   : eff_res = res_base
+    #--------res shifted wtb-------------
+    elif res_type == "SHIFTED WTB" and sup_type == "WTB"            : eff_res = res_base 
+    elif res_type == "SHIFTED WTB" and sup_type == "WTT"            : eff_res = res_base + step
+    elif res_type == "SHIFTED WTB" and sup_type == "STRONG"         : eff_res = res_base + step
+    elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTB"    : eff_res = res_base + step
+    elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTT"    : eff_res = res_base
+    #--------res shifted wtt-------------
+    elif res_type == "SHIFTED WTT" and sup_type == "WTB"            : eff_res = res_target - step
+    elif res_type == "SHIFTED WTT" and sup_type == "WTT"            : eff_res = res_target
+    elif res_type == "SHIFTED WTT" and sup_type == "STRONG"         : eff_res = res_target 
+    elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTB"    : eff_res = res_target - step
+    elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTT"    : eff_res = res_base
+    else: eff_res =                                 res_base + step
+
+
+    # ── Support (trade_logic.py की exact copy) ──
+     # --------sup wtb-------------
+    if sup_type == "WTB"            and res_type == "WTB"           : eff_sup = sup_target - step
+    elif sup_type == "WTB"          and res_type == "WTT"           : eff_sup = sup_target 
+    elif sup_type == "WTB"          and res_type == "STRONG"        : eff_sup = sup_target + step # test ok
+    elif sup_type == "WTB"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base
+    elif sup_type == "WTB"          and res_type == "SHIFTED WTT"   : eff_sup = sup_target 
+    #--------sup wtt-------------
+    elif sup_type == "WTT"          and res_type == "WTB"           : eff_sup = sup_base
+    elif sup_type == "WTT"          and res_type == "WTT"           : eff_sup = sup_base 
+    elif sup_type == "WTT"          and res_type == "STRONG"        : eff_sup = sup_base 
+    elif sup_type == "WTT"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base + step
+    elif sup_type == "WTT"          and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
+    #--------sup strong-------------
+    elif sup_type == "STRONG"       and res_type == "WTB"           : eff_sup = sup_base - step
+    elif sup_type == "STRONG"       and res_type == "WTT"           : eff_sup = sup_base 
+    elif sup_type == "STRONG"       and res_type == "STRONG"        : eff_sup = sup_base - step
+    elif sup_type == "STRONG"       and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
+    elif sup_type == "STRONG"       and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
+    #--------sup shifted wtb-------------
+    elif sup_type == "SHIFTED WTB"  and res_type == "WTB"           : eff_sup = sup_target 
+    elif sup_type == "SHIFTED WTB"  and res_type == "WTT"           : eff_sup = sup_target + step
+    elif sup_type == "SHIFTED WTB"  and res_type == "STRONG"        : eff_sup = sup_target + step # test ok
+    elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTB"   : eff_sup = sup_base - step
+    elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTT"   : eff_sup = sup_target - step
+    #--------sup shifted wtt-------------
+    elif sup_type == "SHIFTED WTT"  and res_type == "WTB"           : eff_sup = sup_base - step # test ok
+    elif sup_type == "SHIFTED WTT"  and res_type == "WTT"           : eff_sup = sup_base 
+    elif sup_type == "SHIFTED WTT"  and res_type == "STRONG"        : eff_sup = sup_base - step
+    elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
+    elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
+    else:                                          eff_sup = sup_base - step
+
+    return eff_res, eff_sup
+
+
 def get_reversal_lines_for_replay(symbol: str, date_str: str,
                                    sr_dict: dict, oc_list: list) -> list:
     """
-    हर एक Tick के SR Data के अनुसार dynamically Master R और Master S निकालता है
-    और सिर्फ काम की lines return करता है।
+    ✅ FIXED: get_master_levels का DB-free version use करता है।
+    पुराने simplified (गलत) SHIFTED logic की जगह
+    trade_logic.py का exact 25-condition matrix use होता है।
     """
     try:
         if not sr_dict or not oc_list:
             return []
 
-        # ✅ Fix #5: Magic number हटाया, STEP_MAP use किया
         step = STEP_MAP.get(symbol, DEFAULT_STEP)
-
-        # ✅ Fix #1 & #3: _safe_float से safe conversion
         spot = _safe_float(oc_list[0].get('Spot_Price', 0)) if oc_list else 0.0
 
-        # ── Effective Resistance ─────────────────────────────────────────────
-        res_status = str(sr_dict.get('resistance_status', '')).upper()
-        res_base   = _safe_float(sr_dict.get('resistance_strike'))
+        # ✅ FIX: सही strike calculation — trade_logic.py की exact copy
+        eff_res, eff_sup = _calc_eff_strikes_from_dict(sr_dict, symbol)
 
-        m_res      = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-        res_target = float(m_res.group(1)) if m_res else res_base
-
-        if   "SHIFTED WTT" in res_status: eff_res = res_base + step
-        elif "SHIFTED WTB" in res_status: eff_res = res_base + step
-        elif "WTT"         in res_status: eff_res = res_target - step
-        elif "WTB"         in res_status: eff_res = res_target + step
-        elif "STRONG"      in res_status: eff_res = res_base + step
-        else:                             eff_res = res_base + step
-
-        # ── Effective Support ────────────────────────────────────────────────
-        sup_status = str(sr_dict.get('supprt_status', '')).upper()
-        sup_base   = _safe_float(sr_dict.get('supprt_strike'))
-
-        m_sup      = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-        sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-        if   "SHIFTED WTT" in sup_status: eff_sup = sup_base - step
-        elif "SHIFTED WTB" in sup_status: eff_sup = sup_base - step
-        elif "WTT"         in sup_status: eff_sup = sup_target - step
-        elif "WTB"         in sup_status: eff_sup = sup_target + step
-        elif "STRONG"      in sup_status: eff_sup = sup_base - step
-        else:                             eff_sup = sup_base - step
-
-        # Fallback: SR data न हो तो spot के हिसाब से set करो
+        # Fallback
         if eff_res == 0: eff_res = spot + step
         if eff_sup == 0: eff_sup = spot - step
-        if res_base == 0: res_base = spot
-        if sup_base == 0: sup_base = spot
 
-        # ── Global Strike Range ──────────────────────────────────────────────
-        all_levels  = [eff_res, res_base, eff_sup, sup_base]
-        global_low  = min(all_levels) - step
-        global_high = max(all_levels) + step
+        global_low  = min(eff_res, eff_sup) - step
+        global_high = max(eff_res, eff_sup) + step
 
-        lines    = []
-        seen_ce  = set()
-        seen_pe  = set()
+        lines   = []
+        seen_ce = set()
+        seen_pe = set()
 
-        # ── FIRST PASS: Master R / S lines ───────────────────────────────────
+        # ── FIRST PASS: Master R / S lines ──
         for row in oc_list:
-            strike = _safe_float(row.get('Strike_Price', 0))     # ✅ Fix #1
-            if strike < global_low or strike > global_high:
+            strike = _safe_float(row.get('Strike_Price', 0))
+            if not (global_low <= strike <= global_high):
                 continue
 
             if strike == eff_res:
-                val = _safe_float(row.get('Reversl_Ce'))          # ✅ Fix #1
+                val = _safe_float(row.get('Reversl_Ce'))
                 if val > 0:
-                    lines.append({
-                        "price": val, "color": "#ff8c00",
-                        "width": 3,  "label": f"R {strike:.0f}"
-                    })
+                    lines.append({"price": val, "color": "#ff8c00", "width": 3, "label": f"R {strike:.0f}"})
                     seen_ce.add(val)
 
             if strike == eff_sup:
-                val = _safe_float(row.get('Reversl_Pe'))          # ✅ Fix #1
+                val = _safe_float(row.get('Reversl_Pe'))
                 if val > 0:
-                    lines.append({
-                        "price": val, "color": "#00bfff",
-                        "width": 3,  "label": f"S {strike:.0f}"
-                    })
+                    lines.append({"price": val, "color": "#00bfff", "width": 3, "label": f"S {strike:.0f}"})
                     seen_pe.add(val)
 
-        # ── SECOND PASS: बाकी lines ──────────────────────────────────────────
+        # ── SECOND PASS: बाकी lines ──
         for row in oc_list:
-            strike = _safe_float(row.get('Strike_Price', 0))      # ✅ Fix #1
-            if strike < global_low or strike > global_high:
+            strike = _safe_float(row.get('Strike_Price', 0))
+            if not (global_low <= strike <= global_high):
                 continue
 
             if strike != eff_res:
-                val = _safe_float(row.get('Reversl_Ce'))           # ✅ Fix #1
+                val = _safe_float(row.get('Reversl_Ce'))
                 if val > 0 and val >= spot and val not in seen_ce:
                     seen_ce.add(val)
-                    lines.append({
-                        "price": val, "color": "#f85149",
-                        "width": 1,  "label": f"CE {strike:.0f}"
-                    })
+                    lines.append({"price": val, "color": "#f85149", "width": 1, "label": f"CE {strike:.0f}"})
 
             if strike != eff_sup:
-                val = _safe_float(row.get('Reversl_Pe'))           # ✅ Fix #1
+                val = _safe_float(row.get('Reversl_Pe'))
                 if val > 0 and val < spot and val not in seen_pe:
                     seen_pe.add(val)
-                    lines.append({
-                        "price": val, "color": "#3fb950",
-                        "width": 1,  "label": f"P {strike:.0f}"
-                    })
+                    lines.append({"price": val, "color": "#3fb950", "width": 1, "label": f"P {strike:.0f}"})
 
         lines.sort(key=lambda x: x["price"], reverse=True)
         return lines
 
     except Exception:
-        # ✅ Fix #7 & #9: logger.exception — full traceback, extra context
-        logger.exception(
-            "get_reversal_lines_for_replay failed | symbol=%s | date=%s", symbol, date_str
-        )
+        logger.exception("get_reversal_lines_for_replay failed | symbol=%s | date=%s", symbol, date_str)
         return []
     
+
+
+# ─────────────────────────────────────────────────────────────────────
+# फाइल: mystock/views.py में add करें
+# URL:   path('backtest/', backtest_view, name='backtest'),
+#        path('api/backtest/run/', backtest_run_api, name='backtest_run'),
+# ─────────────────────────────────────────────────────────────────────
+
+
+
+# ─────────────────────────────────────────────────────────────────────
+# View 1: HTML Page
+# ─────────────────────────────────────────────────────────────────────
+def backtest_view(request):
+    return render(request, 'mystock/backtesta.html')
+
+
+# ─────────────────────────────────────────────────────────────────────
+# View 2: AJAX API — Backtest Run
+# ─────────────────────────────────────────────────────────────────────
+@require_GET
+def backtest_run_api(request):
+    symbol     = request.GET.get('symbol', 'NIFTY').strip().upper()
+    date_str   = request.GET.get('date', '').strip()
+    interval   = int(request.GET.get('interval', 1))
+    buffer_pts = float(request.GET.get('buffer', 2.0))
+    target_pts = float(request.GET.get('target_pts', 50))
+    sl_pts     = float(request.GET.get('sl_pts', 50))
+
+    if not date_str:
+        return JsonResponse({'error': 'date parameter जरूरी है'}, status=400)
+
+    try:
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': f'Date format गलत: {date_str}'}, status=400)
+
+    step         = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
+    tolerance    = 20.0
+    MARKET_START = dt_time(9, 15)
+    MARKET_END   = dt_time(15, 30)
+
+    day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
+    day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
+
+    # ── 1. SR Data ──
+    sr_rows = list(
+        LiveSRData.objects
+        .filter(Symbol__iexact=symbol, Time__gte=day_start, Time__lte=day_end)
+        .order_by('Time')
+    )
+    if not sr_rows:
+        return JsonResponse({'error': f'{date_str} को {symbol} का SR Data नहीं मिला'}, status=404)
+
+    # ── 2. OptionChain ticks ──
+    all_oc = list(
+        OptionChain.objects
+        .filter(Symbol__iexact=symbol, Time__gte=day_start, Time__lte=day_end)
+        .order_by('Time')
+        .values('Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe')
+    )
+    if not all_oc:
+        return JsonResponse({'error': f'{date_str} को {symbol} का OptionChain data नहीं मिला'}, status=404)
+
+    spot_by_time   = {}
+    skipped_outside = 0
+    for row in all_oc:
+        t     = row['Time']
+        t_ist = timezone.localtime(t)
+        if not (MARKET_START <= t_ist.time() <= MARKET_END):
+            skipped_outside += 1
+            continue
+        if t_ist.minute % interval == 0:
+            if t not in spot_by_time:
+                spot_by_time[t] = {'spot': float(row['Spot_Price'] or 0), 'ist': t_ist, 'strikes': {}}
+            s = float(row['Strike_Price'] or 0)
+            if s > 0:
+                spot_by_time[t]['strikes'][s] = {
+                    'ce': float(row['Reversl_Ce'] or 0),
+                    'pe': float(row['Reversl_Pe'] or 0),
+                }
+
+    sorted_times = sorted(spot_by_time.keys())
+
+    # ── Helpers ──
+    def get_sr_at_time(tick_time):
+        active = None
+        for sr in sr_rows:
+            if sr.Time <= tick_time:
+                active = sr
+            else:
+                break
+        return active
+
+    def calc_eff_strikes(sr):
+        if not sr:
+            return 0, 0
+        res_status = str(sr.resistance_status or '').upper()
+        sup_status = str(sr.supprt_status or '').upper()
+        res_base   = float(sr.resistance_strike or 0)
+        sup_base   = float(sr.supprt_strike or 0)
+        m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
+        m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
+        res_target = float(m_res.group(1)) if m_res else res_base
+        sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
+        if   'WTB' in res_status and 'WTB' in sup_status: eff_res = res_target
+        elif 'WTB' in res_status and 'WTT' in sup_status: eff_res = res_base
+        elif 'WTB' in res_status and 'STRONG' in sup_status: eff_res = res_base
+        elif 'WTB' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_base + step
+        elif 'WTB' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base - step
+        elif 'WTT' in res_status and 'WTB' in sup_status: eff_res = res_target
+        elif 'WTT' in res_status and 'WTT' in sup_status: eff_res = res_target + step
+        elif 'WTT' in res_status and 'STRONG' in sup_status: eff_res = res_target
+        elif 'WTT' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_target + step
+        elif 'WTT' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
+        elif 'STRONG' in res_status and 'WTB' in sup_status: eff_res = res_base
+        elif 'STRONG' in res_status and 'WTT' in sup_status: eff_res = res_base + step
+        elif 'STRONG' in res_status and 'STRONG' in sup_status: eff_res = res_base + step
+        elif 'STRONG' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_base + step
+        elif 'STRONG' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
+        elif 'SHIFTED WTB' in res_status and 'WTB' in sup_status: eff_res = res_base
+        elif 'SHIFTED WTB' in res_status and 'WTT' in sup_status: eff_res = res_base + step
+        elif 'SHIFTED WTB' in res_status and 'STRONG' in sup_status: eff_res = res_base + step
+        elif 'SHIFTED WTB' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_base + step
+        elif 'SHIFTED WTB' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
+        elif 'SHIFTED WTT' in res_status and 'WTB' in sup_status: eff_res = res_target - step
+        elif 'SHIFTED WTT' in res_status and 'WTT' in sup_status: eff_res = res_target
+        elif 'SHIFTED WTT' in res_status and 'STRONG' in sup_status: eff_res = res_target - step
+        elif 'SHIFTED WTT' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_target - step
+        elif 'SHIFTED WTT' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
+        else: eff_res = res_base + step
+
+        if   'WTB' in sup_status and 'WTB' in res_status: eff_sup = sup_target - step
+        elif 'WTB' in sup_status and 'WTT' in res_status: eff_sup = sup_target
+        elif 'WTB' in sup_status and 'STRONG' in res_status: eff_sup = sup_target
+        elif 'WTB' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_target - step
+        elif 'WTB' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base
+        elif 'WTT' in sup_status and 'WTB' in res_status: eff_sup = sup_base
+        elif 'WTT' in sup_status and 'WTT' in res_status: eff_sup = sup_base + step
+        elif 'WTT' in sup_status and 'STRONG' in res_status: eff_sup = sup_base
+        elif 'WTT' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base + step
+        elif 'WTT' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base - step
+        elif 'STRONG' in sup_status and 'WTB' in res_status: eff_sup = sup_base - step
+        elif 'STRONG' in sup_status and 'WTT' in res_status: eff_sup = sup_base
+        elif 'STRONG' in sup_status and 'STRONG' in res_status: eff_sup = sup_base - step
+        elif 'STRONG' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base
+        elif 'STRONG' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base - step
+        elif 'SHIFTED WTB' in sup_status and 'WTB' in res_status: eff_sup = sup_target
+        elif 'SHIFTED WTB' in sup_status and 'WTT' in res_status: eff_sup = sup_target + step
+        elif 'SHIFTED WTB' in sup_status and 'STRONG' in res_status: eff_sup = sup_target + step
+        elif 'SHIFTED WTB' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base
+        elif 'SHIFTED WTB' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_target + step
+        elif 'SHIFTED WTT' in sup_status and 'WTB' in res_status: eff_sup = sup_base - step
+        elif 'SHIFTED WTT' in sup_status and 'WTT' in res_status: eff_sup = sup_base
+        elif 'SHIFTED WTT' in sup_status and 'STRONG' in res_status: eff_sup = sup_base - step
+        elif 'SHIFTED WTT' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base
+        elif 'SHIFTED WTT' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base - step
+        else: eff_sup = sup_base - step
+
+        return eff_res, eff_sup
+
+    def get_rev_val_at_time(tick_time, strike, side, period=10):
+        col = 'Reversl_Ce' if side == 'CE' else 'Reversl_Pe'
+        rows = (
+            OptionChain.objects
+            .filter(Symbol__iexact=symbol, Time__lte=tick_time, Time__gte=day_start, Strike_Price=strike)
+            .order_by('-Time').values(col)[:period]
+        )
+        vals = [float(r[col]) for r in rows if r[col] and float(r[col]) > 0]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    # ── 3. Simulation ──
+    trades     = []
+    ticks_log  = []   # show-all data
+    open_trade = None
+    warnings   = []
+
+    for tick_time in sorted_times:
+        tick_data = spot_by_time[tick_time]
+        spot      = tick_data['spot']
+        if spot <= 0:
+            continue
+
+        sr = get_sr_at_time(tick_time)
+        if not sr:
+            continue
+
+        eff_res, eff_sup = calc_eff_strikes(sr)
+        if not eff_res or not eff_sup:
+            continue
+
+        r_level = get_rev_val_at_time(tick_time, eff_res, 'CE')
+        s_level = get_rev_val_at_time(tick_time, eff_sup, 'PE')
+        t_ist   = timezone.localtime(tick_time).strftime('%H:%M')
+
+        ticks_log.append({
+            'time': t_ist,
+            'spot': spot,
+            'eff_res': eff_res, 'r_level': r_level,
+            'eff_sup': eff_sup, 's_level': s_level,
+            'res_status': str(sr.resistance_status or '')[:20],
+            'sup_status': str(sr.supprt_status or '')[:20],
+            'open_trade': open_trade['type'] if open_trade else None,
+        })
+
+        # EXIT
+        if open_trade:
+            entry = open_trade['entry_spot']
+            ttype = open_trade['type']
+            target = open_trade.get('target')
+            sl     = open_trade.get('sl')
+
+            if ttype == 'PUT':
+                if not target: target = entry - target_pts
+                if not sl:     sl     = entry + sl_pts
+                if sl <= entry:
+                    sl = entry + sl_pts
+                    warnings.append(f"{t_ist} PUT SL override (entry={entry:.0f})")
+                hit_target = spot <= (target + buffer_pts)
+                hit_sl     = spot >= (sl - buffer_pts)
+            else:
+                if not target: target = entry + target_pts
+                if not sl:     sl     = entry - sl_pts
+                if sl >= entry:
+                    sl = entry - sl_pts
+                    warnings.append(f"{t_ist} CALL SL override (entry={entry:.0f})")
+                hit_target = spot >= (target - buffer_pts)
+                hit_sl     = spot <= (sl + buffer_pts)
+
+            if hit_target or hit_sl:
+                pnl = (spot - entry) if ttype == 'CALL' else (entry - spot)
+                open_trade.update({
+                    'exit_time': timezone.localtime(tick_time).strftime('%H:%M'),
+                    'exit_spot': spot,
+                    'result': 'TARGET' if hit_target else 'SL',
+                    'pnl': round(pnl, 2),
+                    'target_used': round(target, 2),
+                    'sl_used': round(sl, 2),
+                })
+                trades.append(open_trade)
+                open_trade = None
+                continue
+
+        if open_trade:
+            continue
+
+        # ENTRY
+        last_put_sl  = next((t for t in reversed(trades) if t['type'] == 'PUT'  and t['result'] == 'SL'), None)
+        last_call_sl = next((t for t in reversed(trades) if t['type'] == 'CALL' and t['result'] == 'SL'), None)
+        r_paused = last_put_sl  and float(last_put_sl.get('entry_strike', 0)) == eff_res
+        s_paused = last_call_sl and float(last_call_sl.get('entry_strike', 0)) == eff_sup
+
+        if not r_paused and r_level:
+            r_traded = any(abs(t['trigger'] - r_level) <= tolerance for t in trades if t['type'] == 'PUT')
+            if r_traded:
+                eff_res = eff_res + step
+                r_level = get_rev_val_at_time(tick_time, eff_res, 'CE')
+
+        if not s_paused and s_level:
+            s_traded = any(abs(t['trigger'] - s_level) <= tolerance for t in trades if t['type'] == 'CALL')
+            if s_traded:
+                eff_sup = eff_sup - step
+                s_level = get_rev_val_at_time(tick_time, eff_sup, 'PE')
+
+        if not r_paused and r_level and spot >= r_level:
+            open_trade = {
+                'type': 'PUT',
+                'entry_time': t_ist, 'entry_spot': spot, 'entry_strike': eff_res,
+                'trigger': r_level,
+                'target': get_rev_val_at_time(tick_time, eff_res - step, 'CE'),
+                'sl':     get_rev_val_at_time(tick_time, eff_res + step, 'CE'),
+                'exit_time': None, 'exit_spot': None, 'result': 'OPEN', 'pnl': 0,
+            }
+        elif not s_paused and s_level and spot <= s_level:
+            open_trade = {
+                'type': 'CALL',
+                'entry_time': t_ist, 'entry_spot': spot, 'entry_strike': eff_sup,
+                'trigger': s_level,
+                'target': get_rev_val_at_time(tick_time, eff_sup + step, 'PE'),
+                'sl':     get_rev_val_at_time(tick_time, eff_sup - step, 'PE'),
+                'exit_time': None, 'exit_spot': None, 'result': 'OPEN', 'pnl': 0,
+            }
+
+    # EOD
+    if open_trade and sorted_times:
+        last_spot = spot_by_time[sorted_times[-1]]['spot']
+        pnl = (last_spot - open_trade['entry_spot']) if open_trade['type'] == 'CALL' else (open_trade['entry_spot'] - last_spot)
+        open_trade.update({
+            'exit_time': timezone.localtime(sorted_times[-1]).strftime('%H:%M'),
+            'exit_spot': last_spot, 'result': 'EOD', 'pnl': round(pnl, 2),
+        })
+        trades.append(open_trade)
+
+    # ── 4. Summary ──
+    wins     = [t for t in trades if t['result'] == 'TARGET']
+    losses   = [t for t in trades if t['result'] == 'SL']
+    eod_list = [t for t in trades if t['result'] == 'EOD']
+    net_pnl  = round(sum(t['pnl'] for t in trades), 2)
+    win_rate = round(len(wins) / len(trades) * 100, 1) if trades else 0
+
+    # Spot range
+    all_spots = [spot_by_time[t]['spot'] for t in sorted_times]
+
+    return JsonResponse({
+        'symbol': symbol, 'date': date_str, 'interval': interval,
+        'meta': {
+            'sr_rows': len(sr_rows),
+            'total_ticks': len(sorted_times),
+            'skipped_outside': skipped_outside,
+            'spot_high': max(all_spots) if all_spots else 0,
+            'spot_low':  min(all_spots) if all_spots else 0,
+        },
+        'summary': {
+            'total': len(trades), 'wins': len(wins),
+            'losses': len(losses), 'eod': len(eod_list),
+            'win_rate': win_rate, 'net_pnl': net_pnl,
+        },
+        'trades': trades,
+        'ticks': ticks_log,
+        'warnings': warnings,
+    })
+
+
+
+# Trade journal views Start Here
+
+
+
+def _form_context(instance=None):
+    return {
+        "status_choices": TradeStatus.choices,
+        "type_choices":   TradeType.choices,
+        "level_choices":  TradeLevel.choices,
+        "entry":          instance,
+    }
+
+
+# ── LIST  /journal/ ───────────────────────────────────────────
+def journal_list(request):
+    entries = TradingJournal.objects.all()
+
+    # ── Filters ──
+    trade_type         = request.GET.get('trade_type', '')
+    trade_level        = request.GET.get('trade_level', '')
+    resistance_status  = request.GET.get('resistance_status', '')
+    support_status     = request.GET.get('support_status', '')
+
+    if trade_type:
+        entries = entries.filter(trade_type=trade_type)
+    if trade_level:
+        entries = entries.filter(trade_level=trade_level)
+    if resistance_status:
+        entries = entries.filter(resistance_status=resistance_status)
+    if support_status:
+        entries = entries.filter(support_status=support_status)
+
+    # ── Stats (always on full DB) ──
+    all_entries = TradingJournal.objects.all()
+
+    return render(request, 'journal/journal_list.html', {
+        "entries":            entries,
+        "status_choices":     TradeStatus.choices,
+        "type_choices":       TradeType.choices,
+        "level_choices":      TradeLevel.choices,
+
+        # active filter values (for keeping dropdowns selected)
+        "filter_type":              trade_type,
+        "filter_level":             trade_level,
+        "filter_resistance_status": resistance_status,
+        "filter_support_status":    support_status,
+
+        # stats
+        "total_count": all_entries.count(),
+        "call_count":  all_entries.filter(trade_type='call').count(),
+        "put_count":   all_entries.filter(trade_type='put').count(),
+    })
+
+
+# ── CREATE  /journal/add/ ─────────────────────────────────────
+def journal_create(request):
+    if request.method == 'POST':
+        try:
+            TradingJournal.objects.create(
+                resistance_status  = request.POST['resistance_status'],
+                resistance_strike  = request.POST['resistance_strike'],
+                resistance_strike2 = request.POST.get('resistance_strike2') or None,
+                support_status     = request.POST['support_status'],
+                support_strike     = request.POST['support_strike'],
+                support_strike2    = request.POST.get('support_strike2') or None,
+                trade_type         = request.POST['trade_type'],
+                trade_level        = request.POST['trade_level'],
+                notes              = request.POST.get('notes', ''),
+            )
+            messages.success(request, "✅ Trade entry save हो गई!")
+            return redirect('journal_list')
+        except Exception as e:
+            messages.error(request, f"❌ Error: {e}")
+
+    return render(request, 'journal/journal_form.html', _form_context())
+
+
+# ── EDIT  /journal/edit/<pk>/ ─────────────────────────────────
+def journal_edit(request, pk):
+    entry = get_object_or_404(TradingJournal, pk=pk)
+
+    if request.method == 'POST':
+        try:
+            entry.resistance_status  = request.POST['resistance_status']
+            entry.resistance_strike  = request.POST['resistance_strike']
+            entry.resistance_strike2 = request.POST.get('resistance_strike2') or None
+            entry.support_status     = request.POST['support_status']
+            entry.support_strike     = request.POST['support_strike']
+            entry.support_strike2    = request.POST.get('support_strike2') or None
+            entry.trade_type         = request.POST['trade_type']
+            entry.trade_level        = request.POST['trade_level']
+            entry.notes              = request.POST.get('notes', '')
+            entry.save()
+            messages.success(request, "✅ Trade entry update हो गई!")
+            return redirect('journal_list')
+        except Exception as e:
+            messages.error(request, f"❌ Error: {e}")
+
+    return render(request, 'journal/journal_form.html', _form_context(entry))
+
+
+# ── DELETE  /journal/delete/<pk>/ ────────────────────────────
+def journal_delete(request, pk):
+    entry = get_object_or_404(TradingJournal, pk=pk)
+    if request.method == 'POST':
+        entry.delete()
+        messages.success(request, "🗑️ Trade entry delete हो गई।")
+        return redirect('journal_list')
+    return render(request, 'journal/journal_confirm_delete.html', {"entry": entry})
+
+
+
+
+# Trade journal views End Here
