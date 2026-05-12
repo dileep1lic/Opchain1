@@ -44,6 +44,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE   = True
     CSRF_COOKIE_SECURE      = True
 
+# DEBUG = True
 
 # Application definition
 
@@ -128,13 +129,57 @@ else:
 
 
 # ── Cache — LocMem (Redis हटाया, Render पर ज़रूरी नहीं) ────────────────────
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+#         "LOCATION": "opchain-cache",
+#     }
+# }
+# CACHES = {
+#     'default': {
+#         'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+#         'LOCATION': 'mystock_cache_table', # यह डेटाबेस में बनने वाली नई टेबल का नाम है
+#     }
+# }
+
+import os
+
+# Render के Environment Variables से Redis URL लेना
+# REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
+
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         "LOCATION": REDIS_URL,
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#             # यह सेटिंग सुनिश्चित करती है कि अगर Redis क्रैश हो जाए, तो वेबसाइट क्रैश न हो
+#             "IGNORE_EXCEPTIONS": True, 
+#         }
+#     }
+# }
+
+import os
+
+IS_ON_RENDER = 'RENDER' in os.environ
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
+
 CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
-        'LOCATION': 'mystock_cache_table', # यह डेटाबेस में बनने वाली नई टेबल का नाम है
+    # 1. मुख्य कैश (Redis)
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "IGNORE_EXCEPTIONS": True,  # 🟢 यह बहुत ज़रूरी है! Redis फेल होने पर एरर नहीं देगा
+        }
+    },
+    # 2. बैकअप कैश (Database)
+    "db_cache": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "mystock_cache_table",
     }
 }
-
 from mystock.credentials import access_token
 
 UPSTOX_ACCESS_TOKEN = access_token
@@ -143,8 +188,8 @@ UPSTOX_ACCESS_TOKEN = access_token
 WATCHED_INSTRUMENTS = [
     {"instrument_key": "NSE_INDEX|Nifty 50",   "unit": "minutes", "interval": "1"},
     {"instrument_key": "NSE_INDEX|Nifty 50",   "unit": "minutes", "interval": "5"},
-    # {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "5"},
-    # {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "1"},
+    {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "5"},
+    {"instrument_key": "NSE_INDEX|Nifty Bank", "unit": "minutes", "interval": "1"},
     # और symbols जोड़ते जाएं...
 ]
 
