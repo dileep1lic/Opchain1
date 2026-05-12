@@ -99,6 +99,7 @@
                         <strong>{{ row.CE_LTP }}</strong>
                     </a>
                     <span class="pct-text {% if row.CE_CLTP >= 0 %}pos-val{% else %}neg-val{% endif %}">
+
                         ({{ row.CE_CLTP|floatformat:1 }})
                     </span>
                 </div>
@@ -110,7 +111,10 @@
 
             <td class="col-strike strike">
                 {% if row.is_spot_divider %}<span class="spot-label">{{ spot }}</span>{% endif %}
-                {{ row.Strike_Price|floatformat:0 }}
+                <a href="javascript:void(0)" onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}', 'ltp')" style="color: inherit; text-decoration: underline; text-decoration-style: dotted;">
+                    {{ row.Strike_Price|floatformat:0 }}
+                </a>
+                
             </td>
 
             <td class="col-reversl rev-val {% if row.Reversl_Pe > spot %}breakdown{% endif %}">
