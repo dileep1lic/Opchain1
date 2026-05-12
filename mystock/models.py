@@ -266,3 +266,91 @@ class BotSettings(models.Model):
     class Meta:
         verbose_name = "Bot Setting"
         verbose_name_plural = "Bot Settings"
+
+# Trade jnournal के लिए Enums (Choices) - models.py में जोड़ें
+class TradeStatus(models.TextChoices):
+    WTT         = 'wtt',         'WTT'
+    WTB         = 'wtb',         'WTB'
+    STRONG      = 'strong',      'STRONG'
+    SHIFTED_WTB = 'shifted_wtb', 'SHIFTED WTB'
+    SHIFTED_WTT = 'shifted_wtt', 'SHIFTED WTT'
+
+
+class TradeType(models.TextChoices):
+    CALL = 'call', 'CALL'
+    PUT  = 'put',  'PUT'
+
+
+class TradeLevel(models.TextChoices):
+    # ── Support ──────────────────────────────────────────
+    SUPPORT_STRIKE           = 'support_strike',           'Support Strike'
+    SUPPORT_PLUS_STRIKE      = 'support_plus_strike',      'Support + Strike'
+    SUPPORT_MINUS_STRIKE     = 'support_minus_strike',     'Support - Strike'
+    SUPPORT2_STRIKE          = 'support2_strike',          '2Support Strike'
+    SUPPORT2_PLUS_STRIKE     = 'support2_plus_strike',     '2Support + Strike'
+    SUPPORT2_MINUS_STRIKE    = 'support2_minus_strike',    '2Support - Strike'
+    # ── Resistance ───────────────────────────────────────
+    RESISTANCE_STRIKE        = 'resistance_strike',        'Resistance Strike'
+    RESISTANCE_PLUS_STRIKE   = 'resistance_plus_strike',   'Resistance + Strike'
+    RESISTANCE_MINUS_STRIKE  = 'resistance_minus_strike',  'Resistance - Strike'
+    RESISTANCE2_STRIKE       = 'resistance2_strike',       '2Resistance Strike'
+    RESISTANCE2_PLUS_STRIKE  = 'resistance2_plus_strike',  '2Resistance + Strike'
+    RESISTANCE2_MINUS_STRIKE = 'resistance2_minus_strike', '2Resistance - Strike'
+
+
+class TradingJournal(models.Model):
+    date = models.DateField(auto_now_add=True)
+
+    # ── Resistance ────────────────────────────────────────────
+    resistance_status  = models.CharField(
+        max_length=20, choices=TradeStatus.choices,
+        verbose_name="Resistance Status",
+    )
+    resistance_strike  = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        verbose_name="Resistance Strike",
+    )
+    resistance_strike2 = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        verbose_name="2nd Resistance Strike",
+    )
+
+    # ── Support ───────────────────────────────────────────────
+    support_status  = models.CharField(
+        max_length=20, choices=TradeStatus.choices,
+        verbose_name="Support Status",
+    )
+    support_strike  = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        verbose_name="Support Strike",
+    )
+    support_strike2 = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        verbose_name="2nd Support Strike",
+    )
+
+    # ── Trade Info ────────────────────────────────────────────
+    trade_type  = models.CharField(
+        max_length=10, choices=TradeType.choices,
+        verbose_name="Trade Type",
+    )
+    trade_level = models.CharField(
+        max_length=30, choices=TradeLevel.choices,
+        verbose_name="Trade Level",
+    )
+
+    notes = models.TextField(blank=True, verbose_name="Notes")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering            = ['-created_at']
+        verbose_name        = "Trading Journal"
+        verbose_name_plural = "Trading Journals"
+
+    def __str__(self):
+        return f"{self.date} | {self.trade_type.upper()} | {self.get_trade_level_display()}"
+
