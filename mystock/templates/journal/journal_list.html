@@ -1,0 +1,319 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Trading Journal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+
+  .page-wrap { max-width: 1400px; margin: 0 auto; padding: 28px 16px; }
+
+  /* ── Header ── */
+  .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; flex-wrap:wrap; gap:12px; }
+  .page-title  { font-size:1.8rem; font-weight:700; background:linear-gradient(90deg,#38bdf8,#818cf8); background-clip: text; -webkit-text-fill-color:transparent; }
+  .header-actions { display:flex; gap:10px; flex-wrap:wrap; }
+  .btn-add   { background:linear-gradient(135deg,#38bdf8,#818cf8); color:#fff; border:none; padding:10px 22px; border-radius:8px; font-size:.9rem; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+  .btn-add:hover { opacity:.85; }
+  .btn-admin { background:#1e2742; color:#94a3b8; border:1px solid #2d3748; padding:10px 20px; border-radius:8px; font-size:.9rem; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+  .btn-admin:hover { background:#263050; color:#e2e8f0; }
+
+  /* ── Messages ── */
+  .msg { padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:.9rem; }
+  .msg-success { background:#064e3b; color:#6ee7b7; }
+  .msg-error   { background:#450a0a; color:#fca5a5; }
+
+  /* ── Stats ── */
+  .stats { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  .stat-card     { background:#1a1f2e; border:1px solid #2d3748; border-radius:10px; padding:14px 22px; text-align:center; flex:1; min-width:110px; }
+  .stat-card .num { font-size:1.5rem; font-weight:700; color:#38bdf8; }
+  .stat-card .lbl { font-size:.73rem; color:#64748b; margin-top:3px; text-transform:uppercase; letter-spacing:.05em; }
+  .stat-call .num { color:#34d399; }
+  .stat-put  .num { color:#f87171; }
+
+  /* ── Filter Box ── */
+  .filter-box {
+    background: #1a1f2e;
+    border: 1px solid #2d3748;
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+  }
+  .filter-box-title {
+    font-size: .75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #4a5568;
+    margin-bottom: 12px;
+  }
+  /* two rows of filters */
+  .filter-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .filter-row + .filter-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e2742; }
+
+  .filter-group { display:flex; flex-direction:column; gap:4px; flex:1; min-width:150px; }
+  .filter-group label { font-size:.72rem; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:.05em; }
+
+  .filter-box select {
+    background:#0f1117; color:#e2e8f0;
+    border:1px solid #2d3748; border-radius:8px;
+    padding:8px 12px; font-size:.83rem; cursor:pointer; width:100%;
+  }
+  .filter-box select:focus { outline:none; border-color:#38bdf8; }
+
+  .filter-actions { display:flex; gap:8px; align-items:flex-end; }
+  .btn-filter { background:#2d3748; color:#e2e8f0; border:none; border-radius:8px; padding:9px 18px; cursor:pointer; font-size:.83rem; white-space:nowrap; }
+  .btn-filter:hover { background:#3a4a61; }
+  .btn-reset  { background:transparent; color:#94a3b8; border:1px solid #3a4a61; border-radius:8px; padding:9px 14px; cursor:pointer; font-size:.83rem; text-decoration:none; white-space:nowrap; }
+
+  /* active filter indicator */
+  .filter-active-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .f-tag { background:#1e2742; border:1px solid #2d3748; border-radius:20px; padding:3px 12px; font-size:.75rem; color:#94a3b8; display:inline-flex; align-items:center; gap:6px; }
+  .f-tag span { color:#38bdf8; font-weight:700; }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x:auto; border-radius:12px; box-shadow:0 4px 24px rgba(0,0,0,.45); }
+  table { width:100%; border-collapse:collapse; background:#1a1f2e; font-size:.82rem; }
+  thead th { background:#1c2240; color:#94a3b8; font-weight:700; padding:13px 11px; text-align:left; white-space:nowrap; border-bottom:2px solid #2d3748; }
+  tbody tr { border-bottom:1px solid #1e2742; transition:background .15s; }
+  tbody tr:hover { background:#1e2742; }
+  tbody td { padding:11px; vertical-align:middle; white-space:nowrap; }
+
+  /* ── Badges ── */
+  .badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:.75rem; font-weight:700; letter-spacing:.03em; }
+  .s-wtt         { background:#1e3a5f; color:#60a5fa; }
+  .s-wtb         { background:#064e3b; color:#34d399; }
+  .s-strong      { background:#3b1d6e; color:#c084fc; }
+  .s-shifted_wtb { background:#064030; color:#2dd4bf; }
+  .s-shifted_wtt { background:#1a2f5e; color:#93c5fd; }
+  .t-call { background:#064e3b; color:#34d399; }
+  .t-put  { background:#450a0a; color:#f87171; }
+  .l-support_strike        { background:#0c2a40; color:#38bdf8; }
+  .l-support_plus_strike   { background:#063a2a; color:#4ade80; }
+  .l-support_minus_strike  { background:#3a2006; color:#fb923c; }
+  .l-support2_strike       { background:#0e2a45; color:#7dd3fc; }
+  .l-support2_plus_strike  { background:#064030; color:#86efac; }
+  .l-support2_minus_strike { background:#3a1a06; color:#fdba74; }
+  .l-resistance_strike         { background:#2d1f4e; color:#c084fc; }
+  .l-resistance_plus_strike    { background:#1e3a1e; color:#86efac; }
+  .l-resistance_minus_strike   { background:#4a0c0c; color:#fca5a5; }
+  .l-resistance2_strike        { background:#2d1060; color:#d8b4fe; }
+  .l-resistance2_plus_strike   { background:#143014; color:#bbf7d0; }
+  .l-resistance2_minus_strike  { background:#5a0a0a; color:#fecaca; }
+
+  /* ── Action buttons ── */
+  .btn-edit { background:#1e3a5f; color:#60a5fa; border:none; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:.78rem; text-decoration:none; }
+  .btn-del  { background:#450a0a; color:#f87171; border:none; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:.78rem; text-decoration:none; }
+  .btn-edit:hover { background:#2a4e7f; }
+  .btn-del:hover  { background:#5a1010; }
+
+  /* ── Empty state ── */
+  .empty { text-align:center; padding:60px 20px; color:#4a5568; }
+  .empty span { font-size:3rem; display:block; margin-bottom:12px; }
+
+  /* result count */
+  .result-count { font-size:.8rem; color:#4a5568; margin-bottom:10px; }
+  .result-count b { color:#94a3b8; }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- Header -->
+  <div class="page-header">
+    <h1 class="page-title">📊 Trading Journal</h1>
+    <div class="header-actions">
+      <a href="{% url 'journal_create' %}" class="btn-add">+ New Trade Entry</a>
+      <a href="{% url 'admin_panel' %}"    class="btn-admin">⚙️ Admin Panel</a>
+    </div>
+  </div>
+
+  <!-- Flash messages -->
+  {% for message in messages %}
+    <div class="msg {% if message.tags == 'success' %}msg-success{% else %}msg-error{% endif %}">{{ message }}</div>
+  {% endfor %}
+
+  <!-- Stats bar -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="num">{{ total_count }}</div>
+      <div class="lbl">Total Trades</div>
+    </div>
+    <div class="stat-card stat-call">
+      <div class="num">{{ call_count }}</div>
+      <div class="lbl">CALL</div>
+    </div>
+    <div class="stat-card stat-put">
+      <div class="num">{{ put_count }}</div>
+      <div class="lbl">PUT</div>
+    </div>
+  </div>
+
+  <!-- ═══ FILTER BOX ═══════════════════════════════════════════ -->
+  <form method="get">
+    <div class="filter-box">
+      <div class="filter-box-title">🔍 Filter करें</div>
+
+      <!-- Row 1 : Resistance Status | Support Status | Trade Type -->
+      <div class="filter-row">
+
+        <div class="filter-group">
+          <label>📈 Resistance Status</label>
+          <select name="resistance_status">
+            <option value="">— सभी —</option>
+            {% for val, label in status_choices %}
+              <option value="{{ val }}" {% if filter_resistance_status == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label>📉 Support Status</label>
+          <select name="support_status">
+            <option value="">— सभी —</option>
+            {% for val, label in status_choices %}
+              <option value="{{ val }}" {% if filter_support_status == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label>🔖 Trade Type</label>
+          <select name="trade_type">
+            <option value="">— सभी —</option>
+            {% for val, label in type_choices %}
+              <option value="{{ val }}" {% if filter_type == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+      </div><!-- /row1 -->
+
+      <!-- Row 2 : Trade Level | buttons -->
+      <div class="filter-row">
+
+        <div class="filter-group">
+          <label>🎯 Trade Level</label>
+          <select name="trade_level">
+            <option value="">— सभी —</option>
+            {% for val, label in level_choices %}
+              <option value="{{ val }}" {% if filter_level == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="filter-actions">
+          <button type="submit" class="btn-filter">Apply Filter</button>
+          <a href="{% url 'journal_list' %}" class="btn-reset">✕ Reset</a>
+        </div>
+
+      </div><!-- /row2 -->
+    </div><!-- /filter-box -->
+  </form>
+
+  <!-- Active filter tags -->
+  {% if filter_resistance_status or filter_support_status or filter_type or filter_level %}
+  <div class="filter-active-bar">
+    <span style="font-size:.75rem; color:#4a5568; align-self:center;">Active:</span>
+    {% if filter_resistance_status %}
+      <span class="f-tag">R. Status: <span>{{ filter_resistance_status|upper }}</span></span>
+    {% endif %}
+    {% if filter_support_status %}
+      <span class="f-tag">S. Status: <span>{{ filter_support_status|upper }}</span></span>
+    {% endif %}
+    {% if filter_type %}
+      <span class="f-tag">Type: <span>{{ filter_type|upper }}</span></span>
+    {% endif %}
+    {% if filter_level %}
+      <span class="f-tag">Level: <span>{{ filter_level }}</span></span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Result count -->
+  <div class="result-count">
+    दिख रहे हैं: <b>{{ entries|length }}</b> entries
+    {% if filter_resistance_status or filter_support_status or filter_type or filter_level %}
+      (filtered)
+    {% endif %}
+  </div>
+
+  <!-- ═══ TABLE ════════════════════════════════════════════════ -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Date</th>
+          <th>R. Status</th>
+          <th>R. Strike</th>
+          <th>2nd R. Strike</th>
+          <th>S. Status</th>
+          <th>S. Strike</th>
+          <th>2nd S. Strike</th>
+          <th>Trade Type</th>
+          <th>Trade Level</th>
+          <th>Notes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+        <tr>
+          <td style="color:#4a5568">{{ forloop.counter }}</td>
+          <td>{{ entry.date }}</td>
+
+          <td><span class="badge s-{{ entry.resistance_status }}">{{ entry.get_resistance_status_display }}</span></td>
+          <td style="color:#e2e8f0">{{ entry.resistance_strike }}</td>
+          <td style="color:#64748b">{{ entry.resistance_strike2|default:"—" }}</td>
+
+          <td><span class="badge s-{{ entry.support_status }}">{{ entry.get_support_status_display }}</span></td>
+          <td style="color:#e2e8f0">{{ entry.support_strike }}</td>
+          <td style="color:#64748b">{{ entry.support_strike2|default:"—" }}</td>
+
+          <td><span class="badge t-{{ entry.trade_type }}">{{ entry.get_trade_type_display }}</span></td>
+          <td><span class="badge l-{{ entry.trade_level }}">{{ entry.get_trade_level_display }}</span></td>
+
+          <td style="color:#94a3b8; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="{{ entry.notes }}">
+            {{ entry.notes|truncatechars:25 }}
+          </td>
+          <td>
+            <div style="display:flex;gap:5px;">
+              <a href="{% url 'journal_edit' entry.pk %}" class="btn-edit">Edit</a>
+              <a href="{% url 'journal_delete' entry.pk %}" class="btn-del">Del</a>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="12">
+            <div class="empty">
+              <span>📭</span>
+              {% if filter_resistance_status or filter_support_status or filter_type or filter_level %}
+                इस filter में कोई entry नहीं मिली।
+                <a href="{% url 'journal_list' %}" style="color:#38bdf8;">Reset करें →</a>
+              {% else %}
+                कोई trade entry नहीं।
+                <a href="{% url 'journal_create' %}" style="color:#38bdf8;">पहली entry जोड़ें →</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>
