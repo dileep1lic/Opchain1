@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>S/R Live</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    :root{
+      --bg:    #080d12;
+      --surf:  #0d1520;
+      --line:  #182535;
+      --ce:    #f95c7a;
+      --pe:    #0de89e;
+      --gold:  #f5c842;
+      --blue:  #38bdf8;
+      --text:  #cce0f0;
+      --dim:   #48657a;
+      --wtt:   #f95c7a;
+      --wtb:   #0de89e;
+      --str:   #f5c842;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{font-size:13px}
+    body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;min-height:100vh;overflow-x:auto}
+
+    /* ══ TOP NAV ══ */
+    .topbar{
+      display:flex;align-items:center;gap:0;
+      background:var(--surf);border-bottom:1px solid var(--line);
+      padding:0 1rem;
+      position:sticky;top:0;z-index:100;
+    }
+    .brand{
+      font-family:'Rajdhani',sans-serif;font-weight:700;
+      font-size:1.1rem;letter-spacing:1px;
+      color:var(--text);padding:.6rem 1rem .6rem 0;
+      border-right:1px solid var(--line);margin-right:.8rem;
+      white-space:nowrap;
+    }
+    .brand span{color:var(--pe)}
+
+    /* Symbol tabs */
+    .sym-tabs{display:flex;gap:.3rem;padding:.4rem 0}
+    .sym-tab{
+      font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.85rem;
+      padding:.28rem .85rem;border-radius:4px;cursor:pointer;
+      border:1px solid var(--line);color:var(--dim);background:transparent;
+      transition:all .15s;letter-spacing:.5px;
+    }
+    .sym-tab:hover{color:var(--text);border-color:var(--dim)}
+    .sym-tab.active{background:var(--pe);color:#080d12;border-color:var(--pe)}
+
+    /* Right side of topbar */
+    .topbar-right{
+      margin-left:auto;display:flex;align-items:center;gap:.8rem;
+      font-size:.75rem;
+    }
+    .tb-chip{
+      display:flex;align-items:center;gap:.4rem;
+      background:rgba(255,255,255,.04);border:1px solid var(--line);
+      border-radius:5px;padding:.3rem .7rem;
+      white-space:nowrap;
+    }
+    .tb-chip label{color:var(--dim);font-size:.65rem;letter-spacing:1px;text-transform:uppercase}
+    .tb-chip strong{color:var(--blue)}
+    .ldot{width:6px;height:6px;border-radius:50%;background:var(--pe);animation:blink 1.4s ease-in-out infinite;flex-shrink:0}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+    /* ══ DATE BAR ══ */
+    .datebar{
+      display:flex;align-items:center;gap:.7rem;
+      padding:.5rem 1rem;border-bottom:1px solid var(--line);
+      background:rgba(13,232,158,.025);flex-wrap:wrap;
+    }
+    .dl{font-size:.6rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim)}
+    input[type="date"]{
+      background:var(--surf);border:1px solid var(--line);color:var(--text);
+      font-family:'Share Tech Mono',monospace;font-size:.8rem;
+      padding:.35rem .75rem;border-radius:5px;outline:none;cursor:pointer;
+      transition:border-color .15s;
+    }
+    input[type="date"]:hover,input[type="date"]:focus{border-color:var(--pe)}
+    input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.4)}
+    .btn{
+      font-family:'Share Tech Mono',monospace;font-size:.75rem;
+      padding:.35rem .9rem;border:none;border-radius:5px;
+      cursor:pointer;transition:all .15s;text-decoration:none;display:inline-block;
+    }
+    .bp{background:var(--pe);color:#080d12;font-weight:600}
+    .bp:hover{opacity:.85}
+    .bg{background:transparent;border:1px solid var(--line);color:var(--dim)}
+    .bg:hover{color:var(--text)}
+    .row-count{margin-left:auto;font-size:.68rem;color:var(--dim)}
+    .row-count b{color:var(--text)}
+
+    /* ══ ALERT BOX (latest record) ══ */
+    .alert-box{
+      display:grid;grid-template-columns:1fr 1fr;
+      gap:0;border-bottom:2px solid var(--line);
+    }
+    .al{padding:.6rem 1.2rem;border-right:1px solid var(--line)}
+    .ar{padding:.6rem 1.2rem}
+    .al-dot{display:inline-flex;align-items:center;gap:.4rem;font-size:.6rem;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:.25rem}
+    .al-dot.r{color:var(--ce)} .al-dot.g{color:var(--pe)}
+    .al-dot::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block}
+    .al-main{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:1.1rem}
+    .al-main.r{color:var(--ce)} .al-main.g{color:var(--pe)}
+    .al-sub{font-size:.65rem;color:var(--dim);margin-top:.15rem}
+
+    /* ══ TABLE ══ */
+    .tbl-wrap{overflow-x:auto}
+    table{width:100%;border-collapse:collapse;min-width:1100px}
+
+    /* Group headers */
+    .gh-ce{background:rgba(249,92,122,.07);color:var(--ce);font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.75rem;letter-spacing:1.5px;text-transform:uppercase;text-align:center;padding:.4rem;border-bottom:1px solid rgba(249,92,122,.2)}
+    .gh-pe{background:rgba(13,232,158,.07);color:var(--pe);font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.75rem;letter-spacing:1.5px;text-transform:uppercase;text-align:center;padding:.4rem;border-bottom:1px solid rgba(13,232,158,.2)}
+    .gh-mid{background:rgba(255,255,255,.025);text-align:center;padding:.4rem;border-bottom:1px solid var(--line)}
+
+    /* Column headers */
+    thead tr.col-hdr th{
+      font-size:.58rem;letter-spacing:1px;text-transform:uppercase;
+      color:var(--dim);padding:.45rem .55rem;
+      border-bottom:2px solid var(--line);
+      background:rgba(255,255,255,.015);
+      white-space:nowrap;text-align:center;font-family:'Share Tech Mono',monospace;font-weight:400;
+    }
+    th.ce-h{color:rgba(249,92,122,.55)}
+    th.pe-h{color:rgba(13,232,158,.55)}
+    th.mid-h{color:rgba(56,189,248,.55)}
+    th.bdr-l{border-left:1px solid var(--line)}
+    th.bdr-r{border-right:1px solid var(--line)}
+
+    /* Rows */
+    tbody tr{
+      border-bottom:1px solid rgba(24,37,53,.8);
+      transition:background .1s;
+      animation:rowIn .25s ease both;
+    }
+    @keyframes rowIn{from{opacity:0}to{opacity:1}}
+    tbody tr:hover{background:rgba(13,232,158,.03)}
+
+    td{
+      padding:.45rem .55rem;vertical-align:middle;
+      text-align:center;white-space:nowrap;font-size:.78rem;
+    }
+    td.bdr-l{border-left:1px solid var(--line)}
+    td.bdr-r{border-right:1px solid var(--line)}
+
+    /* ── Cell types ── */
+    .time-td{font-size:.75rem;color:var(--blue);font-weight:500;min-width:70px}
+
+    /* Strike number */
+    .sk{font-size:.8rem;font-weight:500}
+    .sk-ce{color:var(--ce)} .sk-pe{color:var(--pe)}
+    .sk-2nd{opacity:.55;font-size:.72rem}
+    .na{color:rgba(72,101,122,.5)}
+
+    /* Status pill */
+    .st{display:inline-block;padding:.12rem .42rem;border-radius:3px;font-size:.62rem;font-weight:600;letter-spacing:.5px}
+    .wtt{background:rgba(249,92,122,.15);color:var(--wtt);border:1px solid rgba(249,92,122,.2)}
+    .wtb{background:rgba(13,232,158,.15);color:var(--wtb);border:1px solid rgba(13,232,158,.2)}
+    .str-pill{background:rgba(245,200,66,.15);color:var(--str);border:1px solid rgba(245,200,66,.2)}
+
+    /* Source text */
+    .src{
+      display:inline-block;padding:.12rem .45rem;
+      border-radius:3px;font-size:.65rem;
+      background:rgba(255,255,255,.04);color:var(--dim);
+      border:1px solid var(--line);max-width:160px;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    }
+
+    /* Main level text */
+    .lvl{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.88rem;text-align:left}
+    .lvl-ce{color:var(--ce)} .lvl-pe{color:var(--pe)}
+
+    /* ── EMPTY ── */
+    .empty-row td{padding:3.5rem;text-align:center;color:var(--dim);font-size:.85rem}
+
+    footer{text-align:center;padding:.8rem;font-size:.6rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);border-top:1px solid var(--line)}
+  </style>
+</head>
+<body>
+
+<!-- ══ TOP BAR ══ -->
+<div class="topbar">
+  <div class="brand">S/<span>R</span> LIVE</div>
+
+  <!-- Symbol filter tabs (JS से filter होंगे) -->
+  <div class="sym-tabs" id="symTabs">
+    {# JS dynamically builds these tabs from table data #}
+  </div>
+
+  <div class="topbar-right">
+    <div class="tb-chip"><span class="ldot"></span><label>IST</label><strong id="clock">--:--:--</strong></div>
+    <div class="tb-chip"><label>ROWS</label><strong>{{ sr_data|length }}</strong></div>
+    {% if sr_data %}<div class="tb-chip"><label>DATE</label><strong>{{ selected_date }}</strong></div>{% endif %}
+  </div>
+</div>
+
+<!-- ══ DATE BAR ══ -->
+<div class="datebar">
+  <span class="dl">तारीख :</span>
+  <form method="GET" id="df" style="display:flex;gap:.5rem;align-items:center">
+    <input type="date" name="date" value="{{ selected_date }}"
+           onchange="document.getElementById('df').submit()"/>
+    <button type="submit" class="btn bp">Filter</button>
+    <a href="?" class="btn bg">Today</a>
+  </form>
+  <span class="row-count">Showing <b id="visCount">{{ sr_data|length }}</b> records</span>
+</div>
+
+<!-- ══ ALERT (latest row) ══ -->
+{% if sr_data %}
+{% with item=sr_data.0 %}
+<div class="alert-box">
+  <div class="al">
+    <div class="al-dot r">Resistance</div>
+    <div class="al-main r">{{ item.resistance_status|default:"—" }}</div>
+    <div class="al-sub">
+      CE OI: {{ item.ce_high_oi_strike|floatformat:0|default:"—" }}
+      &nbsp;|&nbsp; Vol: {{ item.ce_high_vol_strike|floatformat:0|default:"—" }}
+    </div>
+  </div>
+  <div class="ar">
+    <div class="al-dot g">Support</div>
+    <div class="al-main g">{{ item.supprt_status|default:"—" }}</div>
+    <div class="al-sub">
+      PE OI: {{ item.pe_high_oi_strike|floatformat:0|default:"—" }}
+      &nbsp;|&nbsp; Vol: {{ item.pe_high_vol_strike|floatformat:0|default:"—" }}
+    </div>
+  </div>
+</div>
+{% endwith %}
+{% endif %}
+
+<!-- ══ TABLE ══ -->
+<div class="tbl-wrap">
+  <table id="mainTable">
+    <thead>
+      <!-- Group headers -->
+      <tr>
+        <th colspan="6" class="gh-ce">🔴 &nbsp;CE — RESISTANCE</th>
+        <th colspan="2" class="gh-mid">—</th>
+        <th colspan="6" class="gh-pe">🟢 &nbsp;PE — SUPPORT</th>
+      </tr>
+      <!-- Column headers -->
+      <tr class="col-hdr">
+        <!-- CE -->
+        <th class="ce-h">OI 1st</th>
+        <th class="ce-h">OI St.</th>
+        <th class="ce-h">OI 2nd</th>
+        <th class="ce-h">Vol 1st</th>
+        <th class="ce-h">Vol St.</th>
+        <th class="ce-h bdr-r">Source</th>
+        <!-- Middle -->
+        <th class="mid-h">Time</th>
+        <th class="mid-h bdr-l">Resistance ↓ / Support ↑</th>
+        <!-- PE -->
+        <th class="pe-h bdr-l">OI 1st</th>
+        <th class="pe-h">OI St.</th>
+        <th class="pe-h">OI 2nd</th>
+        <th class="pe-h">Vol 1st</th>
+        <th class="pe-h">Vol St.</th>
+        <th class="pe-h">Source</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if sr_data %}
+        {% for item in sr_data %}
+        <tr data-sym="{{ item.Symbol }}">
+
+          <!-- ── CE ── -->
+          <td class="sk sk-ce">{{ item.ce_high_oi_strike|floatformat:0|default:"—" }}</td>
+          <td>
+            {% if item.ce_oi_status == "WTT" %}<span class="st wtt">WTT</span>
+            {% elif item.ce_oi_status == "WTB" %}<span class="st wtb">WTB</span>
+            {% elif item.ce_oi_status == "STRONG" %}<span class="st str-pill">STR</span>
+            {% else %}<span class="na">{{ item.ce_oi_status|default:"—" }}</span>{% endif %}
+          </td>
+          <td class="sk sk-2nd sk-ce">{{ item.ce_2nd_high_oi_strike|floatformat:0|default:"—" }}</td>
+          <td class="sk sk-ce">{{ item.ce_high_vol_strike|floatformat:0|default:"—" }}</td>
+          <td>
+            {% if item.ce_vol_status == "WTT" %}<span class="st wtt">WTT</span>
+            {% elif item.ce_vol_status == "WTB" %}<span class="st wtb">WTB</span>
+            {% elif item.ce_vol_status == "STRONG" %}<span class="st str-pill">STR</span>
+            {% else %}<span class="na">{{ item.ce_vol_status|default:"—" }}</span>{% endif %}
+          </td>
+          <td class="bdr-r">
+            <span class="src">{{ item.resistance_status|default:"—" }}</span>
+          </td>
+
+          <!-- ── TIME + SYMBOL ── -->
+          <td class="time-td">{{ item.Time|time:"H:i:s" }}</td>
+
+          <!-- Main level cell -->
+          <td class="bdr-l" style="min-width:300px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+              <span class="lvl lvl-ce">
+                {% if item.resistance_strike %}↓ {{ item.resistance_strike|floatformat:0 }}{% else %}—{% endif %}
+              </span>
+              <span style="font-size:.65rem;color:var(--dim);font-family:'Share Tech Mono',monospace">
+                {{ item.Symbol }} &nbsp; ₹{{ item.Spot_Price|floatformat:0 }}
+              </span>
+              <span class="lvl lvl-pe">
+                {% if item.supprt_strike %}↑ {{ item.supprt_strike|floatformat:0 }}{% else %}—{% endif %}
+              </span>
+            </div>
+          </td>
+
+          <!-- ── PE ── -->
+          <td class="bdr-l sk sk-pe">{{ item.pe_high_oi_strike|floatformat:0|default:"—" }}</td>
+          <td>
+            {% if item.pe_oi_status == "WTT" %}<span class="st wtt">WTT</span>
+            {% elif item.pe_oi_status == "WTB" %}<span class="st wtb">WTB</span>
+            {% elif item.pe_oi_status == "STRONG" %}<span class="st str-pill">STR</span>
+            {% else %}<span class="na">{{ item.pe_oi_status|default:"—" }}</span>{% endif %}
+          </td>
+          <td class="sk sk-2nd sk-pe">{{ item.pe_2nd_high_oi_strike|floatformat:0|default:"—" }}</td>
+          <td class="sk sk-pe">{{ item.pe_high_vol_strike|floatformat:0|default:"—" }}</td>
+          <td>
+            {% if item.pe_vol_status == "WTT" %}<span class="st wtt">WTT</span>
+            {% elif item.pe_vol_status == "WTB" %}<span class="st wtb">WTB</span>
+            {% elif item.pe_vol_status == "STRONG" %}<span class="st str-pill">STR</span>
+            {% else %}<span class="na">{{ item.pe_vol_status|default:"—" }}</span>{% endif %}
+          </td>
+          <td><span class="src">{{ item.supprt_status|default:"—" }}</span></td>
+
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr class="empty-row"><td colspan="14">इस तारीख के लिए कोई डेटा नहीं मिला</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<footer>S/R Live &nbsp;·&nbsp; IST &nbsp;·&nbsp; {{ selected_date }}</footer>
+
+<script>
+  // ── Live clock ──
+  function tick(){
+    const now = new Date();
+    const t = now.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour12:false});
+    document.getElementById('clock').textContent = t;
+  }
+  tick(); setInterval(tick, 1000);
+
+  // ── Symbol tabs (build from data) ──
+  const rows  = [...document.querySelectorAll('#mainTable tbody tr[data-sym]')];
+  const syms  = [...new Set(rows.map(r => r.dataset.sym))];
+  const tabs  = document.getElementById('symTabs');
+
+  // Clear placeholder content
+  tabs.innerHTML = '';
+
+  // ALL tab
+  const allBtn = makeTab('ALL', true);
+  tabs.appendChild(allBtn);
+
+  syms.forEach(s => tabs.appendChild(makeTab(s, false)));
+
+  function makeTab(label, active){
+    const b = document.createElement('button');
+    b.className = 'sym-tab' + (active ? ' active' : '');
+    b.textContent = label;
+    b.onclick = () => filterSym(b, label);
+    return b;
+  }
+
+  function filterSym(btn, sym){
+    document.querySelectorAll('.sym-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    let vis = 0;
+    rows.forEach(r => {
+      const show = sym === 'ALL' || r.dataset.sym === sym;
+      r.style.display = show ? '' : 'none';
+      if(show) vis++;
+    });
+    document.getElementById('visCount').textContent = vis;
+  }
+
+  // ── Row stagger animation ──
+  rows.forEach((r,i) => r.style.animationDelay = `${i*20}ms`);
+</script>
+</body>
+</html>
