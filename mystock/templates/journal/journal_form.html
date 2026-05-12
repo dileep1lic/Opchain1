@@ -1,0 +1,342 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>{% if entry %}Edit{% else %}New{% endif %} Trade Entry</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 32px 16px; }
+
+  .card { width: 100%; max-width: 820px; background: #1a1f2e; border-radius: 16px; box-shadow: 0 8px 40px rgba(0,0,0,.55); overflow: hidden; }
+
+  /* ── Card Header ── */
+  .card-header { background: linear-gradient(135deg, #1a2a4a, #2d1f4e); padding: 26px 30px; border-bottom: 1px solid #2d3748; }
+  .card-header h1 { font-size: 1.35rem; font-weight: 700; color: #e2e8f0; }
+  .card-header p  { color: #64748b; font-size: .82rem; margin-top: 5px; }
+
+  /* ── Card Body ── */
+  .card-body { padding: 28px 30px; }
+
+  /* ── Section Title ── */
+  .section-label {
+    display: flex; align-items: center; gap: 8px;
+    font-size: .78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: #64748b;
+    margin: 28px 0 14px;
+    border-bottom: 1px solid #2d3748; padding-bottom: 8px;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  /* ── Grid ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  @media(max-width: 600px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+
+  /* ── Fields ── */
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label { font-size: .8rem; font-weight: 600; color: #94a3b8; }
+  .req  { color: #f87171; margin-left: 2px; }
+  .hint { font-size: .73rem; color: #4a5568; }
+
+  input[type="number"],
+  select,
+  textarea {
+    background: #0f1117;
+    border: 1px solid #2d3748;
+    border-radius: 8px;
+    color: #e2e8f0;
+    padding: 10px 13px;
+    font-size: .88rem;
+    width: 100%;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 3px rgba(56,189,248,.12);
+  }
+  textarea { resize: vertical; min-height: 85px; }
+
+  /* ── Status option colors (via optgroup) ── */
+  select option { background: #1a1f2e; }
+
+  /* ── Live badge preview ── */
+  .preview-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+  .preview-lbl { font-size: .75rem; color: #4a5568; }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: .78rem; font-weight: 700; }
+
+  /* Status badges */
+  .s-wtt         { background:#1e3a5f; color:#60a5fa; }
+  .s-wtb         { background:#064e3b; color:#34d399; }
+  .s-strong      { background:#3b1d6e; color:#c084fc; }
+  .s-shifted_wtb { background:#064030; color:#2dd4bf; }
+  .s-shifted_wtt { background:#1a2f5e; color:#93c5fd; }
+
+  /* Type badges */
+  .t-call { background:#064e3b; color:#34d399; }
+  .t-put  { background:#450a0a; color:#f87171; }
+
+  /* Level badges */
+  .l-support_strike        { background:#0c2a40; color:#38bdf8; }
+  .l-support_plus_strike   { background:#063a2a; color:#4ade80; }
+  .l-support_minus_strike  { background:#3a2006; color:#fb923c; }
+  .l-support2_strike       { background:#0e2a45; color:#7dd3fc; }
+  .l-support2_plus_strike  { background:#064030; color:#86efac; }
+  .l-support2_minus_strike { background:#3a1a06; color:#fdba74; }
+  .l-resistance_strike         { background:#2d1f4e; color:#c084fc; }
+  .l-resistance_plus_strike    { background:#1e3a1e; color:#86efac; }
+  .l-resistance_minus_strike   { background:#4a0c0c; color:#fca5a5; }
+  .l-resistance2_strike        { background:#2d1060; color:#d8b4fe; }
+  .l-resistance2_plus_strike   { background:#143014; color:#bbf7d0; }
+  .l-resistance2_minus_strike  { background:#5a0a0a; color:#fecaca; }
+
+  /* ── Trade Type toggle ── */
+  .type-toggle { display: flex; gap: 0; border: 1px solid #2d3748; border-radius: 8px; overflow: hidden; }
+  .type-toggle input[type="radio"] { display: none; }
+  .type-toggle label {
+    flex: 1; text-align: center; padding: 10px;
+    cursor: pointer; font-size: .88rem; font-weight: 700;
+    color: #64748b; background: #0f1117;
+    border: none; border-radius: 0; transition: all .2s;
+  }
+  .type-toggle input[value="call"]:checked + label { background: #064e3b; color: #34d399; }
+  .type-toggle input[value="put"]:checked  + label { background: #450a0a; color: #f87171; }
+  .type-toggle label:hover { background: #1e2742; }
+
+  /* ── Messages ── */
+  .msg { padding: 12px 16px; border-radius: 8px; margin-bottom: 18px; font-size: .88rem; }
+  .msg-error { background: #450a0a; color: #fca5a5; }
+
+  /* ── Footer ── */
+  .card-footer { padding: 20px 30px; background: #141824; display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid #2d3748; }
+  .btn-submit { background: linear-gradient(135deg,#38bdf8,#818cf8); color:#fff; border:none; border-radius:8px; padding:11px 28px; font-size:.9rem; font-weight:700; cursor:pointer; transition:opacity .2s; }
+  .btn-submit:hover { opacity:.85; }
+  .btn-cancel { background:transparent; color:#94a3b8; border:1px solid #3a4a61; border-radius:8px; padding:11px 20px; font-size:.9rem; text-decoration:none; }
+  .btn-cancel:hover { background:#1e2742; color:#e2e8f0; }
+
+  /* ── Divider ── */
+  .divider { height: 1px; background: #1e2742; margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <!-- Header -->
+  <div class="card-header">
+    <h1>{% if entry %}✏️ Trade Entry Edit करें{% else %}➕ नई Trade Entry जोड़ें{% endif %}</h1>
+    <p>सभी <span style="color:#f87171">*</span> वाले fields ज़रूरी हैं</p>
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="card-body">
+
+      {% for message in messages %}
+        {% if message.tags == 'error' %}
+          <div class="msg msg-error">{{ message }}</div>
+        {% endif %}
+      {% endfor %}
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!--  RESISTANCE                                      -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div class="section-label">📈 Resistance</div>
+      <div class="grid-3">
+
+        <div class="field">
+          <label>Resistance Status <span class="req">*</span></label>
+          <select name="resistance_status" id="r_status" required onchange="updateBadge('r_status','r_badge','s-')">
+            <option value="">— चुनें —</option>
+            {% for val, label in status_choices %}
+              <option value="{{ val }}"
+                {% if entry and entry.resistance_status == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Resistance Strike <span class="req">*</span></label>
+          <input type="number" name="resistance_strike" step="0.01" required
+                 value="{{ entry.resistance_strike|default:'' }}"
+                 placeholder="जैसे 21500.50"/>
+        </div>
+
+        <div class="field">
+          <label>2nd Resistance Strike</label>
+          <input type="number" name="resistance_strike2" step="0.01"
+                 value="{{ entry.resistance_strike2|default:'' }}"
+                 placeholder="Optional"/>
+          <span class="hint">ज़रूरी नहीं</span>
+        </div>
+
+      </div>
+
+      <!-- Badge preview for resistance status -->
+      <div class="preview-row">
+        <span class="preview-lbl">Status Preview →</span>
+        <span id="r_badge" class="badge" style="display:none"></span>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!--  SUPPORT                                         -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div class="section-label">📉 Support</div>
+      <div class="grid-3">
+
+        <div class="field">
+          <label>Support Status <span class="req">*</span></label>
+          <select name="support_status" id="s_status" required onchange="updateBadge('s_status','s_badge','s-')">
+            <option value="">— चुनें —</option>
+            {% for val, label in status_choices %}
+              <option value="{{ val }}"
+                {% if entry and entry.support_status == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Support Strike <span class="req">*</span></label>
+          <input type="number" name="support_strike" step="0.01" required
+                 value="{{ entry.support_strike|default:'' }}"
+                 placeholder="जैसे 21200.00"/>
+        </div>
+
+        <div class="field">
+          <label>2nd Support Strike</label>
+          <input type="number" name="support_strike2" step="0.01"
+                 value="{{ entry.support_strike2|default:'' }}"
+                 placeholder="Optional"/>
+          <span class="hint">ज़रूरी नहीं</span>
+        </div>
+
+      </div>
+
+      <!-- Badge preview for support status -->
+      <div class="preview-row">
+        <span class="preview-lbl">Status Preview →</span>
+        <span id="s_badge" class="badge" style="display:none"></span>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!--  TRADE TYPE                                      -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div class="section-label">🔖 Trade Type <span class="req">*</span></div>
+      <div class="type-toggle">
+        <input type="radio" name="trade_type" id="tt_call" value="call"
+               {% if not entry or entry.trade_type == 'call' %}checked{% endif %}/>
+        <label for="tt_call">📗 CALL</label>
+
+        <input type="radio" name="trade_type" id="tt_put" value="put"
+               {% if entry and entry.trade_type == 'put' %}checked{% endif %}/>
+        <label for="tt_put">📕 PUT</label>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!--  TRADE LEVEL                                     -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div class="section-label">🎯 Trade Level <span class="req">*</span></div>
+      <div class="field">
+        <select name="trade_level" id="t_level" required onchange="updateBadge('t_level','l_badge','l-')">
+          <option value="">— Trade Level चुनें —</option>
+
+          <optgroup label="── Support ──">
+            {% for val, label in level_choices %}
+              {% if 'support' in val %}
+                <option value="{{ val }}"
+                  {% if entry and entry.trade_level == val %}selected{% endif %}>
+                  {{ label }}
+                </option>
+              {% endif %}
+            {% endfor %}
+          </optgroup>
+
+          <optgroup label="── Resistance ──">
+            {% for val, label in level_choices %}
+              {% if 'resistance' in val %}
+                <option value="{{ val }}"
+                  {% if entry and entry.trade_level == val %}selected{% endif %}>
+                  {{ label }}
+                </option>
+              {% endif %}
+            {% endfor %}
+          </optgroup>
+
+        </select>
+      </div>
+
+      <!-- Badge preview for trade level -->
+      <div class="preview-row" style="margin-top:10px;">
+        <span class="preview-lbl">Level Preview →</span>
+        <span id="l_badge" class="badge" style="display:none"></span>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!--  NOTES                                           -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div class="section-label">📝 Notes</div>
+      <div class="field">
+        <textarea name="notes" placeholder="कोई भी note यहाँ लिखें...">{{ entry.notes|default:'' }}</textarea>
+      </div>
+
+    </div><!-- /card-body -->
+
+    <div class="card-footer">
+      <a href="{% url 'journal_list' %}" class="btn-cancel">Cancel</a>
+      <button type="submit" class="btn-submit">
+        {% if entry %}💾 Update Entry{% else %}✅ Save Entry{% endif %}
+      </button>
+    </div>
+  </form>
+</div>
+
+<script>
+  // ── Badge label map ──────────────────────────────────────
+  const LABELS = {
+    // status
+    wtt: 'WTT', wtb: 'WTB', strong: 'STRONG',
+    shifted_wtb: 'SHIFTED WTB', shifted_wtt: 'SHIFTED WTT',
+    // type
+    call: 'CALL', put: 'PUT',
+    // levels
+    support_strike: 'Support Strike',
+    support_plus_strike: 'Support + Strike',
+    support_minus_strike: 'Support - Strike',
+    support2_strike: '2Support Strike',
+    support2_plus_strike: '2Support + Strike',
+    support2_minus_strike: '2Support - Strike',
+    resistance_strike: 'Resistance Strike',
+    resistance_plus_strike: 'Resistance + Strike',
+    resistance_minus_strike: 'Resistance - Strike',
+    resistance2_strike: '2Resistance Strike',
+    resistance2_plus_strike: '2Resistance + Strike',
+    resistance2_minus_strike: '2Resistance - Strike',
+  };
+
+  function updateBadge(selectId, badgeId, prefix) {
+    const sel   = document.getElementById(selectId);
+    const badge = document.getElementById(badgeId);
+    const val   = sel.value;
+    if (!val) { badge.style.display = 'none'; return; }
+    badge.style.display = 'inline-block';
+    badge.className     = 'badge ' + prefix + val;
+    badge.textContent   = LABELS[val] || val;
+  }
+
+  // Init badges on page load (for edit mode)
+  window.addEventListener('DOMContentLoaded', () => {
+    ['r_status', 's_status'].forEach(id =>
+      updateBadge(id, id === 'r_status' ? 'r_badge' : 's_badge', 's-')
+    );
+    updateBadge('t_level', 'l_badge', 'l-');
+  });
+</script>
+</body>
+</html>
