@@ -1,0 +1,433 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Backtest — Trade Logic Verifier</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #080b10; --surface: #0e1420; --card: #131a26;
+      --border: #1e2d45; --accent: #00d4ff; --green: #00ff88;
+      --red: #ff4466; --orange: #ff9500; --muted: #4a6080;
+      --text: #c8d8ec; --text2: #7a9cc0;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-display: 'Syne', sans-serif;
+    }
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--font-mono); min-height: 100vh;
+      background-image: radial-gradient(ellipse 80% 50% at 50% -20%, #0a1f3520, transparent);
+    }
+
+    /* ── Header ── */
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex; align-items: center; gap: 16px;
+      background: linear-gradient(90deg, #0e142099, transparent);
+    }
+    .header-title { font-family: var(--font-display); font-size: 20px; font-weight: 800; color: var(--accent); letter-spacing: -0.5px; }
+    .header-sub { font-size: 11px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ── Controls ── */
+    .controls {
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+      padding: 20px 28px; border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .ctrl-group { display: flex; flex-direction: column; gap: 5px; }
+    .ctrl-label { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
+    input, select {
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font-mono);
+      font-size: 13px; padding: 7px 12px; border-radius: 4px;
+      outline: none; transition: border-color .2s;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    input[type="date"] { color-scheme: dark; min-width: 140px; }
+
+    .btn-run {
+      background: var(--accent); color: #000; border: none;
+      font-family: var(--font-display); font-size: 13px; font-weight: 700;
+      padding: 8px 24px; border-radius: 4px; cursor: pointer;
+      letter-spacing: 0.5px; transition: .15s; white-space: nowrap;
+    }
+    .btn-run:hover { background: #33ddff; transform: translateY(-1px); }
+    .btn-run:disabled { background: var(--muted); cursor: not-allowed; transform: none; }
+
+    /* ── Main Layout ── */
+    .main { display: grid; grid-template-columns: 300px 1fr; gap: 0; height: calc(100vh - 120px); overflow: hidden; }
+
+    /* ── Summary Panel ── */
+    .summary-panel {
+      border-right: 1px solid var(--border); padding: 20px;
+      overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+    }
+    .stat-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 16px;
+    }
+    .stat-title { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    .stat-value { font-family: var(--font-display); font-size: 28px; font-weight: 800; line-height: 1; }
+    .stat-sub { font-size: 11px; color: var(--text2); margin-top: 4px; }
+    .pnl-pos { color: var(--green); }
+    .pnl-neg { color: var(--red); }
+    .pnl-zero { color: var(--muted); }
+
+    .win-bar { height: 5px; background: var(--border); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+    .win-fill { height: 100%; background: linear-gradient(90deg, var(--green), #00ffaa); border-radius: 3px; transition: width .6s ease; }
+
+    .result-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .result-row:last-child { border: none; }
+
+    /* ── Right Panel ── */
+    .right-panel { display: flex; flex-direction: column; overflow: hidden; }
+    .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
+    .tab {
+      padding: 10px 20px; font-size: 11px; letter-spacing: 1.5px;
+      text-transform: uppercase; color: var(--muted); cursor: pointer;
+      border-bottom: 2px solid transparent; transition: .2s;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-content { flex: 1; overflow-y: auto; padding: 16px 20px; display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Trades Table ── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: var(--surface); color: var(--muted); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+    td { padding: 8px 10px; border-bottom: 1px solid #0e1420; vertical-align: middle; }
+    tr:hover td { background: #0e142088; }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 3px;
+      font-size: 10px; font-weight: 600; letter-spacing: 1px;
+    }
+    .badge-put    { background: #ff446622; color: var(--red); border: 1px solid #ff446644; }
+    .badge-call   { background: #00ff8822; color: var(--green); border: 1px solid #00ff8844; }
+    .badge-target { background: #00ff8822; color: var(--green); }
+    .badge-sl     { background: #ff446622; color: var(--red); }
+    .badge-eod    { background: #ff950022; color: var(--orange); }
+    .badge-open   { background: #00d4ff22; color: var(--accent); }
+
+    .pnl-cell { font-weight: 600; }
+
+    /* ── Tick Log ── */
+    .tick-table td, .tick-table th { padding: 4px 8px; font-size: 11px; }
+    .tick-open { background: #00d4ff08; }
+
+    /* ── Loading ── */
+    #loading {
+      display: none; position: fixed; inset: 0; background: #080b10cc;
+      z-index: 100; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    }
+    #loading.show { display: flex; }
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { font-family: var(--font-display); font-size: 14px; color: var(--accent); }
+    .loading-sub { font-size: 11px; color: var(--muted); }
+
+    /* ── Empty / Error ── */
+    .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty-icon { font-size: 40px; margin-bottom: 12px; }
+    .error-box { background: #ff446615; border: 1px solid #ff446633; border-radius: 6px; padding: 14px 18px; color: var(--red); font-size: 13px; margin-bottom: 16px; }
+
+    /* ── Meta bar ── */
+    .meta-bar {
+      display: flex; gap: 24px; flex-wrap: wrap;
+      padding: 10px 20px; background: var(--surface);
+      border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text2);
+    }
+    .meta-item strong { color: var(--text); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Backtest Running...</div>
+  <div class="loading-sub" id="loading-detail">DB queries processing...</div>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <div class="dot"></div>
+  <div>
+    <div class="header-title">Trade Logic Backtest</div>
+    <div class="header-sub">OptionChain DB Simulator</div>
+  </div>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <div class="ctrl-group">
+    <div class="ctrl-label">Symbol</div>
+    <select id="symbol">
+      <option value="NIFTY">NIFTY</option>
+      <option value="BANKNIFTY">BANKNIFTY</option>
+      <option value="SENSEX">SENSEX</option>
+      <option value="FINNIFTY">FINNIFTY</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">Date</div>
+    <input type="date" id="date" value="{{ today }}"/>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">Interval (min)</div>
+    <select id="interval">
+      <option value="1">1 min</option>
+      <option value="3">3 min</option>
+      <option value="5" selected>5 min</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">Buffer pts</div>
+    <input type="number" id="buffer" value="2" min="0" max="20" step="0.5" style="width:80px"/>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">Default Target pts</div>
+    <input type="number" id="target_pts" value="50" min="10" max="500" step="10" style="width:90px"/>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">Default SL pts</div>
+    <input type="number" id="sl_pts" value="50" min="10" max="500" step="10" style="width:90px"/>
+  </div>
+  <button class="btn-run" id="run-btn" onclick="runBacktest()">▶ Run Backtest</button>
+</div>
+
+<!-- Results -->
+<div class="main">
+
+  <!-- Left: Summary -->
+  <div class="summary-panel" id="summary-panel">
+    <div class="empty">
+      <div class="empty-icon">📊</div>
+      <div>Date और Symbol चुनकर<br>Backtest Run करें</div>
+    </div>
+  </div>
+
+  <!-- Right: Trades + Ticks -->
+  <div class="right-panel">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('trades')">Trades</div>
+      <div class="tab" onclick="switchTab('ticks')">Tick Log</div>
+      <div class="tab" onclick="switchTab('warnings')">Warnings <span id="warn-count"></span></div>
+    </div>
+    <div id="meta-bar" class="meta-bar" style="display:none"></div>
+    <div class="tab-content active" id="tab-trades">
+      <div class="empty"><div class="empty-icon">📋</div><div>Backtest results यहाँ दिखेंगे</div></div>
+    </div>
+    <div class="tab-content" id="tab-ticks">
+      <div class="empty"><div class="empty-icon">🕐</div><div>Tick-by-tick log यहाँ दिखेगा</div></div>
+    </div>
+    <div class="tab-content" id="tab-warnings">
+      <div class="empty"><div class="empty-icon">✅</div><div>कोई Warning नहीं</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['trades','ticks','warnings'][i] === name));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  function fmt(n) { return n != null ? parseFloat(n).toFixed(2) : '—'; }
+  function pnlClass(v) { return v > 0 ? 'pnl-pos' : v < 0 ? 'pnl-neg' : 'pnl-zero'; }
+
+  async function runBacktest() {
+    const symbol     = document.getElementById('symbol').value;
+    const date       = document.getElementById('date').value;
+    const interval   = document.getElementById('interval').value;
+    const buffer     = document.getElementById('buffer').value;
+    const target_pts = document.getElementById('target_pts').value;
+    const sl_pts     = document.getElementById('sl_pts').value;
+
+    if (!date) { alert('Date चुनें'); return; }
+
+    document.getElementById('loading').classList.add('show');
+    document.getElementById('run-btn').disabled = true;
+
+    // Loading message rotate
+    const msgs = ['DB queries processing...', 'SR timeline बना रहे हैं...', 'Reversal values calculate हो रही हैं...', 'Trade logic simulate हो रही है...'];
+    let mi = 0;
+    const msgTimer = setInterval(() => { document.getElementById('loading-detail').textContent = msgs[mi++ % msgs.length]; }, 1800);
+
+    try {
+      const url = `/api/backtest/run/?symbol=${symbol}&date=${date}&interval=${interval}&buffer=${buffer}&target_pts=${target_pts}&sl_pts=${sl_pts}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      clearInterval(msgTimer);
+      document.getElementById('loading').classList.remove('show');
+      document.getElementById('run-btn').disabled = false;
+
+      if (data.error) {
+        document.getElementById('summary-panel').innerHTML = `<div class="error-box">❌ ${data.error}</div>`;
+        document.getElementById('tab-trades').innerHTML = '';
+        return;
+      }
+      renderResults(data);
+    } catch(e) {
+      clearInterval(msgTimer);
+      document.getElementById('loading').classList.remove('show');
+      document.getElementById('run-btn').disabled = false;
+      document.getElementById('summary-panel').innerHTML = `<div class="error-box">❌ Network error: ${e.message}</div>`;
+    }
+  }
+
+  function renderResults(d) {
+    const s = d.summary;
+    const m = d.meta;
+
+    // ── Meta bar ──
+    const mb = document.getElementById('meta-bar');
+    mb.style.display = 'flex';
+    mb.innerHTML = `
+      <span>SR Rows: <strong>${m.sr_rows}</strong></span>
+      <span>Ticks: <strong>${m.total_ticks}</strong></span>
+      <span>Spot Range: <strong>${m.spot_low} – ${m.spot_high}</strong></span>
+      <span>Market hours बाहर skip: <strong>${m.skipped_outside}</strong></span>
+    `;
+
+    // ── Summary Panel ──
+    const netClass = pnlClass(s.net_pnl);
+    document.getElementById('summary-panel').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-title">Net P&amp;L</div>
+        <div class="stat-value ${netClass}">${s.net_pnl > 0 ? '+' : ''}${s.net_pnl}</div>
+        <div class="stat-sub">points</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-title">Win Rate</div>
+        <div class="stat-value ${s.win_rate >= 50 ? 'pnl-pos' : 'pnl-neg'}">${s.win_rate}%</div>
+        <div class="win-bar"><div class="win-fill" style="width:${s.win_rate}%"></div></div>
+        <div class="stat-sub">${s.wins} जीते / ${s.losses} हारे</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-title">Trades Detail</div>
+        <div class="result-row"><span>कुल Trades</span><strong>${s.total}</strong></div>
+        <div class="result-row"><span style="color:var(--green)">✅ TARGET</span><strong style="color:var(--green)">${s.wins}</strong></div>
+        <div class="result-row"><span style="color:var(--red)">❌ SL Hit</span><strong style="color:var(--red)">${s.losses}</strong></div>
+        <div class="result-row"><span style="color:var(--orange)">⏰ EOD</span><strong style="color:var(--orange)">${s.eod}</strong></div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-title">Session</div>
+        <div class="result-row"><span>Symbol</span><strong>${d.symbol}</strong></div>
+        <div class="result-row"><span>Date</span><strong>${d.date}</strong></div>
+        <div class="result-row"><span>Interval</span><strong>${d.interval}m</strong></div>
+      </div>
+    `;
+
+    // ── Trades Table ──
+    if (d.trades.length === 0) {
+      document.getElementById('tab-trades').innerHTML = `
+        <div class="empty">
+          <div class="empty-icon">⚪</div>
+          <div>कोई trade trigger नहीं हुई।<br><small style="color:var(--muted)">Reversal data नहीं मिला या spot कभी level तक नहीं पहुँचा।</small></div>
+        </div>`;
+    } else {
+      const rows = d.trades.map(t => {
+        const typeBadge = t.type === 'PUT'
+          ? '<span class="badge badge-put">PUT</span>'
+          : '<span class="badge badge-call">CALL</span>';
+        const resBadge = t.result === 'TARGET'
+          ? '<span class="badge badge-target">TARGET</span>'
+          : t.result === 'SL'
+            ? '<span class="badge badge-sl">SL</span>'
+            : t.result === 'EOD'
+              ? '<span class="badge badge-eod">EOD</span>'
+              : '<span class="badge badge-open">OPEN</span>';
+        const pnlVal = t.pnl != null ? t.pnl : 0;
+        const pnlStr = `<span class="pnl-cell ${pnlClass(pnlVal)}">${pnlVal > 0 ? '+' : ''}${pnlVal}</span>`;
+        return `
+          <tr>
+            <td>${typeBadge}</td>
+            <td>${t.entry_time || '—'}</td>
+            <td>${fmt(t.entry_spot)}</td>
+            <td>${fmt(t.entry_strike)}</td>
+            <td>${fmt(t.trigger)}</td>
+            <td>${fmt(t.target)}</td>
+            <td>${fmt(t.sl)}</td>
+            <td>${t.exit_time || '—'}</td>
+            <td>${fmt(t.exit_spot)}</td>
+            <td>${resBadge}</td>
+            <td>${pnlStr}</td>
+          </tr>`;
+      }).join('');
+
+      document.getElementById('tab-trades').innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Type</th><th>Entry Time</th><th>Entry Spot</th><th>Strike</th>
+              <th>Trigger</th><th>Target</th><th>SL</th>
+              <th>Exit Time</th><th>Exit Spot</th><th>Result</th><th>PNL</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
+    // ── Tick Log ──
+    const tickRows = d.ticks.map(t => {
+      const isOpen = t.open_trade ? 'tick-open' : '';
+      const openInfo = t.open_trade ? `<span style="color:var(--accent);font-size:10px">[${t.open_trade}]</span>` : '';
+      return `
+        <tr class="${isOpen}">
+          <td>${t.time}</td>
+          <td>${t.spot}</td>
+          <td>${t.eff_res} <small style="color:var(--muted)">(${t.r_level || '—'})</small></td>
+          <td>${t.eff_sup} <small style="color:var(--muted)">(${t.s_level || '—'})</small></td>
+          <td style="color:var(--muted);font-size:10px">${t.res_status}</td>
+          <td style="color:var(--muted);font-size:10px">${t.sup_status}</td>
+          <td>${openInfo}</td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('tab-ticks').innerHTML = `
+      <div class="table-wrap">
+        <table class="tick-table">
+          <thead><tr>
+            <th>Time IST</th><th>Spot</th><th>R Strike (Level)</th><th>S Strike (Level)</th>
+            <th>R Status</th><th>S Status</th><th>Trade</th>
+          </tr></thead>
+          <tbody>${tickRows}</tbody>
+        </table>
+      </div>`;
+
+    // ── Warnings ──
+    document.getElementById('warn-count').textContent = d.warnings.length ? `(${d.warnings.length})` : '';
+    if (d.warnings.length === 0) {
+      document.getElementById('tab-warnings').innerHTML = `<div class="empty"><div class="empty-icon">✅</div><div>कोई Warning नहीं</div></div>`;
+    } else {
+      const wRows = d.warnings.map(w => `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--orange)">⚠️ ${w}</div>`).join('');
+      document.getElementById('tab-warnings').innerHTML = `<div style="padding:8px 0">${wRows}</div>`;
+    }
+  }
+
+  // Default date = today
+  document.getElementById('date').value = new Date().toISOString().split('T')[0];
+</script>
+</body>
+</html>
