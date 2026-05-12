@@ -94,6 +94,15 @@
                 <option value="BANKNIFTY">BANKNIFTY</option>
             </select>
             <input type="date" id="sim-date">
+            <select id="candle-interval" onchange="rebuildCandles()" title="Candle Interval">
+                <option value="1">1 Min</option>
+                <option value="2">2 Min</option>
+                <option value="3">3 Min</option>
+                <option value="5" selected>5 Min</option>
+                <option value="10">10 Min</option>
+                <option value="15">15 Min</option>
+                <option value="60">1 Hour</option>
+            </select>
             <button class="btn-load" onclick="loadReplayData()">⬇ Load Data</button>
         </div>
         <div class="stats">
@@ -157,7 +166,74 @@
         let isPlaying = false;
         let playInterval = null;
 
-        let allCandlesData = [];
+        let rawCandlesData  = [];  // Upstox से आई 1-min raw candles
+        let allCandlesData  = [];  // interval के हिसाब से aggregated candles
+        let userScrolled    = false; // user ने manually scroll किया है?
+
+        // ── Candle Aggregation Function ──────────────────────────────────
+        function aggregateCandles(rawCandles, intervalMin) {
+            if (!rawCandles || rawCandles.length === 0) return [];
+            if (intervalMin <= 1) return rawCandles; // 1 min → no change
+
+            const intervalSec = intervalMin * 60;
+            const buckets = {};
+
+            rawCandles.forEach(c => {
+                // Bucket start time: interval के शुरू में snap
+                const bucketTime = Math.floor(c.time / intervalSec) * intervalSec;
+
+                if (!buckets[bucketTime]) {
+                    buckets[bucketTime] = {
+                        time:    bucketTime,
+                        timeStr: new Date((bucketTime - 19800) * 1000)
+                                    .toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Kolkata' }),
+                        open:  c.open,
+                        high:  c.high,
+                        low:   c.low,
+                        close: c.close,
+                    };
+                } else {
+                    const b = buckets[bucketTime];
+                    b.high  = Math.max(b.high, c.high);
+                    b.low   = Math.min(b.low,  c.low);
+                    b.close = c.close; // last tick का close
+                }
+            });
+
+            return Object.values(buckets).sort((a, b) => a.time - b.time);
+        }
+
+        // ── Last candle हमेशा visible रखो (right margin के साथ) ────────
+        function showLastCandle() {
+            if (userScrolled) return;  // ✅ user ने scroll किया है — मत हिलाओ
+            const barsCount = allCandlesData.length;
+            if (barsCount === 0) return;
+            _chartUpdating = true;
+            mainChart.timeScale().scrollToPosition(-5, false);
+            setTimeout(() => { _chartUpdating = false; }, 50);
+        }
+
+        // Double-click पर auto-follow फिर से ON करो
+        function resetChartFollow() {
+            userScrolled = false;
+            showLastCandle();
+        }
+
+        // ── Interval बदलने पर candles rebuild करो ──────────────────────
+        function rebuildCandles() {
+            const intervalMin = parseInt(document.getElementById('candle-interval').value) || 1;
+            allCandlesData = aggregateCandles(rawCandlesData, intervalMin);
+
+            // अगर replay चल रहा है तो current frame पर re-render
+            if (replayData && replayData.timeline.length > 0) {
+                const timeStr = replayData.timeline[timelineIndex];
+                let visibleCandles = allCandlesData.filter(c => c.timeStr <= timeStr);
+                if (visibleCandles.length > 0) {
+                    candleSeries.setData(visibleCandles);
+                    showLastCandle();
+                }
+            }
+        }
         let ceReversalLine = null;
         let peReversalLine = null;
         
@@ -183,8 +259,17 @@
             new ResizeObserver(() => {
                 mainChart.applyOptions({ width: chartDiv.clientWidth, height: chartDiv.clientHeight });
             }).observe(chartDiv);
+
+            // ✅ User ने scroll किया तो flag set करो
+            mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+                if (!_chartUpdating) userScrolled = true;
+            });
         }
         initChart();
+        let _chartUpdating = false; // chart programmatically update हो रहा है?
+
+        // Double-click पर auto-follow फिर से ON करो
+        document.getElementById('chart').addEventListener('dblclick', resetChartFollow);
 
         // 2. FETCH DATA FROM SERVER
         async function loadReplayData() {
@@ -211,20 +296,22 @@
                 
                 // Chart Data को वेरिएबल में सेव करें, लेकिन चार्ट को खाली रखें
                 // Bug 7 Fix: allCandlesData हमेशा reset करें चाहे candles हों या न हों
+                rawCandlesData = [];
                 allCandlesData = [];
                 if(data.candles && data.candles.length > 0) {
-                     allCandlesData = data.candles.map(c => {
-                         let d = new Date(c.time);
-                         // टाइम को 09:15:00 फॉर्मेट में बदलें ताकि टिक-बाय-टिक मैच हो सके
-                         let tStr = d.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Kolkata' });
-                         return {
-                             // Bug 2 Fix: IST पहले से Date में है, +19800 double offset था
-                             time: d.getTime() / 1000,
-                             open: c.open, high: c.high, low: c.low, close: c.close,
-                             timeStr: tStr
-                         };
-                     }).sort((a,b) => a.time - b.time);
+                    rawCandlesData = data.candles.map(c => {
+                        let d = new Date(c.time);
+                        let tStr = d.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Kolkata' });
+                        return {
+                            time: d.getTime() / 1000 + 19800, // UTC → IST
+                            open: c.open, high: c.high, low: c.low, close: c.close,
+                            timeStr: tStr
+                        };
+                    }).sort((a,b) => a.time - b.time);
                 }
+                userScrolled = false; // नया data load — auto-follow ON
+                rebuildCandles(); // interval के हिसाब से aggregate करो
+                setTimeout(() => mainChart.timeScale().fitContent(), 100);
 
                 document.getElementById('loading-overlay').style.display = 'none';
                 renderFrame(0); // Pehla frame render karo
@@ -324,10 +411,11 @@
                 });
             }
 
-            // 3. कैंडल अपडेट 
+            // 3. कैंडल अपडेट — aggregated candles में से visible दिखाओ
             let visibleCandles = allCandlesData.filter(c => c.timeStr <= timeStr);
             if (visibleCandles.length > 0) {
                 candleSeries.setData(visibleCandles);
+                showLastCandle();
             }
 
             timelineIndex = index;
