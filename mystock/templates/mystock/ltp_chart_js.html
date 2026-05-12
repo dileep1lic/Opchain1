@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LTP Analysis</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+
+    <style>
+        body { margin: 0; padding: 0; background-color: #0f1115; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
+        .top-bar { height: 40px; background: #181b21; display: flex; align-items: center; justify-content: center; gap: 10px; border-bottom: 1px solid #333; }
+        .info-tag { font-size: 13px; color: #ffc107; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+        .btn { background: #333; border: 1px solid #444; color: #ccc; padding: 5px 15px; font-size: 11px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        .btn:hover { background: #444; color: white; }
+        .btn.active { background: #2962ff; color: white; border-color: #2962ff; }
+        .btn-reset { background: #d32f2f; color: white; border: 1px solid #b71c1c; }
+        .chart-wrapper { flex-grow: 1; position: relative; width: 100%; height: 100%; padding: 10px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <span class="info-tag">{{ symbol }} {{ strike|floatformat:0 }}</span>
+        
+        <button class="btn active" onclick="switchChart('ltp')">LTP</button>
+        <button class="btn" onclick="switchChart('cltp')">CLTP (Change)</button>
+        
+        <button class="btn btn-reset" onclick="resetZoomChart()">RESET ZOOM</button>
+    </div>
+
+    <div class="chart-wrapper">
+        <canvas id="ltpChart"></canvas>
+    </div>
+
+<script>
+    let myChart = null;
+    let globalData = null;
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const symbol = urlParams.get('symbol');
+    let strike = urlParams.get('strike');
+    let displayStrike = strike ? parseFloat(strike).toFixed(0) : '';
+
+    async function fetchData() {
+        try {
+            // यहाँ API URL बदलकर ltp-data कर दिया गया है
+            const response = await fetch(`/api/ltp-data/?symbol=${symbol}&strike=${strike}`);
+            globalData = await response.json();
+            
+            if(globalData.error) { alert(globalData.error); return; }
+            drawChart('ltp');
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function drawChart(type) {
+        const ctx = document.getElementById('ltpChart').getContext('2d');
+        if (myChart) myChart.destroy();
+
+        let dataset1, dataset2, title;
+
+        // LTP और CLTP के लिए अलग-अलग डेटासेट सेट करना
+        if (type === 'ltp') {
+            dataset1 = globalData.ce_ltp;
+            dataset2 = globalData.pe_ltp;
+            title = `LTP (${displayStrike})`; 
+        } else {
+            dataset1 = globalData.ce_cltp;
+            dataset2 = globalData.pe_cltp;
+            title = `CLTP Change (${displayStrike})`; 
+        }
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: globalData.times,
+                datasets: [
+                    {
+                        label: 'Call (CE)',
+                        data: dataset1,
+                        borderColor: '#ff1744',
+                        backgroundColor: 'rgba(255, 23, 68, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        fill: false, // LTP चार्ट में आमतौर पर लाइन बेहतर दिखती है, आप इसे true भी कर सकते हैं
+                        tension: 0.1
+                    },
+                    {
+                        label: 'Put (PE)',
+                        data: dataset2,
+                        borderColor: '#00e676',
+                        backgroundColor: 'rgba(0, 230, 118, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        fill: false,
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                
+                plugins: {
+                    legend: { labels: { color: 'white' } },
+                    title: { display: true, text: title, color: 'white', font: { size: 14 } },
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                            modifierKey: null,
+                        },
+                        zoom: {
+                            wheel: { enabled: true },
+                            pinch: { enabled: true },
+                            mode: 'x',
+                            drag: { enabled: false }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(20, 20, 20, 0.9)',
+                        titleColor: '#ffc107',
+                        bodyColor: '#fff',
+                        borderColor: '#444',
+                        borderWidth: 1,
+                        padding: 10,
+                        displayColors: true,
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#909399', maxTicksLimit: 8 },
+                        grid: { color: '#333' }
+                    },
+                    y: {
+                        ticks: { color: '#909399' },
+                        grid: { color: 'rgba(255,255,255,0.05)' }
+                    }
+                }
+            }
+        });
+    }
+
+    window.resetZoomChart = function() {
+        if (myChart) {
+            myChart.resetZoom();
+        }
+    }
+
+    window.switchChart = function(mode) {
+        document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+        if (!event.target.classList.contains('btn-reset')) {
+            event.target.classList.add('active');
+        }
+        drawChart(mode);
+    }
+
+    fetchData();
+</script>
+</body>
+</html>
