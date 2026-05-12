@@ -9,12 +9,10 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
 from datetime import timedelta
-from django.core.cache import cache
+from django.core.cache import caches
 from .async_live import (
     save_sr_async_wrapper,
-    # get_smart_expiry,
     calculate_data_async_optimized,
-    # save_live_sr_data_async_wrapper,
     save_live_sr_async,
     save_temp_async_wrapper,
     update_instrument_store_bulk,
@@ -24,10 +22,48 @@ from .async_live import (
 from .symbol import symbols as all_symbols
 from mystock.models import OptionChain, SyncControl, SupportResistance, InstrumentStore, TempOptionChain, LiveSRData
 from django.db import close_old_connections
+from mystock.trade_logic import get_master_levels
+
+# --- SMART CACHE LOGIC START ---
+def set_smart_cache(key, value, timeout):
+    """
+    यह फंक्शन डेटा को Redis और Database दोनों में सेव करेगा।
+    ताकि अगर Redis क्रैश हो जाए, तो Database Backup हमेशा तैयार रहे।
+    """
+    # 1. पहले Redis (default) में सेव करें
+    try:
+        caches['default'].set(key, value, timeout)
+    except Exception:
+        pass  # अगर Redis डाउन है तो बिना क्रैश हुए आगे बढ़ जाएँ
+
+    # 2. बैकअप के लिए Database Cache (db_cache) में भी सेव करें
+    try:
+        caches['db_cache'].set(key, value, timeout)
+    except Exception:
+        pass
 
 # async wrapper बना लें ताकि लूप ब्लॉक ना हो
-set_cache_async = sync_to_async(cache.set)
+set_cache_async = sync_to_async(set_smart_cache)
+# --- SMART CACHE LOGIC END ---
+# यह फंक्शन पहले Redis से डेटा लाने की कोशिश करेगा, अगर वहाँ डेटा नहीं मिलेगा या Redis डाउन होगा, तो Database Cache से डेटा लाएगा।
+def get_smart_cache(key):
+    """Redis से डेटा लाएगा, फेल होने पर Database से लाएगा"""
+    try:
+        val = caches['default'].get(key)
+        if val is not None:
+            return val
+    except Exception:
+        pass
+    
+    try:
+        return caches['db_cache'].get(key)
+    except Exception as e:
+        print(f"🔴 REDIS ERROR: {e}", flush=True)
+        return None
 
+# Async लूप में चलाने के लिए रैपर
+get_cache_async = sync_to_async(get_smart_cache)
+# --------GET SMART CACHE LOGIC END --------
 # Logging setup
 log_dir = os.path.join(os.getcwd(), 'logs')
 if not os.path.exists(log_dir): os.makedirs(log_dir)
@@ -147,10 +183,6 @@ class Command(BaseCommand):
                 continue 
     
             ctrl, _ = await get_control_async(name="nifty_loop")
-            # current_now = timezone.now()
-            # current_date = current_now.date()
-            
-            
 
             # 2. 📈 LIVE TRADING LOOP
             if not ctrl.is_active:
@@ -170,7 +202,7 @@ class Command(BaseCommand):
                             'total_pe_coi': float(df['PE_COI'].sum() or 0),
                         }
                         # इसे 60 सेकंड के लिए कैश करें
-                        await set_cache_async(f'live_nifty_totals_{fixes_sym}', nifty_totals, 60)
+                        await set_cache_async(f'live_nifty_totals_{fixes_sym}', nifty_totals, 43200)
                         # 1. DataFrame को Strike_Price के क्रम में Sort करें
                         df = df.sort_values(by='Strike_Price').reset_index(drop=True)
 
@@ -191,8 +223,8 @@ class Command(BaseCommand):
                         # 🟢 नया कोड: DataFrame को Dictionary में बदलकर Cache में डालें
                         live_data_dict = filtered_df.to_dict('records')
                         # 10 सेकंड के लिए कैश में रखें (हर 5 सेकंड में ये रिफ्रेश हो ही जाएगा)
-                        await set_cache_async(f'live_nifty_data_{fixes_sym}', live_data_dict, 60)
-                        await set_cache_async(f'live_nifty_spot_{fixes_sym}', spot_price, 60)
+                        await set_cache_async(f'live_nifty_data_{fixes_sym}', live_data_dict, 43200)
+                        await set_cache_async(f'live_nifty_spot_{fixes_sym}', spot_price, 43200)
 
                         entries = [OptionChain(
                             Time=row.get('Time'),
@@ -234,18 +266,75 @@ class Command(BaseCommand):
                         
                         # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
                         await save_live_sr_async(df, fixes_sym)
-                        # await sync_to_async(run_live_paper_trading)(df=df, symbol=fixes_sym) # लाइव पेपर ट्रेडिंग भी ट्रिगर करें
-                        # bot को चलाने के लिए कंट्रोल चेक करें
-                        if self.is_trad_hours():
-                            ctrl, _ = await get_control_async(name="bot_loop")
-                            if ctrl.is_active:
-                                await sync_to_async(run_live_paper_trading)(df=df, symbol=fixes_sym) 
-                            else:
-                                # बॉट रुका हुआ है, लेकिन डेटाबेस में स्पॉट प्राइस और लेवल्स जा रहे हैं!
-                                print("🤖 Bot Loop is Paused. Data will be saved but no trades will be executed.")
-                                pass
+                        
+                        # 🟢 Incremental History Update — FIXED
+                        try:
+                            # ✅ FIX Bug 4: master_levels एक बार निकालो, trade function को pass करो
+                            master_levels = await sync_to_async(get_master_levels)(fixes_sym)
+                            eff_res = master_levels["R"]["strike"]
+                            eff_sup = master_levels["S"]["strike"]
+                            t_str   = datetime.now().isoformat()
+
+                            history_key  = f"moving_history_all_{fixes_sym.upper()}"
+                            history_data = await get_cache_async(history_key) or {}
+
+                            for _, row in df.iterrows():
+                                s = float(row['Strike_Price'])
+                                if s not in history_data:
+                                    history_data[s] = {'ce_hist': [], 'pe_hist': []}
+
+                                # ✅ FIX Bug 6: 0.0 skip होती थी, अब > 0 check
+                                ce_val = row.get('Reversl_Ce')
+                                if ce_val is not None and float(ce_val) > 0:
+                                    history_data[s]['ce_hist'].append({"time": t_str, "value": float(ce_val)})
+                                    history_data[s]['ce_hist'] = history_data[s]['ce_hist'][-500:]
+
+                                pe_val = row.get('Reversl_Pe')
+                                if pe_val is not None and float(pe_val) > 0:
+                                    history_data[s]['pe_hist'].append({"time": t_str, "value": float(pe_val)})
+                                    history_data[s]['pe_hist'] = history_data[s]['pe_hist'][-500:]
+
+                            # ✅ FIX Bug 3: Strike price नहीं — Reversal VALUE save करो
+                            if "master_res" not in history_data: history_data["master_res"] = []
+                            if "master_sup" not in history_data: history_data["master_sup"] = []
+
+                            res_val = None   # ← Fix: default None (पहले eff_res था जो strike price है)
+                            sup_val = None   # ← Fix: default None (पहले eff_sup था)
+
+                            for _, row in df.iterrows():
+                                if float(row['Strike_Price']) == eff_res and row.get('Reversl_Ce') and float(row['Reversl_Ce']) > 0:
+                                    res_val = float(row['Reversl_Ce'])
+                                if float(row['Strike_Price']) == eff_sup and row.get('Reversl_Pe') and float(row['Reversl_Pe']) > 0:
+                                    sup_val = float(row['Reversl_Pe'])
+
+                            # ✅ सिर्फ valid reversal value हो तो save करो (strike price नहीं)
+                            if res_val is not None:
+                                history_data["master_res"].append({"time": t_str, "value": res_val})
+                                history_data["master_res"] = history_data["master_res"][-500:]
+
+                            if sup_val is not None:
+                                history_data["master_sup"].append({"time": t_str, "value": sup_val})
+                                history_data["master_sup"] = history_data["master_sup"][-500:]
+
+                            await set_cache_async(history_key, history_data, 43200)
+
+                        except Exception as e:
+                            print(f"❌ History Update Error: {e}")
+
+                    # Bot trading trigger
+                    # if self.is_trad_hours():
+                        ctrl, _ = await get_control_async(name="bot_loop")
+                        if ctrl.is_active:
+                            # ✅ FIX Bug 4: master_levels pass करो — double call नहीं होगा
+                            await sync_to_async(run_live_paper_trading)(
+                                df=df,
+                                symbol=fixes_sym,
+                                master_levels=master_levels,   # ← नया parameter
+                            )
                         else:
-                            print("⏸️ Bot Loop Outside Trading Hours. No trades will be executed, but data will be saved.")
+                            print("🤖 Bot Loop is Paused. Data saving, no trades.")
+                    # else:
+                        # print("⏸️ Bot Loop Outside Trading Hours.")
                     else:
                         print(f"⚠️ [NIFTY] No data returned for expiry {expiry}.")
                 except Exception as e:
