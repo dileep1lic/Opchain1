@@ -1,7 +1,7 @@
 from django.urls import path
-from . import views, backtest_view
+from . import views, reversal_chart_views
 from . import replay_views
-# from . import reversal_chart_views
+
 
 
 
@@ -27,6 +27,9 @@ urlpatterns = [
     # COI
     path('chart/view/coi/', views.render_chart_page_coi, name='chart_page_coi'), # HTML पेज
     path('api/coi-data/', views.specific_strike_coi_data, name='coi_data_api'), # JSON डेटा
+    # LTP
+    path('chart/view/ltp/', views.render_chart_page_ltp, name='chart_page_ltp'), # HTML पेज
+    path('api/ltp-data/', views.specific_strike_ltp_data, name='ltp_data_api'), # JSON डेटा
 
     # path('reversal-chart/', views.reversal_chart_view, name='reversal_chart'),
 
@@ -51,29 +54,27 @@ urlpatterns = [
     path("api/candle/",    views.candle_api,    name="candle_api"),   # AJAX JSON data
     path("api/symbols/",   views.symbol_search, name="symbol_search"),# Autocomplete
 
-    # test 
-    # path('live-chart/', views.live_chart_page, name='live_chart'),
-    
-    # यह आपका API एंडपॉइंट है जिसे JavaScript fetch() करेगा
-    # path('api/live-reversal-data/', views.live_reversal_data_api, name='live_reversal_api'),
-
-    # path('reversal-chart/', reversal_chart_views.reversal_chart_view, name='reversal_chart'),
-    # path('api/reversal-chart-data/', reversal_chart_views.reversal_chart_data_api, name='reversal_chart_data_api'),
-
     path('dashboard-chart/', views.dashboard_chart_view, name='dashboard_chart'),
-
-    # बैकटेस्ट के लिए URL:
-    path('backtest/', backtest_view.backtest_view, name='backtest'),
 
     # लाइव पेपर ट्रेड्स देखने के लिए नया URL:
     path('live-trades/', views.live_trades_view, name='live_trades'),
     path('api/dashboard-data/', views.dashboard_data_api, name='dashboard_data_api'),
+    
     # 👇 यह Skip Trade URL जोड़ें
     path('api/skip-trade/', views.skip_trade_api, name='skip_trade_api'),
     # 👇 यह Add Manual Trade URL जोड़ें
     path('api/add-manual/', views.add_manual_trade_api, name='add_manual_trade'),
-
     # पुराने ट्रैड डेसबोर्ड के url 
     path('trade-journal/', views.trade_dashboard, name='trade_journal'),
+
+    # बैकटेस्ट Trade के लिए URL:
+    path('backtesta/', views.backtest_view, name='backtest'),
+    path('api/backtest/run/', views.backtest_run_api, name='backtest_run'),
+
+    # Trade journal backtest ricord के लिए URLs
+    path('journal/',                    views.journal_list,   name='journal_list'),
+    path('journal/add/',                views.journal_create, name='journal_create'),
+    path('journal/edit/<int:pk>/',      views.journal_edit,   name='journal_edit'),
+    path('journal/delete/<int:pk>/',    views.journal_delete, name='journal_delete'),
     
 ]
