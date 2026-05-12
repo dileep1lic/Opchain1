@@ -23,10 +23,20 @@
     #countdown-bar { flex-shrink: 0; height: 2px; width: 100%; background: var(--border); display: none; }
     #countdown-fill { height: 100%; background: var(--green); width: 100%; transition: width linear; }
 
-    body { background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+    html, body { 
+        background: var(--bg); 
+        color: var(--text); 
+        font-family: var(--font); 
+        overflow: hidden !important;
+        margin: 0; 
+        padding: 0;
+        height: 100%; 
+        width: 100%;
+        display: flex; 
+        flex-direction: column; 
+    }
     #chart-wrap { position: relative; width: 100%; flex-grow: 1; overflow: hidden; }
     #chart { position: absolute; width: 100%; height: 100%; top: 0; left: 0; }
-    /* OHLC Legend Styles */
     #ohlc-legend {
         position: absolute;
         top: 10px;
@@ -37,7 +47,7 @@
         background: rgba(22, 27, 34, 0.6);
         padding: 4px 10px;
         border-radius: 4px;
-        pointer-events: none; /* ताकि माउस चार्ट पर काम करता रहे */
+        pointer-events: none;
         display: none;
         border: 1px solid var(--border);
     }
@@ -69,14 +79,13 @@
             <span id="ar-icon">⏸</span> Auto
         </button>
         
-        <button id="reversal-toggle-btn" class="btn-active" onclick="toggleReversalLines()" title="Change Reversal Mode">
-            <span id="rv-label">📉 Rev: Moving</span>
+        <button id="reversal-toggle-btn" class="btn-active" onclick="toggleReversalLines()" title="Toggle Reversal Lines">
+            <span id="rv-label">➖ Rev: ON</span>
         </button>
     </div>
 </div>
 
 <div id="countdown-bar"><div id="countdown-fill"></div></div>
-
 
 <div id="chart-wrap">
   <div id="loading">⏳ Loading...</div>
@@ -87,7 +96,7 @@
 
 <script>
   let mainChart = null;
-  let reversalMode = 1; // 1 = मूविंग, 2 = सीधी, 0 = ऑफ
+  let reversalMode = 1; // 1 = ON (Straight), 0 = OFF
   let savedRange = null;
   let lastCandles = [];
   let lastReversals = [];
@@ -107,7 +116,6 @@
     }
     document.getElementById("message").style.display = "none";
 
-    // 🛡️ चार्ट का साइज़ ज़बरदस्ती सेट करना
     const cWidth = chartContainer.clientWidth || window.innerWidth || 800;
     const cHeight = chartContainer.clientHeight || window.innerHeight || 400;
 
@@ -121,7 +129,6 @@
         timeScale: { borderColor: "#30363d", timeVisible: true },
     });
 
-    // 🛡️ Resize Observer: स्क्रीन हिलते ही चार्ट को एकदम सही साइज़ में फिट करेगा
     new ResizeObserver(entries => {
         if(entries.length === 0 || !mainChart) return;
         const newRect = entries[0].contentRect;
@@ -153,7 +160,6 @@
     // ── OHLC Hover Logic ──
     const legend = document.getElementById('ohlc-legend');
     
-    // अपडेट करने का फंक्शन
     const updateLegend = (data) => {
         const isUp = data.close >= data.open;
         const color = isUp ? 'var(--green)' : 'var(--red)';
@@ -166,73 +172,48 @@
         legend.style.display = 'block';
     };
 
-    // डिफ़ॉल्ट रूप से सबसे आखिरी (Latest) कैंडल का डेटा दिखाएं
     if (cdData.length > 0) {
         updateLegend(cdData[cdData.length - 1]);
     }
 
-    // जब माउस चार्ट पर घूमेगा
     mainChart.subscribeCrosshairMove(param => {
         if (param.time) {
             const data = param.seriesData.get(candleSeries);
-            if (data) {
-                updateLegend(data);
-            }
+            if (data) { updateLegend(data); }
         }
     });
     // ──────────────────────
 
-    // ── Reversal Lines draw करना ──
+    // ── Reversal Lines: सिर्फ Straight Lines ──
     if (window._reversalSeries) {
         window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
     }
     window._reversalSeries = [];
 
-    const validReversals = reversalMode !== 0 ? reversals.filter(r => r && r.price > 0) : [];
+    if (reversalMode === 1) {
+        const validReversals = reversals.filter(r => r && r.price > 0);
 
-    validReversals.forEach(rev => {
-        try {
-            const ls = mainChart.addLineSeries({ 
-                color: rev.color, 
-                lineWidth: rev.width || 1, 
-                lineStyle: rev.dash || 0, 
-                priceLineVisible: false, 
-                lastValueVisible: true, 
-                title: rev.label || '' 
-            });
-            
-            let lineData = [];
-
-            if (reversalMode === 1 && rev.history && rev.history.length > 0) {
-                let hData = rev.history.map(h => ({
-                    time: Math.floor(new Date(h.time).getTime() / 1000) + IST_OFFSET,
-                    value: Number(h.value)
-                })).sort((a,b) => a.time - b.time);
-
-                cdData.forEach(c => {
-                    let val = rev.price; 
-                    let found = false;
-                    for(let i = hData.length - 1; i >= 0; i--) {
-                        if (hData[i].time <= c.time) {
-                            val = hData[i].value;
-                            found = true; break;
-                        }
-                    }
-                    if (!found && hData.length > 0) val = hData[0].value;
-                    lineData.push({ time: c.time, value: val });
+        validReversals.forEach(rev => {
+            try {
+                const ls = mainChart.addLineSeries({ 
+                    color: rev.color, 
+                    lineWidth: rev.width || 1, 
+                    lineStyle: rev.dash || 0, 
+                    priceLineVisible: false, 
+                    lastValueVisible: true, 
+                    title: rev.label || '' 
                 });
-            } else if (reversalMode === 2 || reversalMode === 1) { 
-                cdData.forEach(c => {
-                    lineData.push({ time: c.time, value: Number(rev.price) });
-                });
+
+                // सिर्फ Straight Line: पूरे चार्ट पर एक fixed price value
+                const lineData = cdData.map(c => ({ time: c.time, value: Number(rev.price) }));
+
+                if (lineData.length > 0) { ls.setData(lineData); }
+                window._reversalSeries.push(ls);
+            } catch (e) {
+                console.warn("Reversal line error:", e.message);
             }
-
-            if(lineData.length > 0) { ls.setData(lineData); }
-            window._reversalSeries.push(ls);
-        } catch (e) {
-            console.warn("Reversal line error:", e.message);
-        }
-    });
+        });
+    }
 
     if (savedRange) mainChart.timeScale().setVisibleLogicalRange(savedRange);
     else mainChart.timeScale().fitContent();
@@ -243,20 +224,15 @@
   }
 
   function toggleReversalLines() {
-      reversalMode = (reversalMode + 1) % 3; 
+      reversalMode = reversalMode === 1 ? 0 : 1; // सिर्फ ON/OFF
       const btn = document.getElementById("reversal-toggle-btn");
       const label = document.getElementById("rv-label");
       
       if (reversalMode === 1) {
           btn.classList.add("btn-active");
-          btn.style.borderColor = "var(--green)";
-          btn.style.color = "var(--green)";
-          label.innerText = "📉 Rev: Moving";
-      } else if (reversalMode === 2) {
-          btn.classList.add("btn-active");
-          btn.style.borderColor = "var(--accent)"; 
+          btn.style.borderColor = "var(--accent)";
           btn.style.color = "var(--accent)";
-          label.innerText = "➖ Rev: Straight";
+          label.innerText = "➖ Rev: ON";
       } else {
           btn.classList.remove("btn-active");
           btn.style.borderColor = "var(--border)";
@@ -289,24 +265,37 @@
       });
   }
 
-  let autoRefreshTimer = null, countdownTimer = null, isAutoRefresh = false;
+  let autoRefreshTimer = null, isAutoRefresh = false;
   function toggleAutoRefresh() { isAutoRefresh ? stopAutoRefresh() : startAutoRefresh(); }
   function startAutoRefresh() {
-    isAutoRefresh = true; document.getElementById("auto-refresh-btn").classList.add("btn-active");
-    document.getElementById("countdown-bar").style.display = "block"; scheduleNext();
+    isAutoRefresh = true;
+    document.getElementById("auto-refresh-btn").classList.add("btn-active");
+    document.getElementById("ar-icon").innerText = "▶";
+    document.getElementById("countdown-bar").style.display = "block";
+    scheduleNext();
   }
   function stopAutoRefresh() {
-    isAutoRefresh = false; document.getElementById("auto-refresh-btn").classList.remove("btn-active");
-    document.getElementById("countdown-bar").style.display = "none"; clearTimeout(autoRefreshTimer); clearInterval(countdownTimer);
+    isAutoRefresh = false;
+    document.getElementById("auto-refresh-btn").classList.remove("btn-active");
+    document.getElementById("ar-icon").innerText = "⏸";
+    document.getElementById("countdown-bar").style.display = "none";
+    clearTimeout(autoRefreshTimer);
   }
   function scheduleNext() {
     if (!isAutoRefresh) return;
     const sec = parseInt(document.getElementById("refresh-interval").value);
     const fill = document.getElementById("countdown-fill");
-    fill.style.transition = "none"; fill.style.width = "100%";
+
+    // Countdown bar reset
+    fill.style.transition = "none";
+    fill.style.width = "100%";
     setTimeout(() => { fill.style.transition = `width ${sec}s linear`; fill.style.width = "0%"; }, 50);
+
     clearTimeout(autoRefreshTimer);
-    autoRefreshTimer = setTimeout(() => { loadChart(); scheduleNext(); }, sec * 1000);
+    autoRefreshTimer = setTimeout(() => {
+      scheduleNext(); // ✅ पहले अगला timer शुरू करो (loadChart की speed से independent)
+      loadChart();    // ✅ फिर data fetch करो (parallel — timer wait नहीं करेगा)
+    }, sec * 1000);
   }
 
   const intOpts = { minutes: [1,2,3,5,10,15,30,60], hours: [1,2,4], days: [1] };
@@ -322,9 +311,9 @@
     if(!sel.value) sel.selectedIndex = 0;
   }
   
-  // 🛡️ पेज लोड होते ही API से फ्रेश डेटा लाएं (ताकि क्रैश का कोई चांस न रहे)
-  updateIntervalOptions(); 
-  loadChart(); 
+  updateIntervalOptions();
+  loadChart();
+  startAutoRefresh(); // ✅ Page load होते ही auto-refresh शुरू
 </script>
 </body>
 </html>
