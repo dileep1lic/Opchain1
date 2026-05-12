@@ -32,6 +32,8 @@
             color: var(--text-primary);
             margin: 0;
             padding: 0;
+            height: 100vh;
+            overflow: hidden;
         }
 
         /* --- 2. NEW HEADER STYLES --- */
@@ -483,7 +485,7 @@
     <div id="drag-resizer" style="display: none;"></div>
 
     <div id="integrated-chart-container" style="width: 0%; display: none;">
-        <iframe id="mainChartFrame" class="integrated-chart-frame" src=""></iframe>
+        <iframe id="mainChartFrame" class="integrated-chart-frame" src="" scrolling="no" style="overflow: hidden;"></iframe>
     </div>
 </div>
 
@@ -674,7 +676,17 @@ function scrollToSpot() {
 function openChart(symbol, strike, type) {
     const modal = document.getElementById('chartModal');
     const iframe = document.getElementById('chartFrame');
-    let url = (type === 'oi') ? `/chart/view/oi/?symbol=${symbol}&strike=${strike}` : `/chart/view/coi/?symbol=${symbol}&strike=${strike}`;
+    
+    let url = "";
+    if (type === 'oi') {
+        url = `/chart/view/oi/?symbol=${symbol}&strike=${strike}`;
+    } else if (type === 'coi') {
+        url = `/chart/view/coi/?symbol=${symbol}&strike=${strike}`;
+    } else if (type === 'ltp') {
+        // यह आपके नए LTP चार्ट का URL जनरेट करेगा
+        url = `/chart/view/ltp/?symbol=${symbol}&strike=${strike}`; 
+    }
+    
     iframe.src = url;
     modal.style.display = 'flex';
 }
