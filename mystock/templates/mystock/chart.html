@@ -315,13 +315,16 @@
       }
     });
 
-    // Resize
-    window.addEventListener('resize', () => {
-      mainChart.applyOptions({
-        width:  container.clientWidth,
-        height: container.clientHeight,
-      });
-    });
+    // ✅ FIX: window.resize की जगह ResizeObserver —
+    // जब countdown-bar / refresh-status दिखते हैं तो chart-wrap की height बदलती है,
+    // window.resize उसे detect नहीं करता → time scale clip हो जाती थी
+    new ResizeObserver(entries => {
+      if (!mainChart) return;
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) {
+        mainChart.applyOptions({ width, height });
+      }
+    }).observe(container);
   }
 
   // ── ✅ Fix 1: Data UPDATE — chart rebuild नहीं होता ──────────
@@ -477,7 +480,11 @@
     const fromDate = document.getElementById('ctrl-from').value;
     const toDate   = document.getElementById('ctrl-to').value;
 
-    const url = `/api/candle/?symbol=${encodeURIComponent(symbol)}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}`;
+    // ✅ FIX: reversal param जोड़ा (loadChart से consistent)
+    const url = `/api/candle/?symbol=${encodeURIComponent(symbol)}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}&reversal=${reversalVisible ? 1 : 0}`;
+
+    // ✅ FIX: scheduleNext() पहले — fetch की speed से timer independent रहेगा
+    scheduleNext();
 
     fetch(url)
       .then(r => r.json())
@@ -487,9 +494,8 @@
             lastReversals = data.reversal_lines.filter(r => r && r.price > 0);
           updateChartData(data.candles, lastReversals);
         }
-        scheduleNext();
       })
-      .catch(() => scheduleNext());
+      .catch(err => console.warn('Silent refresh error:', err));
   }
 
   // ── Auto Refresh ──────────────────────────────────────────
