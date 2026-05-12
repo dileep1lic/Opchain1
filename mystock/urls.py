@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, reversal_chart_views
+from . import views
 from . import replay_views
 
 
@@ -59,7 +59,7 @@ urlpatterns = [
     # लाइव पेपर ट्रेड्स देखने के लिए नया URL:
     path('live-trades/', views.live_trades_view, name='live_trades'),
     path('api/dashboard-data/', views.dashboard_data_api, name='dashboard_data_api'),
-    
+
     # 👇 यह Skip Trade URL जोड़ें
     path('api/skip-trade/', views.skip_trade_api, name='skip_trade_api'),
     # 👇 यह Add Manual Trade URL जोड़ें
