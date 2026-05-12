@@ -1,245 +1,273 @@
+from django.test import TestCase
+
 import re
 from django.utils import timezone
+from django.core.cache import caches
+
 from .models import OptionChain, LiveSRData, PaperTrade
-from django.core.cache import cache
-from django.utils import timezone
-# ─── ACTIVE TRADE OVERRIDE FUNCTION ───
-# इसे मुख्य फंक्शन के बाहर (ऊपर) रखा गया है ताकि कोड साफ रहे
+
+
+# ========================================================
+# SMART CACHE OVERRIDE (FAILOVER MECHANISM)
+# ========================================================
+class SmartCache:
+    def get(self, key, default=None):
+        try:
+            val = caches['default'].get(key)
+            if val is not None:
+                return val
+        except Exception:
+            pass
+        try:
+            val = caches['db_cache'].get(key)
+            if val is not None:
+                return val
+        except Exception:
+            pass
+        return default
+
+    def set(self, key, value, timeout=None):
+        try:
+            caches['default'].set(key, value, timeout)
+        except Exception:
+            pass
+        try:
+            caches['db_cache'].set(key, value, timeout)
+        except Exception:
+            pass
+
+
+cache = SmartCache()
+
+
+# ==========================================
+# ACTIVE TRADE OVERRIDE HELPER
 # ==========================================
 def get_active_trade_data(symbol, selected_date):
-    """
-    अगर कोई ट्रेड OPEN है, तो उसकी एंट्री स्ट्राइक और टाइप (CALL/PUT) रिटर्न करेगा।
-    अगर कोई ट्रेड OPEN नहीं है, तो None रिटर्न करेगा।
-    """
-    open_trade = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date, result__in=["OPEN", "PENDING"]).first()
-    
+    open_trade = PaperTrade.objects.filter(
+        symbol=symbol,
+        trade_date=selected_date,
+        result__in=["OPEN", "PENDING"],
+    ).first()
     if open_trade and open_trade.entry_strike:
-        saved_entry_strike = float(open_trade.entry_strike)
-        ttype = open_trade.trade_type
-        return saved_entry_strike, ttype
-    
+        return float(open_trade.entry_strike), open_trade.trade_type
     return None, None
 
+
 def get_master_levels(symbol, selected_date=None):
-    """
-    पूरे प्रोजेक्ट का इकलौता मास्टर फंक्शन।
-    यह चार्ट, बॉट और डैशबोर्ड सभी को एक ही समान (Common) लेवल्स देगा।
-    """
     if selected_date is None:
         selected_date = timezone.now().date()
-        
-    step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
-    tolerance = 20.0 # रिपीट ट्रेड को इग्नोर करने के लिए टॉलरेंस पॉइंट्स
-    
-    # डिफ़ॉल्ट आउटपुट डिक्शनरी
+
+    step      = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+    tolerance = 20.0
+
     levels = {
         "R": {"strike": 0, "entry": None, "target": None, "sl": None, "status": ""},
-        "S": {"strike": 0, "entry": None, "target": None, "sl": None, "status": ""}
+        "S": {"strike": 0, "entry": None, "target": None, "sl": None, "status": ""},
     }
 
-    # 1. SR डेटा लाएं
-    sr = LiveSRData.objects.filter(Symbol__iexact=symbol, Time__date=selected_date).order_by('-Time').first()
+    sr = (
+        LiveSRData.objects
+        .filter(Symbol__iexact=symbol, Time__date=selected_date)
+        .order_by('-Time')
+        .first()
+    )
     if not sr:
         return levels
 
-    # हेल्पर: डेटाबेस से Reversal वैल्यू लाने के लिए
-    def get_rev_val1(strike, side):
-        row = OptionChain.objects.filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=strike).order_by('-Time').first()
-        if not row: return None
-        return float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
-    
-    # हेल्पर: डेटाबेस से Reversal वैल्यू का Average (SMA) लाने के लिए
-    def get_rev_val2(strike, side, period=1):
-        """
-        period=5 का मतलब है कि यह पिछले 5 डेटा पॉइंट्स का एवरेज निकालेगा।
-        आप इसे अपनी सुविधानुसार 3, 5 या 10 कर सकते हैं।
-        """
-        rows = OptionChain.objects.filter(
-            Symbol__iexact=symbol, 
-            Time__date=selected_date, 
-            Strike_Price=strike
-        ).order_by('-Time')[:period]
-        
-        if not rows: 
-            return None
-            
-        total_val = 0.0
-        valid_count = 0
-        
-        for row in rows:
-            # चेक करें कि CE चाहिए या PE
-            val = float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
-            
-            # सिर्फ तभी जोड़ें जब वैल्यू 0 से बड़ी और वैलिड हो
-            if val and val > 0:
-                total_val += val
-                valid_count += 1
-                
-        # एवरेज निकाल कर 2 डेसिमल तक राउंड करें
-        if valid_count > 0:
-            return round(total_val / valid_count, 2)
-        else:
-            return None
-
     def get_rev_val(strike, side, period=1):
-        """
-        period=5 का मतलब है कि यह पिछले 5 डेटा पॉइंट्स का एवरेज निकालेगा।
-        Hybrid Logic:
-        - अगर period=1 और आज की डेट है -> Cache से लाएगा (0 DB Queries, Super Fast)
-        - अगर period > 1 या पुरानी डेट है -> Database से लाएगा (Fallback)
-        """
-        # 1. 🟢 Cache Logic (सिर्फ आज के लेटेस्ट डेटा के लिए)
         today = timezone.now().date()
-        # मान लेते हैं selected_date और symbol आपके outer function से आ रहे हैं
-        if period == 1 and selected_date == today:
-            live_data = cache.get(f'live_nifty_data_{symbol.upper()}')
-            
-            if live_data:
-                # Cache (List of Dicts) में से वो row ढूंढें जिसका Strike मैच करता हो
-                for row in live_data:
-                    if row.get('Strike_Price') == strike:
-                        # CE या PE वैल्यू निकालें
-                        val = row.get('Reversl_Ce') if side == 'CE' else row.get('Reversl_Pe')
-                        
-                        if val is not None and float(val) > 0:
-                            return round(float(val), 2)
-                        return None # अगर वैल्यू 0 या None है
 
-        # 2. 🔴 Database Logic (SMA के लिए या पुरानी डेट के लिए)
-        rows = OptionChain.objects.filter(
-            Symbol__iexact=symbol, 
-            Time__date=selected_date, 
-            Strike_Price=strike
-        ).order_by('-Time')[:period]
-        
-        if not rows: 
-            return None
-            
-        total_val = 0.0
-        valid_count = 0
-        
+        if selected_date == today:
+            history_key  = f"moving_history_all_{symbol.upper()}"
+            history_data = cache.get(history_key)
+            strike_float = float(strike)
+
+            if history_data and strike_float in history_data:
+                full_hist    = history_data[strike_float].get('ce_hist' if side == 'CE' else 'pe_hist', [])
+                last_n_ticks = full_hist[-period:]
+                if last_n_ticks:
+                    total_val, valid_count = 0.0, 0
+                    for tick in last_n_ticks:
+                        val = float(tick.get('value', 0))
+                        if val > 0:
+                            total_val  += val
+                            valid_count += 1
+                    if valid_count > 0:
+                        return round(total_val / valid_count, 2)
+
+        rows = (
+            OptionChain.objects
+            .filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=strike)
+            .order_by('-Time')[:period]
+        )
+        print(f"DB Query for {symbol} {strike} {side} on {selected_date}")
+
+        total_val, valid_count = 0.0, 0
         for row in rows:
             val = float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
             if val and val > 0:
-                total_val += val
+                total_val  += val
                 valid_count += 1
-                
-        if valid_count > 0:
-            return round(total_val / valid_count, 2)
-        else:
-            return None
-    
+
+        return round(total_val / valid_count, 2) if valid_count > 0 else None
+
     # ==========================================
-    # ─── RESISTANCE LOGIC (CALL SIDE) ───
+    # PARSE SR STATUS
     # ==========================================
     res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
-    res_base = float(sr.resistance_strike) if sr.resistance_strike else 0
-    m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
+    res_base   = float(sr.resistance_strike) if sr.resistance_strike else 0
+    m_res      = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
     res_target = float(m_res.group(1)) if m_res else res_base
 
-    # आपकी फिक्स की गई शिफ्टिंग लॉजिक
-    if "SHIFTED WTT" in res_status: eff_res = res_base + step
-    elif "SHIFTED WTB" in res_status: eff_res = res_base + step
-    elif "WTT" in res_status: eff_res = res_target - step
-    elif "WTB" in res_status: eff_res = res_target + step
-    elif "STRONG" in res_status: eff_res = res_base + step
+    sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
+    sup_base   = float(sr.supprt_strike) if sr.supprt_strike else 0
+    m_sup      = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
+    sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
+    def parse_status_type(status: str) -> str:
+        """
+        "Support (Vol) Shifted WTT 24400" → "SHIFTED WTT"
+        "Support (Vol) WTB 24300"         → "WTB"
+        "Strong Support"                  → "STRONG"
+        """
+        s = status.upper()
+        if "SHIFTED" in s and "WTT" in s: return "SHIFTED WTT"
+        if "SHIFTED" in s and "WTB" in s: return "SHIFTED WTB"
+        if "WTT" in s:                    return "WTT"
+        if "WTB" in s:                    return "WTB"
+        if "STRONG" in s:                 return "STRONG"
+        return ""
+
+    # Parse करो
+    res_type = parse_status_type(res_status)
+    sup_type = parse_status_type(sup_status)
+
+    # Number निकालो (Regex अब सिर्फ number के लिए)
+    m_res = re.search(r'(\d{4,6})', res_status)
+    m_sup = re.search(r'(\d{4,6})', sup_status)
+    res_target = float(m_res.group(1)) if m_res else res_base
+    sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
+    # ==========================================
+    # RESISTANCE (PUT Trade के लिए)
+    # ==========================================
+    if res_type == "SHIFTED WTT": eff_res = res_base + step
+    elif res_type == "SHIFTED WTB" : eff_res = res_base + step
+    elif res_type == "WTT" : eff_res = res_target - step
+    elif res_type == "WTB" : eff_res = res_target + step
+    elif res_type == "STRONG" : eff_res = res_base + step
+     
     else: eff_res = res_base + step
 
-   # 👇 1. नया रेजिस्टेंस SL शिफ्टिंग लॉजिक 
-    # चेक करें कि क्या आखिरी PUT ट्रेड में इसी स्ट्राइक पर SL लगा था?
-    last_put = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date, trade_type='PUT').exclude(result='OPEN').order_by('-exit_time').first()
-    
-    if last_put and last_put.result == 'SL' and last_put.entry_strike == eff_res:
-        eff_res = eff_res + step # रेजिस्टेंस को एक स्ट्राइक ऊपर खिसका दें
-        res_status = res_status + " (POST-SL SHIFT)"
- 
-    # 👇 2. AVOID REPEAT लॉजिक (नया)
-    r_entry_val = get_rev_val(eff_res, 'CE')
-    if r_entry_val:
-        # चेक करें कि क्या इस भाव के आस-पास पहले ही PUT ट्रेड हो चुका है?
-        r_already_traded = PaperTrade.objects.filter(
-            symbol=symbol, trade_date=selected_date, trade_type='PUT',
-            trigger_price__gte=r_entry_val + tolerance, 
-            trigger_price__lte=r_entry_val - tolerance
-        ).exists()
-        
-        if r_already_traded:
-            eff_res = eff_res + step # रेजिस्टेंस को एक स्ट्राइक ऊपर खिसका दें
-            res_status += " (REPEAT SHIFT)"
+    # ✅ FIX Bug 2: float() cast — Decimal vs float mismatch fix
+    last_put   = (
+        PaperTrade.objects
+        .filter(symbol=symbol, trade_date=selected_date, trade_type='PUT')
+        .exclude(result='OPEN')
+        .order_by('-exit_time')
+        .first()
+    )
+    is_r_paused = (
+        last_put is not None
+        and last_put.result == 'SL'
+        and float(last_put.entry_strike or 0) == float(eff_res)   # ← Fix
+    )
+    if is_r_paused:
+        res_status += " SL HIT (PAUSED)"
+
+    # ✅ FIX Bug 5: get_rev_val सिर्फ एक बार — result reuse
+    r_entry_val = None
+    # Repeat Shift सिर्फ तब जब SL नहीं लगा
+    if not is_r_paused:
+        r_entry_val = get_rev_val(eff_res, 'CE')
+        if r_entry_val:                              # ← सिर्फ एक check
+            r_already_traded = PaperTrade.objects.filter(
+                symbol=symbol, trade_date=selected_date, trade_type='PUT',
+                trigger_price__gte=r_entry_val - tolerance,
+                trigger_price__lte=r_entry_val + tolerance,
+            ).exists()
+            if r_already_traded:                     # ← r_entry_val के अंदर
+                # ✅ Shift से पहले check: नई shifted strike पर भी SL था?
+                new_eff_res = eff_res + step
+                last_put_on_new = PaperTrade.objects.filter(
+                    symbol=symbol, trade_date=selected_date,
+                    trade_type='PUT', result='SL',
+                    entry_strike=new_eff_res
+                ).exists()
+                
+                if last_put_on_new:
+                    # नई strike पर भी SL था — और shift मत करो
+                    is_r_paused = True
+                    res_status += " SL HIT SHIFTED (PAUSED)"
+                else:
+                    eff_res = new_eff_res
+                    res_status += " (REPEAT SHIFT)"
+                    r_entry_val = get_rev_val(eff_res, 'CE')
 
     levels["R"]["status"] = res_status
     levels["R"]["strike"] = eff_res
-    levels["R"]["entry"] = get_rev_val(eff_res, 'CE')
-    levels["R"]["target"] = get_rev_val(eff_res - step, 'CE') # PUT का टारगेट नीचे होता है
-    levels["R"]["sl"] = get_rev_val(eff_res + step, 'CE')     # PUT का SL ऊपर होता है
+    levels["R"]["entry"]  = r_entry_val                          # ← reuse, no duplicate call
+    levels["R"]["target"] = get_rev_val(eff_res - step, 'CE')
+    levels["R"]["sl"]     = get_rev_val(eff_res + step, 'CE')
 
     # ==========================================
-    # ─── SUPPORT LOGIC (PUT SIDE) ───
+    # SUPPORT (CALL Trade के लिए)
     # ==========================================
-    sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
-    sup_base = float(sr.supprt_strike) if sr.supprt_strike else 0
-    m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-    sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-    # आपकी फिक्स की गई शिफ्टिंग लॉजिक
-    if "SHIFTED WTT" in sup_status: eff_sup = sup_base - step
-    elif "SHIFTED WTB" in sup_status: eff_sup = sup_base - step
-    elif "WTT" in sup_status: eff_sup = sup_target - step
-    elif "WTB" in sup_status: eff_sup = sup_target + step
-    elif "STRONG" in sup_status: eff_sup = sup_base - step
+    if      sup_type =="SHIFTED WTT"    : eff_sup = sup_base - step
+    elif    sup_type == "SHIFTED WTB"   : eff_sup = sup_base - step
+    elif    sup_type == "WTT"           : eff_sup = sup_target - step
+    elif    sup_type == "WTB"           : eff_sup = sup_target + step
+    elif    sup_type == "STRONG"        : eff_sup = sup_base - step
     else: eff_sup = sup_base - step
 
-    # 👇 3. नया सपोर्ट SL शिफ्टिंग लॉजिक 
-    # चेक करें कि क्या आखिरी CALL ट्रेड में इसी स्ट्राइक पर SL लगा था?
-    last_call = PaperTrade.objects.filter(symbol=symbol, trade_date=selected_date, trade_type='CALL').exclude(result='OPEN').order_by('-exit_time').first()
-    
-    if last_call and last_call.result == 'SL' and last_call.entry_strike == eff_sup:
-        eff_sup = eff_sup - step # सपोर्ट को एक स्ट्राइक नीचे खिसका दें
-        sup_status = sup_status + " (POST-SL SHIFT)"
+    # ✅ FIX Bug 2: float() cast
+    last_call   = (
+        PaperTrade.objects
+        .filter(symbol=symbol, trade_date=selected_date, trade_type='CALL')
+        .exclude(result='OPEN')
+        .order_by('-exit_time')
+        .first()
+    )
+    is_s_paused = (
+        last_call is not None
+        and last_call.result == 'SL'
+        and float(last_call.entry_strike or 0) == float(eff_sup)  # ← Fix
+    )
+    if is_s_paused:
+        sup_status += " SL HIT (PAUSED)"
 
-    # 👇 4. AVOID REPEAT लॉजिक (नया)
-    s_entry_val = get_rev_val(eff_sup, 'PE')
-    if s_entry_val:
-        # चेक करें कि क्या इस भाव के आस-पास पहले ही CALL ट्रेड हो चुका है?
-        s_already_traded = PaperTrade.objects.filter(
-            symbol=symbol, trade_date=selected_date, trade_type='CALL',
-            trigger_price__gte=s_entry_val - tolerance, 
-            trigger_price__lte=s_entry_val + tolerance
-        ).exists()
-        
-        if s_already_traded:
-            eff_sup = eff_sup - step # सपोर्ट को एक स्ट्राइक नीचे खिसका दें
-            sup_status += " (REPEAT SHIFT)"
+    # ✅ FIX Bug 5: get_rev_val सिर्फ एक बार
+    s_entry_val = None
+    if not is_s_paused:
+        s_entry_val = get_rev_val(eff_sup, 'PE')
+        if s_entry_val:
+            s_already_traded = PaperTrade.objects.filter(
+                symbol=symbol, trade_date=selected_date, trade_type='CALL',
+                trigger_price__gte=s_entry_val - tolerance,
+                trigger_price__lte=s_entry_val + tolerance,
+            ).exists()
+            if s_already_traded:
+                # ✅ Shift से पहले check: नई shifted strike पर भी SL था?
+                new_eff_sup = eff_sup - step
+                last_call_on_new = PaperTrade.objects.filter(
+                    symbol=symbol, trade_date=selected_date,
+                    trade_type='CALL', result='SL',
+                    entry_strike=new_eff_sup
+                ).exists()
+                if last_call_on_new:
+                    # नई strike पर भी SL था — और shift मत करो
+                    is_s_paused = True
+                    sup_status += " SL HIT SHIFTED (PAUSED)"
+                else:  
+                    eff_sup     = eff_sup - step
+                    sup_status += " (REPEAT SHIFT)"
+                    s_entry_val = get_rev_val(eff_sup, 'PE')   # shift के बाद नई strike
 
     levels["S"]["status"] = sup_status
     levels["S"]["strike"] = eff_sup
-    levels["S"]["entry"] = get_rev_val(eff_sup, 'PE')
-    levels["S"]["target"] = get_rev_val(eff_sup + step, 'PE') # CALL का टारगेट ऊपर होता है
-    levels["S"]["sl"] = get_rev_val(eff_sup - step, 'PE')     # CALL का SL नीचे होता है
-
-    # ==========================================
-    # ─── 🚀 ACTIVE TRADE OVERRIDE EXECUTION ───
-    # ==========================================
-    # यह चेक करेगा कि डेटाबेस में कोई ट्रेड चल रहा है या नहीं
-    saved_entry_strike, ttype = get_active_trade_data(symbol, selected_date)
-
-    if saved_entry_strike is not None:
-        if ttype == 'CALL':
-            # अगर CALL ट्रेड OPEN है, तो पूरा का पूरा 'S' ब्लॉक डेटाबेस वाली स्ट्राइक पर लॉक कर दें
-            # levels["S"]["strike"] = saved_entry_strike
-            # levels["S"]["entry"] = get_rev_val(saved_entry_strike, 'PE')
-            levels["S"]["target"] = get_rev_val(saved_entry_strike + step, 'PE')
-            levels["S"]["sl"] = get_rev_val(saved_entry_strike - step, 'PE')
-            levels["S"]["status"] = f"{sup_status or ''} ACTIVE CALL TRADE [DB LOCKED] {saved_entry_strike}"
-            
-        elif ttype == 'PUT':
-            # अगर PUT ट्रेड OPEN है, तो पूरा का पूरा 'R' ब्लॉक डेटाबेस वाली स्ट्राइक पर लॉक कर दें
-            # levels["R"]["strike"] = saved_entry_strike
-            # levels["R"]["entry"] = get_rev_val(saved_entry_strike, 'CE')
-            levels["R"]["target"] = get_rev_val(saved_entry_strike - step, 'CE')
-            levels["R"]["sl"] = get_rev_val(saved_entry_strike + step, 'CE')
-            levels["R"]["status"] = f"{res_status or ''} ACTIVE PUT TRADE [DB LOCKED] {saved_entry_strike}"
+    levels["S"]["entry"]  = s_entry_val                          # ← reuse
+    levels["S"]["target"] = get_rev_val(eff_sup + step, 'PE')
+    levels["S"]["sl"]     = get_rev_val(eff_sup - step, 'PE')
 
     return levels
-
-    
