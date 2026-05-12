@@ -1,0 +1,80 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Delete Confirm</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0;
+         min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+
+  .card { background: #1a1f2e; border-radius: 16px; padding: 40px 36px;
+          max-width: 460px; width: 100%; text-align: center;
+          box-shadow: 0 8px 36px rgba(0,0,0,.55); border: 1px solid #2d3748; }
+
+  .icon { font-size: 3.2rem; margin-bottom: 16px; }
+  h2   { font-size: 1.25rem; font-weight: 700; margin-bottom: 8px; }
+  .sub { color: #64748b; font-size: .88rem; margin-bottom: 24px; }
+
+  .detail { background: #0f1117; border: 1px solid #2d3748; border-radius: 10px;
+            padding: 16px; margin-bottom: 28px; text-align: left; }
+  .detail-row { display: flex; justify-content: space-between; padding: 5px 0;
+                font-size: .85rem; border-bottom: 1px solid #1e2742; }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-row .lbl { color: #64748b; }
+  .detail-row .val { color: #e2e8f0; font-weight: 600; }
+
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: .75rem; font-weight: 700; }
+  .t-call { background:#064e3b; color:#34d399; }
+  .t-put  { background:#450a0a; color:#f87171; }
+
+  .actions { display: flex; gap: 12px; justify-content: center; }
+  .btn-del    { background: #7f1d1d; color: #fca5a5; border: none; border-radius: 8px;
+                padding: 11px 24px; font-weight: 700; cursor: pointer; font-size: .9rem; }
+  .btn-del:hover { background: #991b1b; }
+  .btn-cancel { background: transparent; color: #94a3b8; border: 1px solid #3a4a61;
+                border-radius: 8px; padding: 11px 20px; text-decoration: none; font-size: .9rem; }
+  .btn-cancel:hover { background: #1e2742; color: #e2e8f0; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">🗑️</div>
+  <h2>क्या आप delete करना चाहते हैं?</h2>
+  <p class="sub">यह action वापस नहीं होगी।</p>
+
+  <div class="detail">
+    <div class="detail-row">
+      <span class="lbl">Date</span>
+      <span class="val">{{ entry.date }}</span>
+    </div>
+    <div class="detail-row">
+      <span class="lbl">Trade Type</span>
+      <span class="val">
+        <span class="badge t-{{ entry.trade_type }}">{{ entry.get_trade_type_display }}</span>
+      </span>
+    </div>
+    <div class="detail-row">
+      <span class="lbl">Trade Level</span>
+      <span class="val">{{ entry.get_trade_level_display }}</span>
+    </div>
+    <div class="detail-row">
+      <span class="lbl">R. Status</span>
+      <span class="val">{{ entry.get_resistance_status_display }}</span>
+    </div>
+    <div class="detail-row">
+      <span class="lbl">S. Status</span>
+      <span class="val">{{ entry.get_support_status_display }}</span>
+    </div>
+  </div>
+
+  <form method="post" class="actions">
+    {% csrf_token %}
+    <a href="{% url 'journal_list' %}" class="btn-cancel">← Cancel</a>
+    <button type="submit" class="btn-del">हाँ, Delete करें</button>
+  </form>
+</div>
+</body>
+</html>
