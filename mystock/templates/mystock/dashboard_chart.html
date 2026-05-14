@@ -53,6 +53,21 @@
     }
     .ohlc-lbl { color: var(--muted); font-size: 11px; margin-left: 6px;}
     .ohlc-val { font-weight: bold; margin-right: 4px; }
+
+    /* ─── TOAST NOTIFICATION ─── */
+    #toast-container {
+      position: fixed; bottom: 20px; right: 20px;
+      z-index: 9999; display: flex; flex-direction: column; gap: 10px;
+    }
+    .toast {
+      background: var(--surface);
+      border-left: 4px solid var(--accent);
+      color: #fff; padding: 12px 20px; border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      font-family: var(--font); font-size: 13px;
+      animation: slideIn 0.3s ease-out forwards;
+    }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   </style>
 </head>
 <body>
@@ -82,6 +97,10 @@
         <button id="reversal-toggle-btn" class="btn-active" onclick="toggleReversalLines()" title="Toggle Reversal Lines">
             <span id="rv-label">➖ Rev: ON</span>
         </button>
+
+        <button id="alert-toggle-btn" onclick="toggleAlerts()" title="Toggle Sound Alerts">
+            <span id="alert-label">🔕 Alerts OFF</span>
+        </button>
     </div>
 </div>
 
@@ -100,6 +119,82 @@
   let savedRange = null;
   let lastCandles = [];
   let lastReversals = [];
+
+  // ══════════════════════════════════════════════════════
+  //  SOUND ALERTS & NOTIFICATIONS LOGIC
+  // ══════════════════════════════════════════════════════
+  let alertsEnabled = false;
+  let previousSpotPrice = null;
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function toggleAlerts() {
+    alertsEnabled = !alertsEnabled;
+    const btn = document.getElementById('alert-toggle-btn');
+    btn.classList.toggle('btn-active', alertsEnabled);
+    
+    if (alertsEnabled) {
+      document.getElementById('alert-label').textContent = '🔔 Alerts ON';
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      showToast("✅ Sound Alerts Activated!");
+    } else {
+      document.getElementById('alert-label').textContent = '🔕 Alerts OFF';
+    }
+  }
+
+  function playBeep() {
+    if (!alertsEnabled) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime); 
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);     
+    
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.4); 
+  }
+
+  function showToast(msg) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    container.appendChild(toast);
+    
+    setTimeout(() => toast.remove(), 5000); 
+  }
+
+  function checkReversalAlerts(currentPrice, reversals) {
+    if (!alertsEnabled || !reversals || reversals.length === 0) return;
+
+    if (previousSpotPrice !== null) {
+      reversals.forEach(rev => {
+        const linePrice = parseFloat(rev.price);
+        if (linePrice > 0) {
+          const crossedUp   = previousSpotPrice < linePrice && currentPrice >= linePrice;
+          const crossedDown = previousSpotPrice > linePrice && currentPrice <= linePrice;
+
+          if (crossedUp || crossedDown) {
+            playBeep();
+            const direction = crossedUp ? "↗ Crossed UP" : "↘ Crossed DOWN";
+            showToast(`🚨 ALERT: Price ${direction} ${rev.label || 'Level'} at ${linePrice}`);
+          }
+        }
+      });
+    }
+    previousSpotPrice = currentPrice;
+  }
+  // ══════════════════════════════════════════════════════
 
   function buildCharts(candles, reversals = []) {
     lastCandles = candles;
@@ -174,6 +269,8 @@
 
     if (cdData.length > 0) {
         updateLegend(cdData[cdData.length - 1]);
+        // Alert Check Call
+        checkReversalAlerts(cdData[cdData.length - 1].close, reversals);
     }
 
     mainChart.subscribeCrosshairMove(param => {
@@ -182,7 +279,6 @@
             if (data) { updateLegend(data); }
         }
     });
-    // ──────────────────────
 
     // ── Reversal Lines: सिर्फ Straight Lines ──
     if (window._reversalSeries) {
@@ -204,9 +300,7 @@
                     title: rev.label || '' 
                 });
 
-                // सिर्फ Straight Line: पूरे चार्ट पर एक fixed price value
                 const lineData = cdData.map(c => ({ time: c.time, value: Number(rev.price) }));
-
                 if (lineData.length > 0) { ls.setData(lineData); }
                 window._reversalSeries.push(ls);
             } catch (e) {
@@ -224,7 +318,7 @@
   }
 
   function toggleReversalLines() {
-      reversalMode = reversalMode === 1 ? 0 : 1; // सिर्फ ON/OFF
+      reversalMode = reversalMode === 1 ? 0 : 1; 
       const btn = document.getElementById("reversal-toggle-btn");
       const label = document.getElementById("rv-label");
       
@@ -286,15 +380,14 @@
     const sec = parseInt(document.getElementById("refresh-interval").value);
     const fill = document.getElementById("countdown-fill");
 
-    // Countdown bar reset
     fill.style.transition = "none";
     fill.style.width = "100%";
     setTimeout(() => { fill.style.transition = `width ${sec}s linear`; fill.style.width = "0%"; }, 50);
 
     clearTimeout(autoRefreshTimer);
     autoRefreshTimer = setTimeout(() => {
-      scheduleNext(); // ✅ पहले अगला timer शुरू करो (loadChart की speed से independent)
-      loadChart();    // ✅ फिर data fetch करो (parallel — timer wait नहीं करेगा)
+      scheduleNext(); 
+      loadChart();    
     }, sec * 1000);
   }
 
@@ -311,9 +404,25 @@
     if(!sel.value) sel.selectedIndex = 0;
   }
   
+  // अगर Django से date नहीं आई है, तो JS से आज की डेट सेट करें
+  function setDefaultDates() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+    
+    let fromEl = document.getElementById('ctrl-from');
+    let toEl = document.getElementById('ctrl-to');
+    
+    if (!fromEl.value || fromEl.value === 'None') fromEl.value = todayStr;
+    if (!toEl.value || toEl.value === 'None') toEl.value = todayStr;
+  }
+
+  setDefaultDates();
   updateIntervalOptions();
   loadChart();
-  startAutoRefresh(); // ✅ Page load होते ही auto-refresh शुरू
+  startAutoRefresh(); 
 </script>
 </body>
 </html>
