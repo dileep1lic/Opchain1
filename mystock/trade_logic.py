@@ -3,7 +3,7 @@ from django.test import TestCase
 import re
 from django.utils import timezone
 from django.core.cache import caches
-
+from django.db.models import Q
 from .models import OptionChain, LiveSRData, PaperTrade
 
 
@@ -59,11 +59,11 @@ def get_master_levels(symbol, selected_date=None):
         selected_date = timezone.now().date()
 
     step      = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
-    tolerance = 20.0
+    tolerance = 30.0
 
     levels = {
-        "R": {"strike": 0, "entry": None, "target": None, "sl": None, "status": ""},
-        "S": {"strike": 0, "entry": None, "target": None, "sl": None, "status": ""},
+        "R": {"strike": 0, "entry": None, "target": None, "sl": None, "status": "", "tag": "R"},
+        "S": {"strike": 0, "entry": None, "target": None, "sl": None, "status": "", "tag": "S"},
     }
 
     sr = (
@@ -168,13 +168,28 @@ def get_master_levels(symbol, selected_date=None):
         .order_by('-exit_time')
         .first()
     )
+
     is_r_paused = (
         last_put is not None
         and last_put.result == 'SL'
-        and float(last_put.entry_strike or 0) == float(eff_res)   # ← Fix
+        and (
+            float(last_put.entry_strike or 0) == float(eff_res) 
+            or float((last_put.entry_strike or 0) + step) == float(eff_res)
+        )
     )
     if is_r_paused:
-        res_status += " SL HIT (PAUSED)"
+        # 1. पता करें कि पिछली एंट्री कहाँ हुई थी? (उदा: 22000)
+        last_entry_strike = float(last_put.entry_strike or 0)
+        
+        # 2. असली SL कहाँ हिट हुआ था? (Entry से 1 step ऊपर, उदा: 22050)
+        actual_sl_strike = last_entry_strike + step
+        
+        # 3. नया सुरक्षित रेजिस्टेंस इस SL वाली स्ट्राइक से भी 1 step ऊपर होगा (उदा: 22100)
+        new_safe_res = actual_sl_strike + step
+        
+        eff_res = new_safe_res  # हमारा नया रेजिस्टेंस अब यह है
+        is_r_paused = False     # बॉट को अन-पॉज़ (Unpause) कर दें
+        res_status += f" (FORCED SHIFT TO {eff_res})"
 
     # ✅ FIX Bug 5: get_rev_val सिर्फ एक बार — result reuse
     r_entry_val = None
@@ -205,11 +220,66 @@ def get_master_levels(symbol, selected_date=None):
                     res_status += " (REPEAT SHIFT)"
                     r_entry_val = get_rev_val(eff_res, 'CE')
 
+    # न्यू टेस्टिंग===============
+    # 🟢 सबसे पहले मेन (API वाले) रेजिस्टेंस को याद कर लो
+    original_eff_res = eff_res  
+    
+    # ── 1. पॉज़ चेक ──
+    is_r_paused = (
+        last_put is not None
+        and last_put.result == 'SL'
+        and (
+            float(last_put.entry_strike or 0) == float(eff_res) 
+            or float((last_put.entry_strike or 0) + step) == float(eff_res)
+        )
+    )
+
+    # ── 2. Forced Shift (यहाँ eff_res बदल सकता है, लेकिन original_eff_res 22000 ही रहेगा) ──
+    if is_r_paused:
+        last_entry_strike = float(last_put.entry_strike or 0)
+        actual_sl_strike = last_entry_strike + step
+        new_safe_res = actual_sl_strike + step
+        
+        eff_res = new_safe_res  # eff_res बदल गया
+        is_r_paused = False     
+        res_status += f" (FORCED SHIFT TO {eff_res})"
+
+    # ── 3. Repeat Shift और Loop ──
+    r_entry_val = None
+    if not is_r_paused:
+        r_entry_val = get_rev_val(eff_res, 'CE')
+        
+        while r_entry_val: 
+            # 🟢 टैग का फैसला: क्या मौजूदा eff_res, असली original_eff_res के बराबर है?
+            current_tag = 'R' if eff_res == original_eff_res else 'R_SHIFTED'
+            
+            r_already_traded = PaperTrade.objects.filter(
+                symbol=symbol, trade_date=selected_date, trade_type='PUT',
+                trigger_level=current_tag,  # 👈 सिर्फ इस टैग के ट्रेड चेक करेगा
+                trigger_price__gte=r_entry_val - tolerance,
+                trigger_price__lte=r_entry_val + tolerance,
+            ).exists()
+            
+            is_dangerous_level = PaperTrade.objects.filter(
+                Q(entry_strike=eff_res) | Q(entry_strike=eff_res - step), 
+                symbol=symbol, trade_date=selected_date,
+                trade_type='PUT', result='SL'
+            ).exists()
+            
+            if r_already_traded or is_dangerous_level:
+                eff_res = eff_res + step
+                res_status += " (SHIFTED UP)"
+                r_entry_val = get_rev_val(eff_res, 'CE') 
+            else:
+                break
+    # end testing================
+
     levels["R"]["status"] = res_status
     levels["R"]["strike"] = eff_res
     levels["R"]["entry"]  = r_entry_val                          # ← reuse, no duplicate call
     levels["R"]["target"] = get_rev_val(eff_res - step, 'CE')
     levels["R"]["sl"]     = get_rev_val(eff_res + step, 'CE')
+    levels["R"]["tag"]    = 'R' if eff_res == original_eff_res else 'R_SHIFTED'
 
     # ==========================================
     # SUPPORT (CALL Trade के लिए)
@@ -229,45 +299,126 @@ def get_master_levels(symbol, selected_date=None):
         .order_by('-exit_time')
         .first()
     )
+
+    # is_s_paused = (
+    #     last_call is not None
+    #     and last_call.result == 'SL'
+    #     and (
+    #         float(last_call.entry_strike or 0) == float(eff_sup) 
+    #         or float((last_call.entry_strike or 0) - step) == float(eff_sup)
+    #     )
+    # )
+    # # ── 2. Forced Shift Logic (अगर सपोर्ट पर SL कटा है, तो नीचे शिफ्ट हो जाओ) ──
+    # if is_s_paused:
+    #     # 1. पता करें कि पिछली एंट्री कहाँ हुई थी? (उदा: 22000)
+    #     last_entry_strike = float(last_call.entry_strike or 0)
+        
+    #     # 2. असली SL कहाँ हिट हुआ था? (Entry से 1 step नीचे, उदा: 21950)
+    #     actual_sl_strike = last_entry_strike - step
+        
+    #     # 3. नया सुरक्षित सपोर्ट इस SL वाली स्ट्राइक से भी 1 step नीचे होगा (उदा: 21900)
+    #     new_safe_sup = actual_sl_strike - step
+        
+    #     eff_sup = new_safe_sup  # हमारा नया सपोर्ट अब यह है
+    #     is_s_paused = False     # बॉट को अन-पॉज़ (Unpause) कर दें
+    #     sup_status += f" (FORCED SHIFT TO {eff_sup})"
+
+    # # ✅ FIX Bug 5: get_rev_val सिर्फ एक बार
+    # s_entry_val = None
+    # if not is_s_paused:
+    #     s_entry_val = get_rev_val(eff_sup, 'PE')
+    #     if s_entry_val:
+    #         s_already_traded = PaperTrade.objects.filter(
+    #             symbol=symbol, trade_date=selected_date, trade_type='CALL',
+    #             trigger_price__gte=s_entry_val - tolerance,
+    #             trigger_price__lte=s_entry_val + tolerance,
+    #         ).exists()
+    #         if s_already_traded:
+    #             # ✅ Shift से पहले check: नई shifted strike पर भी SL था?
+    #             new_eff_sup = eff_sup - step
+    #             last_call_on_new = PaperTrade.objects.filter(
+    #                 symbol=symbol, trade_date=selected_date,
+    #                 trade_type='CALL', result='SL',
+    #                 entry_strike=new_eff_sup
+    #             ).exists()
+    #             if last_call_on_new:
+    #                 # नई strike पर भी SL था — और shift मत करो
+    #                 is_s_paused = True
+    #                 sup_status += " SL HIT SHIFTED (PAUSED)"
+    #             else:  
+    #                 eff_sup     = eff_sup - step
+    #                 sup_status += " (REPEAT SHIFT)"
+    #                 s_entry_val = get_rev_val(eff_sup, 'PE')   # shift के बाद नई strike
+
+    # न्यू टेस्टिंग===============
+    # 🟢 1. लूप शुरू होने से पहले असली (Main) सपोर्ट को याद रखें
+    original_eff_sup = eff_sup  
+    
+    # ── 1. पॉज़ चेक (Pause Check) ──
     is_s_paused = (
         last_call is not None
         and last_call.result == 'SL'
-        and float(last_call.entry_strike or 0) == float(eff_sup)  # ← Fix
+        and (
+            float(last_call.entry_strike or 0) == float(eff_sup) 
+            or float((last_call.entry_strike or 0) - step) == float(eff_sup)
+        )
     )
-    if is_s_paused:
-        sup_status += " SL HIT (PAUSED)"
 
-    # ✅ FIX Bug 5: get_rev_val सिर्फ एक बार
+    # ── 2. Forced Shift Logic (अगर सपोर्ट पर SL कटा है, तो नीचे शिफ्ट हो जाओ) ──
+    if is_s_paused:
+        # 1. पता करें कि पिछली एंट्री कहाँ हुई थी? (उदा: 22000)
+        last_entry_strike = float(last_call.entry_strike or 0)
+        
+        # 2. असली SL कहाँ हिट हुआ था? (Entry से 1 step नीचे, उदा: 21950)
+        actual_sl_strike = last_entry_strike - step
+        
+        # 3. नया सुरक्षित सपोर्ट इस SL वाली स्ट्राइक से भी 1 step नीचे होगा (उदा: 21900)
+        new_safe_sup = actual_sl_strike - step
+        
+        eff_sup = new_safe_sup  # हमारा नया सपोर्ट अब यह है
+        is_s_paused = False     # बॉट को अन-पॉज़ (Unpause) कर दें
+        sup_status += f" (FORCED SHIFT TO {eff_sup})"
+
+    # ── 3. Repeat Shift और 'Skip Bad Level' Logic (while लूप के साथ) ──
     s_entry_val = None
     if not is_s_paused:
-        s_entry_val = get_rev_val(eff_sup, 'PE')
-        if s_entry_val:
+        s_entry_val = get_rev_val(eff_sup, 'PE')  # CALL की एंट्री PE के रिवर्सल से मिलती है
+        
+        while s_entry_val: 
+            # 🟢 4. तय करें कि यह मेन लेवल है या शिफ्टेड? (Context Tag)
+            current_tag = 'S' if eff_sup == original_eff_sup else 'S_SHIFTED'
+            
+            # चेक: क्या *इस टैग* के साथ यहाँ पहले ट्रेड हुआ है?
             s_already_traded = PaperTrade.objects.filter(
                 symbol=symbol, trade_date=selected_date, trade_type='CALL',
+                trigger_level=current_tag,  # 👈 सिर्फ मैचिंग टैग को देखेगा
                 trigger_price__gte=s_entry_val - tolerance,
                 trigger_price__lte=s_entry_val + tolerance,
             ).exists()
-            if s_already_traded:
-                # ✅ Shift से पहले check: नई shifted strike पर भी SL था?
-                new_eff_sup = eff_sup - step
-                last_call_on_new = PaperTrade.objects.filter(
-                    symbol=symbol, trade_date=selected_date,
-                    trade_type='CALL', result='SL',
-                    entry_strike=new_eff_sup
-                ).exists()
-                if last_call_on_new:
-                    # नई strike पर भी SL था — और shift मत करो
-                    is_s_paused = True
-                    sup_status += " SL HIT SHIFTED (PAUSED)"
-                else:  
-                    eff_sup     = eff_sup - step
-                    sup_status += " (REPEAT SHIFT)"
-                    s_entry_val = get_rev_val(eff_sup, 'PE')   # shift के बाद नई strike
+            
+            # चेक: क्या यह लेवल खतरनाक है? (यहाँ पहले SL कटा था?)
+            # ध्यान दें: सपोर्ट में ऊपर वाला लेवल (eff_sup + step) चेक करते हैं, क्योंकि गिरते हुए मार्केट में SL नीचे हिट होता है
+            is_dangerous_level = PaperTrade.objects.filter(
+                Q(entry_strike=eff_sup) | Q(entry_strike=eff_sup + step), 
+                symbol=symbol, trade_date=selected_date,
+                trade_type='CALL', result='SL'
+            ).exists()
+            
+            # 🚀 अगर ट्रेड हो चुका है या लेवल खतरनाक है, तो - step करके नीचे खिसक जाओ!
+            if s_already_traded or is_dangerous_level:
+                eff_sup = eff_sup - step
+                sup_status += " (SHIFTED DOWN)"
+                s_entry_val = get_rev_val(eff_sup, 'PE') # नया प्राइस निकालो
+            else:
+                # लेवल एकदम फ्रेश और सुरक्षित है! लूप से बाहर आ जाओ।
+                break
+            # end testing================
 
     levels["S"]["status"] = sup_status
     levels["S"]["strike"] = eff_sup
     levels["S"]["entry"]  = s_entry_val                          # ← reuse
     levels["S"]["target"] = get_rev_val(eff_sup + step, 'PE')
     levels["S"]["sl"]     = get_rev_val(eff_sup - step, 'PE')
+    levels["S"]["tag"]    = 'S' if eff_sup == original_eff_sup else 'S_SHIFTED'
 
     return levels
