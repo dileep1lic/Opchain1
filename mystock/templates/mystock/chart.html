@@ -3,259 +3,452 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>📈 Option Candle Chart</title>
-
-  <!-- TradingView Lightweight Charts — defer so page renders first -->
-  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js" defer></script>
+  <title>📈 TradingView Option Chart</title>
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 
   <style>
     :root {
-      --bg:      #0d1117;
-      --surface: #161b22;
-      --border:  #30363d;
-      --accent:  #58a6ff;
-      --green:   #3fb950;
-      --red:     #f85149;
-      --text:    #e6edf3;
-      --muted:   #8b949e;
-      --font:    'Courier New', monospace;
+      --bg:        #131722;
+      --surface:   #1e222d;
+      --surface2:  #2a2e39;
+      --border:    #2a2e39;
+      --border2:   #363a45;
+      --accent:    #2962ff;
+      --accent2:   #1e53e5;
+      --green:     #26a69a;
+      --green2:    #00897b;
+      --red:       #ef5350;
+      --red2:      #e53935;
+      --text:      #d1d4dc;
+      --text2:     #b2b5be;
+      --muted:     #787b86;
+      --muted2:    #555a67;
+      --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+      --font-sans: 'IBM Plex Sans', sans-serif;
+      --header-h: 48px;
+      --controls-h: 46px;
+      --stats-h: 38px;
     }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: var(--font);
-      overflow: hidden;
+      font-family: var(--font-sans);
       height: 100vh;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
-    /* ── Header ── */
-    header {
+    /* ─── TOPBAR ─────────────────────────────────── */
+    .topbar {
+      height: var(--header-h);
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 10px 24px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 8px;
+      padding: 0 16px;
+      gap: 0;
       flex-shrink: 0;
+      position: relative;
+      z-index: 10;
     }
-    .logo { font-size: 1.1rem; font-weight: bold; color: var(--accent); letter-spacing: 2px; }
-    .meta { font-size: 0.75rem; color: var(--muted); }
-    .meta span { color: var(--text); margin-left: 6px; }
 
-    /* ── Controls ── */
-    .controls {
+    .tv-logo {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      border-right: 1px solid var(--border2);
+      padding-right: 16px;
+      margin-right: 16px;
+    }
+
+    .symbol-info {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      border-right: 1px solid var(--border2);
+      padding-right: 16px;
+      margin-right: 16px;
+    }
+
+    .symbol-name {
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.5px;
+    }
+
+    .symbol-exchange {
+      font-size: 0.68rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      background: var(--surface2);
+      padding: 2px 6px;
+      border-radius: 3px;
+      letter-spacing: 1px;
+    }
+
+    .price-display {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .current-price {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .price-change {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    .price-change.up   { color: var(--green); background: rgba(38,166,154,.12); }
+    .price-change.down { color: var(--red);   background: rgba(239,83,80,.12); }
+
+    .topbar-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--muted);
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      padding: 3px 8px;
+      border-radius: 3px;
+      letter-spacing: 1px;
+    }
+
+    .live-dot {
+      width: 7px; height: 7px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: blink 1.4s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
+
+    /* ─── TOOLBAR ─────────────────────────────────── */
+    .toolbar {
+      height: var(--controls-h);
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 8px 24px;
       display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: flex-end;
+      align-items: center;
+      padding: 0 16px;
+      gap: 6px;
       flex-shrink: 0;
+      overflow-x: auto;
     }
-    .controls label { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 3px; }
-    .controls input, .controls select {
-      background: var(--bg);
-      border: 1px solid var(--border);
+
+    .toolbar-sep {
+      width: 1px; height: 22px;
+      background: var(--border2);
+      flex-shrink: 0;
+      margin: 0 4px;
+    }
+
+    .tb-label {
+      font-size: 0.67rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      letter-spacing: 1px;
+      white-space: nowrap;
+    }
+
+    .tb-select, .tb-input {
+      background: var(--surface2);
+      border: 1px solid var(--border2);
       color: var(--text);
-      font-family: var(--font);
-      font-size: 0.76rem;
-      padding: 5px 8px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      padding: 4px 8px;
       border-radius: 4px;
       outline: none;
+      cursor: pointer;
+      transition: border-color .15s;
     }
-    .controls input:focus, .controls select:focus { border-color: var(--accent); }
-    .controls button {
-      background: var(--accent);
-      color: #000;
-      border: none;
-      font-family: var(--font);
-      font-size: 0.76rem;
-      font-weight: bold;
-      padding: 6px 14px;
+    .tb-select:hover, .tb-input:hover,
+    .tb-select:focus, .tb-input:focus { border-color: var(--accent); }
+    .tb-input { width: 180px; }
+
+    .tb-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      padding: 4px 10px;
       border-radius: 4px;
       cursor: pointer;
-      transition: opacity .2s;
-    }
-    .controls button:hover { opacity: .85; }
-    .refresh-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      font-family: var(--font);
-      font-size: 0.73rem;
-      padding: 5px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all .2s;
+      white-space: nowrap;
+      transition: all .15s;
       display: flex;
       align-items: center;
       gap: 5px;
     }
-    .refresh-btn.active { border-color: var(--green); color: var(--green); background: #3fb95011; }
-    .refresh-btn:hover  { border-color: var(--accent); color: var(--accent); }
+    .tb-btn:hover     { border-color: var(--accent); color: var(--accent); background: rgba(41,98,255,.08); }
+    .tb-btn.primary   { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .tb-btn.primary:hover { background: var(--accent2); }
+    .tb-btn.active    { border-color: var(--green); color: var(--green); background: rgba(38,166,154,.08); }
+    .tb-btn.active:hover { border-color: var(--green); color: var(--green); }
 
-    /* ── Stats bar ── */
-    #stats {
-      display: flex;
-      gap: 20px;
-      padding: 7px 24px;
-      font-size: 0.76rem;
-      flex-wrap: wrap;
+    /* ─── OHLCV BAR ─────────────────────────────────── */
+    .ohlcv-bar {
+      height: var(--stats-h);
+      background: var(--surface);
       border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 20px;
       flex-shrink: 0;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
     }
-    .stat-item { display: flex; flex-direction: column; }
-    .stat-label { color: var(--muted); font-size: 0.65rem; margin-bottom: 2px; }
-    .stat-val { font-size: 0.88rem; font-weight: bold; }
-    .up   { color: var(--green); }
-    .down { color: var(--red); }
 
-    /* ── Countdown ── */
-    #countdown-bar {
-      height: 2px; background: var(--border);
-      position: relative; display: none; flex-shrink: 0;
-    }
+    .ohlcv-item { display: flex; align-items: center; gap: 5px; }
+    .ohlcv-key  { color: var(--muted); font-size: 0.65rem; letter-spacing: 1px; }
+    .ohlcv-val  { color: var(--text); font-weight: 600; }
+    .ohlcv-val.up   { color: var(--green); }
+    .ohlcv-val.down { color: var(--red); }
+
+    .ohlcv-sep { width: 1px; height: 16px; background: var(--border2); }
+
+    /* ─── COUNTDOWN BAR ─────────────────────────────── */
+    #countdown-bar { height: 2px; background: var(--border); display: none; flex-shrink: 0; }
     #countdown-bar.active { display: block; }
-    #countdown-fill {
-      height: 100%; background: var(--green);
-      width: 100%; transition: width linear;
-    }
+    #countdown-fill { height: 100%; background: var(--green); width: 100%; transition: width linear; }
+
     #refresh-status {
-      font-size: 0.68rem; color: var(--muted);
-      padding: 3px 24px; background: var(--surface);
+      font-family: var(--font-mono);
+      font-size: 0.65rem; color: var(--muted2);
+      padding: 3px 16px;
+      background: var(--bg);
       border-bottom: 1px solid var(--border);
       display: none; flex-shrink: 0;
+      align-items: center; gap: 6px;
     }
-    #refresh-status.active { display: block; }
-    .pulse { animation: pulse 1s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    #refresh-status.active { display: flex; }
 
-    /* ── Chart container ── */
+    /* ─── CHART ─────────────────────────────────────── */
     #chart-wrap {
-      position: relative;
-      width: 100%;
       flex-grow: 1;
+      position: relative;
       overflow: hidden;
     }
-    #chart { position: absolute; width: 100%; height: 100%; top: 0; left: 0; }
 
-    /* ── Loading / Error ── */
+    #chart { position: absolute; inset: 0; }
+
     #loading {
-      position: absolute; inset: 0; display: none;
-      align-items: center; justify-content: center;
-      background: rgba(13,17,23,0.75); z-index: 10;
-      font-size: 0.9rem; color: var(--muted);
+      position: absolute; inset: 0; z-index: 20;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(19,23,34,.82);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--muted);
+      gap: 10px;
     }
     #loading.show { display: flex; }
+
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid var(--border2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     #message {
-      position: absolute; inset: 0; display: none;
-      align-items: center; justify-content: center;
-      font-size: 0.88rem; color: var(--red); z-index: 10;
+      position: absolute; inset: 0; z-index: 20;
+      display: none; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: 0.82rem;
+      color: var(--red);
     }
     #message.show { display: flex; }
 
-    /* ── Table ── */
-    .table-wrap { padding: 0 24px 24px; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
-    thead th {
-      text-align: left; padding: 7px 10px; color: var(--muted);
-      border-bottom: 1px solid var(--border);
-      font-weight: normal; letter-spacing: 1px; font-size: 0.65rem;
+    /* ─── TABLE ─────────────────────────────────────── */
+    .table-wrap {
+      padding: 0 16px 16px;
+      overflow-x: auto;
+      border-top: 1px solid var(--border);
+      max-height: 220px;
+      overflow-y: auto;
+      flex-shrink: 0;
     }
-    tbody tr:hover { background: var(--surface); }
-    tbody td { padding: 5px 10px; border-bottom: 1px solid #21262d; }
-    .candle-up   { color: var(--green); }
-    .candle-down { color: var(--red); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+    }
+
+    thead th {
+      text-align: left;
+      padding: 6px 10px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-weight: 400;
+      letter-spacing: 1.5px;
+      font-size: 0.62rem;
+      position: sticky; top: 0;
+      background: var(--surface);
+    }
+
+    tbody tr:hover { background: var(--surface2); }
+    tbody td {
+      padding: 4px 10px;
+      border-bottom: 1px solid #1e222d;
+      font-size: 0.7rem;
+      color: var(--text2);
+    }
+
+    .up   { color: var(--green) !important; }
+    .down { color: var(--red) !important; }
+
+    /* ─── TOAST NOTIFICATION ────────────────────────── */
+    #toast-container {
+      position: fixed; bottom: 20px; right: 20px;
+      z-index: 9999; display: flex; flex-direction: column; gap: 10px;
+    }
+    .toast {
+      background: var(--surface2);
+      border-left: 4px solid var(--accent);
+      color: #fff; padding: 12px 20px; border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      font-family: var(--font-mono); font-size: 0.8rem;
+      animation: slideIn 0.3s ease-out forwards;
+    }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
   </style>
 </head>
 <body>
 
-<header>
-  <div class="logo">📈 Option Chart</div>
-  <div class="meta">
-    Symbol: <span id="hdr-symbol">{{ symbol }}</span> &nbsp;|&nbsp;
-    Interval: <span id="hdr-interval">{{ interval }}m</span> &nbsp;|&nbsp;
-    Range: <span>{{ from_date }} → {{ to_date }}</span>
+<!-- ─── TOPBAR ─────────────────────────────────── -->
+<div class="topbar">
+  <!-- <div class="tv-logo">TV Chart</div> -->
+  <div class="symbol-info">
+    <span class="symbol-name" id="hdr-symbol">NIFTY</span>
+    <span class="symbol-exchange">NSE</span>
   </div>
-</header>
-
-<div class="controls">
-  <div>
-    <label>Symbol</label>
-    <input id="ctrl-symbol" type="text" list="symbol-list" value="{{ symbol }}" style="width:200px" oninput="fetchSymbols(this.value)">
-    <datalist id="symbol-list"></datalist>
+  <div class="price-display">
+    <span class="current-price" id="tp-close">—</span>
+    <span class="price-change up" id="tp-change">—</span>
   </div>
-  <div>
-    <label>Unit</label>
-    <select id="ctrl-unit" onchange="updateIntervalOptions()">
-      <option value="minutes" {% if unit == "minutes" or not unit %}selected{% endif %}>Minutes</option>
-      <option value="hours"   {% if unit == "hours" %}selected{% endif %}>Hours</option>
-      <option value="days"    {% if unit == "days"  %}selected{% endif %}>Days</option>
-    </select>
-  </div>
-  <div>
-    <label>Interval</label>
-    <select id="ctrl-interval">
-      <option value="5" selected>5</option>
-    </select>
-  </div>
-  <div>
-    <label>From</label>
-    <input id="ctrl-from" type="date" value="{{ from_date }}">
-  </div>
-  <div>
-    <label>To</label>
-    <input id="ctrl-to" type="date" value="{{ to_date }}">
-  </div>
-  <div style="display:flex; gap:8px; flex-wrap:wrap;">
-    <button onclick="loadChart()">🔄 Update</button>
-    <select id="refresh-interval" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--font);font-size:0.76rem;padding:5px 8px;border-radius:4px;">
-      <option value="30">30 सेकंड</option>
-      <option value="60" selected>1 मिनट</option>
-      <option value="120">2 मिनट</option>
-      <option value="300">5 मिनट</option>
-    </select>
-    <button class="refresh-btn" id="auto-refresh-btn" onclick="toggleAutoRefresh()">
-      <span id="ar-icon">⏸</span>
-      <span id="ar-label">Auto OFF</span>
-    </button>
-    <button class="refresh-btn active" id="reversal-toggle-btn" onclick="toggleReversalLines()">
-      <span id="rv-icon">📉</span>
-      <span id="rv-label">Reversal ON</span>
-    </button>
-    <button class="refresh-btn" id="table-toggle-btn" onclick="toggleTable()">
-      <span id="table-icon">📋</span>
-      <span id="table-label">Table दिखाएं</span>
-    </button>
+  <div class="topbar-right">
+    <div class="live-dot" id="live-dot" style="display:none"></div>
+    <span class="badge" id="interval-badge">5m</span>
+    <span class="badge" id="date-badge">—</span>
   </div>
 </div>
 
+<!-- ─── TOOLBAR ─────────────────────────────────── -->
+<div class="toolbar">
+  <span class="tb-label">SYMBOL</span>
+  <input id="ctrl-symbol" class="tb-input" type="text" list="symbol-list"
+    value="NIFTY" oninput="fetchSymbols(this.value)">
+  <datalist id="symbol-list"></datalist>
+
+  <div class="toolbar-sep"></div>
+
+  <span class="tb-label">UNIT</span>
+  <select id="ctrl-unit" class="tb-select" onchange="updateIntervalOptions()">
+    <option value="minutes" selected>Min</option>
+    <option value="hours">Hrs</option>
+    <option value="days">Days</option>
+  </select>
+
+  <span class="tb-label">INT</span>
+  <select id="ctrl-interval" class="tb-select">
+    <option value="5" selected>5</option>
+  </select>
+
+  <div class="toolbar-sep"></div>
+
+  <span class="tb-label">FROM</span>
+  <input id="ctrl-from" class="tb-select" type="date">
+
+  <span class="tb-label">TO</span>
+  <input id="ctrl-to" class="tb-select" type="date">
+
+  <div class="toolbar-sep"></div>
+
+  <button class="tb-btn primary" onclick="loadChart()">↻ UPDATE</button>
+
+  <select id="refresh-interval" class="tb-select">
+    <option value="30">30s</option>
+    <option value="60" selected>1m</option>
+    <option value="120">2m</option>
+    <option value="300">5m</option>
+  </select>
+
+  <button class="tb-btn" id="auto-refresh-btn" onclick="toggleAutoRefresh()">
+    <span id="ar-icon">⏸</span><span id="ar-label">Auto</span>
+  </button>
+
+  <button class="tb-btn active" id="reversal-toggle-btn" onclick="toggleReversalLines()">
+    <span id="rv-label">Reversal ✓</span>
+  </button>
+
+  <button class="tb-btn" id="alert-toggle-btn" onclick="toggleAlerts()">
+    <span id="alert-label">🔕 Alerts OFF</span>
+  </button>
+
+  <button class="tb-btn" id="table-toggle-btn" onclick="toggleTable()">
+    <span id="table-icon">☰</span> <span id="table-label">Table</span>
+  </button>
+</div>
+
+<!-- ─── OHLCV BAR ─────────────────────────────────── -->
+<div class="ohlcv-bar">
+  <div class="ohlcv-item"><span class="ohlcv-key">O</span><span class="ohlcv-val" id="s-open">—</span></div>
+  <div class="ohlcv-sep"></div>
+  <div class="ohlcv-item"><span class="ohlcv-key">H</span><span class="ohlcv-val up" id="s-high">—</span></div>
+  <div class="ohlcv-sep"></div>
+  <div class="ohlcv-item"><span class="ohlcv-key">L</span><span class="ohlcv-val down" id="s-low">—</span></div>
+  <div class="ohlcv-sep"></div>
+  <div class="ohlcv-item"><span class="ohlcv-key">C</span><span class="ohlcv-val" id="s-close">—</span></div>
+  <div class="ohlcv-sep"></div>
+  <div class="ohlcv-item"><span class="ohlcv-key">VOL</span><span class="ohlcv-val" id="s-vol">—</span></div>
+  <div class="ohlcv-sep"></div>
+  <div class="ohlcv-item"><span class="ohlcv-key">CANDLES</span><span class="ohlcv-val" id="s-count">—</span></div>
+</div>
+
+<!-- ─── COUNTDOWN ─────────────────────────────────── -->
 <div id="countdown-bar"><div id="countdown-fill"></div></div>
-<div id="refresh-status">🟢 <span class="pulse">●</span> Auto Refresh चालू — अगला: <span id="next-refresh">—</span></div>
-
-<div id="stats">
-  <div class="stat-item"><span class="stat-label">OPEN</span>  <span class="stat-val" id="s-open">—</span></div>
-  <div class="stat-item"><span class="stat-label">HIGH</span>  <span class="stat-val up"   id="s-high">—</span></div>
-  <div class="stat-item"><span class="stat-label">LOW</span>   <span class="stat-val down" id="s-low">—</span></div>
-  <div class="stat-item"><span class="stat-label">CLOSE</span> <span class="stat-val" id="s-close">—</span></div>
-  <div class="stat-item"><span class="stat-label">VOLUME</span><span class="stat-val" id="s-vol">—</span></div>
-  <div class="stat-item"><span class="stat-label">CANDLES</span><span class="stat-val" id="s-count">—</span></div>
+<div id="refresh-status">
+  <div class="live-dot"></div>
+  Auto Refresh ON — अगला: <strong id="next-refresh">—</strong>
 </div>
 
+<!-- ─── CHART ─────────────────────────────────────── -->
 <div id="chart-wrap">
-  <div id="loading">⏳ Data load हो रही है...</div>
+  <div id="loading" class="show"><div class="spinner"></div> Data load हो रहा है...</div>
   <div id="message"></div>
   <div id="chart"></div>
 </div>
 
+<!-- ─── TABLE ─────────────────────────────────────── -->
 <div class="table-wrap" id="table-section" style="display:none;">
   <table>
     <thead>
@@ -266,406 +459,515 @@
 </div>
 
 <script>
-  // ── Initial data from Django ─────────────────────────────────
-  const initialCandles   = {{ candles|safe }};
-  const initialError     = "{{ error|default:'' }}";
-  const initialReversals = {{ reversal_lines|safe }};
 
-  let lastReversals   = (initialReversals || []).filter(r => r && r.price > 0);
-  let reversalVisible = true;
-  let tableVisible    = false;
 
-  // ✅ Fix 1: Chart एक बार बनाओ, variables बाहर रखो
-  let mainChart      = null;
-  let candleSeries   = null;
-  let reversalSeries = [];  // current reversal line series
+// ══════════════════════════════════════════════════════
+//  CHART STATE
+// ══════════════════════════════════════════════════════
+let mainChart      = null;
+let candleSeries   = null;
+let reversalSeries = [];
+let lastReversals  = [];
+let reversalVisible = true;
+let tableVisible   = false;
+const IST_OFFSET   = 19800;  // +5:30 in seconds
 
-  const IST_OFFSET = 19800; // seconds (+5:30)
-
-  // ── Chart INIT — सिर्फ एक बार चलता है ──────────────────────
-  function initChart() {
-    const container = document.getElementById('chart-wrap');
-    mainChart = LightweightCharts.createChart(
-      document.getElementById('chart'), {
-        layout:     { background: { color: '#0d1117' }, textColor: '#8b949e' },
-        grid:       { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
-        crosshair:  { mode: LightweightCharts.CrosshairMode.Normal },
-        rightPriceScale: { borderColor: '#30363d' },
-        timeScale:  { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
-        width:  container.clientWidth,
-        height: container.clientHeight,
-      }
-    );
-
-    candleSeries = mainChart.addCandlestickSeries({
-      upColor:        '#3fb950', downColor:     '#f85149',
-      borderUpColor:  '#3fb950', borderDownColor:'#f85149',
-      wickUpColor:    '#3fb950', wickDownColor:  '#f85149',
-    });
-
-    // Crosshair hover → stats update
-    mainChart.subscribeCrosshairMove(param => {
-      if (!param || !param.seriesData) return;
-      const d = param.seriesData.get(candleSeries);
-      if (d) {
-        document.getElementById('s-open').textContent  = d.open.toFixed(2);
-        document.getElementById('s-high').textContent  = d.high.toFixed(2);
-        document.getElementById('s-low').textContent   = d.low.toFixed(2);
-        document.getElementById('s-close').textContent = d.close.toFixed(2);
-      }
-    });
-
-    // ✅ FIX: window.resize की जगह ResizeObserver —
-    // जब countdown-bar / refresh-status दिखते हैं तो chart-wrap की height बदलती है,
-    // window.resize उसे detect नहीं करता → time scale clip हो जाती थी
-    new ResizeObserver(entries => {
-      if (!mainChart) return;
-      const { width, height } = entries[0].contentRect;
-      if (width > 0 && height > 0) {
-        mainChart.applyOptions({ width, height });
-      }
-    }).observe(container);
-  }
-
-  // ── ✅ Fix 1: Data UPDATE — chart rebuild नहीं होता ──────────
-  function updateChartData(candles, reversals) {
-    if (!mainChart || !candleSeries) return;
-
-    // Candle data convert
-    const cdData = candles.map(c => ({
-      time:  Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET,
-      open:  c.open,
-      high:  c.high,
-      low:   c.low,
-      close: c.close,
-    }));
-
-    // ✅ setData() — chart destroy नहीं होता, सिर्फ data replace होता है
-    candleSeries.setData(cdData);
-
-    // Reversal lines update
-    updateReversalLines(candles, reversals, cdData);
-
-    // Zoom fit (सिर्फ पहली बार)
-    if (!window._chartInitialized) {
-      mainChart.timeScale().fitContent();
-      window._chartInitialized = true;
+// ── Init chart ────────────────────────────────────────
+function initChart() {
+  const container = document.getElementById('chart-wrap');
+  mainChart = LightweightCharts.createChart(
+    document.getElementById('chart'), {
+      layout: {
+        background: { type: 'solid', color: '#131722' },
+        textColor: '#787b86',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: '#1e222d' },
+        horzLines: { color: '#1e222d' },
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: '#555a67', labelBackgroundColor: '#2a2e39' },
+        horzLine: { color: '#555a67', labelBackgroundColor: '#2a2e39' },
+      },
+      rightPriceScale: {
+        borderColor: '#2a2e39',
+        scaleMargins: { top: 0.08, bottom: 0.08 },
+      },
+      timeScale: {
+        borderColor: '#2a2e39',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 5,
+        barSpacing: 8,
+      },
+      width:  container.clientWidth,
+      height: container.clientHeight,
     }
+  );
 
-    // Stats update
-    updateStats(candles);
+  candleSeries = mainChart.addCandlestickSeries({
+    upColor:          '#26a69a',
+    downColor:        '#ef5350',
+    borderUpColor:    '#26a69a',
+    borderDownColor:  '#ef5350',
+    wickUpColor:      '#26a69a',
+    wickDownColor:    '#ef5350',
+  });
 
-    // Table update (अगर visible है तभी)
-    if (tableVisible) buildTable(candles);
-  }
-
-  // ── Reversal lines ─────────────────────────────────────────
-  function updateReversalLines(candles, reversals, cdData) {
-    // पुरानी lines हटाओ
-    reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
-    reversalSeries = [];
-
-    if (!reversalVisible || !reversals || reversals.length === 0) return;
-
-    // Line time range: आखिरी candle की date पर 9:15 → 15:30
-    const lastDate = new Date(candles[candles.length - 1].time);
-    const startD   = new Date(lastDate); startD.setHours(9, 15, 0, 0);
-    const endD     = new Date(lastDate); endD.setHours(15, 30, 0, 0);
-    const t1 = Math.floor(startD.getTime() / 1000) + IST_OFFSET;
-    const t2 = Math.floor(endD.getTime()   / 1000) + IST_OFFSET;
-
-    reversals.filter(r => r && r.price > 0).forEach(rev => {
-      try {
-        const ls = mainChart.addLineSeries({
-          color:            rev.color,
-          lineWidth:        rev.width || 1,
-          lineStyle:        rev.dash  || 0,
-          priceLineVisible: false,
-          lastValueVisible: true,
-          title:            rev.label || '',
-        });
-        ls.setData([
-          { time: t1, value: Number(rev.price) },
-          { time: t2, value: Number(rev.price) },
-        ]);
-        reversalSeries.push(ls);
-      } catch(e) { console.warn('Reversal line error:', e.message); }
-    });
-  }
-
-  // ── ✅ Fix 3: Stats — spread operator हटाया, for loop use किया ──
-  function updateStats(candles) {
-    if (!candles.length) return;
-    let high = -Infinity, low = Infinity, vol = 0;
-    for (let i = 0; i < candles.length; i++) {
-      if (candles[i].high > high) high = candles[i].high;
-      if (candles[i].low  < low)  low  = candles[i].low;
-      vol += candles[i].volume;
+  // Crosshair → OHLCV bar update
+  mainChart.subscribeCrosshairMove(param => {
+    if (!param?.seriesData) return;
+    const d = param.seriesData.get(candleSeries);
+    if (d) {
+      document.getElementById('s-open').textContent  = d.open.toFixed(2);
+      document.getElementById('s-high').textContent  = d.high.toFixed(2);
+      document.getElementById('s-low').textContent   = d.low.toFixed(2);
+      document.getElementById('s-close').textContent = d.close.toFixed(2);
+      // change colour on close
+      const isUp = d.close >= d.open;
+      document.getElementById('s-close').className = 'ohlcv-val ' + (isUp ? 'up' : 'down');
     }
-    document.getElementById('s-open').textContent  = candles[0].open.toFixed(2);
-    document.getElementById('s-high').textContent  = high.toFixed(2);
-    document.getElementById('s-low').textContent   = low.toFixed(2);
-    document.getElementById('s-close').textContent = candles[candles.length - 1].close.toFixed(2);
-    document.getElementById('s-vol').textContent   = vol.toLocaleString('en-IN');
-    document.getElementById('s-count').textContent = candles.length;
+  });
+
+  new ResizeObserver(entries => {
+    if (!mainChart) return;
+    const { width, height } = entries[0].contentRect;
+    if (width > 0 && height > 0) mainChart.applyOptions({ width, height });
+  }).observe(container);
+}
+
+// ── Update chart data ─────────────────────────────────
+function updateChartData(candles, reversals) {
+  if (!mainChart || !candleSeries) return;
+
+  const cdData = candles.map(c => ({
+    time:  Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET,
+    open:  c.open, high: c.high, low: c.low, close: c.close,
+  }));
+
+  candleSeries.setData(cdData);
+  updateReversalLines(candles, reversals, cdData);
+
+  if (!window._chartInitialized) {
+    mainChart.timeScale().fitContent();
+    window._chartInitialized = true;
   }
 
-  // ── ✅ Fix 2: Table — innerHTML += हटाया, DocumentFragment use किया ──
-  function buildTable(candles) {
-    const tbody = document.getElementById('candle-table');
-    const frag  = document.createDocumentFragment();
+  updateStats(candles);
+  updateTopbar(candles);
+  if (tableVisible) buildTable(candles);
+  window._lastCandles = candles;
+  // 👇 यह नई लाइन यहाँ जोड़ें 👇
+  checkReversalAlerts(candles[candles.length - 1].close, reversals);
+}
 
-    candles.slice().reverse().forEach((c, i) => {
-      const change = c.close - c.open;
-      const pct    = ((change / c.open) * 100).toFixed(2);
-      const cls    = change >= 0 ? 'candle-up' : 'candle-down';
-      const sign   = change >= 0 ? '▲' : '▼';
-      const dt     = new Date(c.time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+// ── Reversal lines ────────────────────────────────────
+function updateReversalLines(candles, reversals) {
+  reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
+  reversalSeries = [];
+  if (!reversalVisible || !reversals?.length || !candles?.length) return;
 
-      const tr = document.createElement('tr');
-      tr.innerHTML =
-        `<td class="${cls}">${i + 1}</td>` +
-        `<td>${dt}</td>` +
-        `<td>${c.open.toFixed(2)}</td>` +
-        `<td class="candle-up">${c.high.toFixed(2)}</td>` +
-        `<td class="candle-down">${c.low.toFixed(2)}</td>` +
-        `<td class="${cls}">${c.close.toFixed(2)}</td>` +
-        `<td>${c.volume.toLocaleString('en-IN')}</td>` +
-        `<td class="${cls}">${sign} ${Math.abs(change).toFixed(2)} (${pct}%)</td>`;
-      frag.appendChild(tr);
-    });
+  const lastDate = new Date(candles[candles.length - 1].time);
+  const startD = new Date(lastDate); startD.setHours(9, 15, 0, 0);
+  const endD   = new Date(lastDate); endD.setHours(15, 30, 0, 0);
+  const t1 = Math.floor(startD.getTime() / 1000) + IST_OFFSET;
+  const t2 = Math.floor(endD.getTime()   / 1000) + IST_OFFSET;
 
-    tbody.replaceChildren(frag); // ✅ एक ही DOM operation — no repaint loop
-  }
-
-  // ── AJAX load ──────────────────────────────────────────────
-  function loadChart() {
-    const symbol   = document.getElementById('ctrl-symbol').value.trim();
-    const unit     = document.getElementById('ctrl-unit').value;
-    const interval = document.getElementById('ctrl-interval').value;
-    const fromDate = document.getElementById('ctrl-from').value;
-    const toDate   = document.getElementById('ctrl-to').value;
-
-    showLoading(true);
-    hideMsg();
-
-    
-    // ✅ अब — reversalVisible false हो तो &reversal=0 भेजो
-    const url = `/api/candle/?symbol=${encodeURIComponent(symbol)}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}&reversal=${reversalVisible ? 1 : 0}`;
-    fetch(url)
-      .then(r => r.json())
-      .then(data => {
-        showLoading(false);
-        if (data.error) { showMsg('❌ Error: ' + data.error); return; }
-        document.getElementById('hdr-symbol').textContent   = symbol;
-        document.getElementById('hdr-interval').textContent = interval + (unit === 'minutes' ? 'm' : unit === 'hours' ? 'h' : 'd');
-        if (data.reversal_lines && data.reversal_lines.length > 0) {
-          lastReversals = data.reversal_lines.filter(r => r && r.price > 0);
-        }
-        window._chartInitialized = false; // नया symbol → fitContent करो
-        updateChartData(data.candles, lastReversals);
-      })
-      .catch(err => {
-        showLoading(false);
-        showMsg('❌ Network Error: ' + err.message);
+  reversals.filter(r => r?.price > 0).forEach(rev => {
+    try {
+      const ls = mainChart.addLineSeries({
+        color:            rev.color,
+        lineWidth:        rev.width || 1,
+        lineStyle:        rev.dash  || 0,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        title:            rev.label || '',
       });
+      ls.setData([
+        { time: t1, value: +rev.price },
+        { time: t2, value: +rev.price },
+      ]);
+      reversalSeries.push(ls);
+    } catch(e) { console.warn('Reversal error:', e.message); }
+  });
+}
+
+// ── Stats bar ────────────────────────────────────────
+function updateStats(candles) {
+  if (!candles.length) return;
+  let high = -Infinity, low = Infinity, vol = 0;
+  for (const c of candles) {
+    if (c.high > high) high = c.high;
+    if (c.low  < low)  low  = c.low;
+    vol += c.volume;
+  }
+  document.getElementById('s-open').textContent  = candles[0].open.toFixed(2);
+  document.getElementById('s-high').textContent  = high.toFixed(2);
+  document.getElementById('s-low').textContent   = low.toFixed(2);
+  document.getElementById('s-close').textContent = candles[candles.length - 1].close.toFixed(2);
+  document.getElementById('s-vol').textContent   = vol.toLocaleString('en-IN');
+  document.getElementById('s-count').textContent = candles.length;
+}
+
+// ── Topbar ────────────────────────────────────────────
+function updateTopbar(candles) {
+  if (!candles.length) return;
+  const last   = candles[candles.length - 1];
+  const first  = candles[0];
+  const change = last.close - first.open;
+  const pct    = ((change / first.open) * 100).toFixed(2);
+  const isUp   = change >= 0;
+  const sign   = isUp ? '+' : '';
+
+  document.getElementById('tp-close').textContent  = last.close.toFixed(2);
+  const chEl = document.getElementById('tp-change');
+  chEl.textContent = `${sign}${change.toFixed(2)} (${sign}${pct}%)`;
+  chEl.className   = 'price-change ' + (isUp ? 'up' : 'down');
+
+  const symbol = document.getElementById('ctrl-symbol').value;
+  document.getElementById('hdr-symbol').textContent = symbol;
+
+  const unit = document.getElementById('ctrl-unit').value;
+  const int  = document.getElementById('ctrl-interval').value;
+  const suffix = unit === 'minutes' ? 'm' : unit === 'hours' ? 'H' : 'D';
+  document.getElementById('interval-badge').textContent = int + suffix;
+
+  const dt = new Date(last.time);
+  document.getElementById('date-badge').textContent =
+    dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'Asia/Kolkata' });
+}
+
+// ── Table ─────────────────────────────────────────────
+function buildTable(candles) {
+  const tbody = document.getElementById('candle-table');
+  const frag  = document.createDocumentFragment();
+  candles.slice().reverse().forEach((c, i) => {
+    const change = c.close - c.open;
+    const pct    = ((change / c.open) * 100).toFixed(2);
+    const cls    = change >= 0 ? 'up' : 'down';
+    const sign   = change >= 0 ? '▲' : '▼';
+    const dt     = new Date(c.time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td class="${cls}">${i + 1}</td>` +
+      `<td>${dt}</td>` +
+      `<td>${c.open.toFixed(2)}</td>` +
+      `<td class="up">${c.high.toFixed(2)}</td>` +
+      `<td class="down">${c.low.toFixed(2)}</td>` +
+      `<td class="${cls}">${c.close.toFixed(2)}</td>` +
+      `<td>${c.volume.toLocaleString('en-IN')}</td>` +
+      `<td class="${cls}">${sign} ${Math.abs(change).toFixed(2)} (${pct}%)</td>`;
+    frag.appendChild(tr);
+  });
+  tbody.replaceChildren(frag);
+}
+
+async function loadChart() {
+  const symbol   = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
+  const unit     = document.getElementById('ctrl-unit').value;
+  const interval = parseInt(document.getElementById('ctrl-interval').value) || 5;
+  const fromDate = document.getElementById('ctrl-from').value;
+  const toDate   = document.getElementById('ctrl-to').value;
+  
+  // Reversal लाइन्स टॉगल का स्टेटस
+  const reversal = reversalVisible ? '1' : '0';
+
+  if (!fromDate || !toDate) { 
+      showMsg('❌ कृपया From और To date चुनें'); 
+      return; 
   }
 
-  // Silent refresh — UI block नहीं होता ─────────────────────
-  function silentRefresh() {
-    if (!isAutoRefresh) return;
-    const symbol   = document.getElementById('ctrl-symbol').value.trim();
-    const unit     = document.getElementById('ctrl-unit').value;
-    const interval = document.getElementById('ctrl-interval').value;
-    const fromDate = document.getElementById('ctrl-from').value;
-    const toDate   = document.getElementById('ctrl-to').value;
+  showLoading(true); 
+  hideMsg();
 
-    // ✅ FIX: reversal param जोड़ा (loadChart से consistent)
-    const url = `/api/candle/?symbol=${encodeURIComponent(symbol)}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}&reversal=${reversalVisible ? 1 : 0}`;
+  try {
+    // आपके views.py में मौजूद 'candle_api' को कॉल
+    const url = `/api/candle/?symbol=${symbol}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}&reversal=${reversal}`;
+    const response = await fetch(url);
+    const data = await response.json();
 
-    // ✅ FIX: scheduleNext() पहले — fetch की speed से timer independent रहेगा
-    scheduleNext();
+    showLoading(false);
 
-    fetch(url)
-      .then(r => r.json())
-      .then(data => {
-        if (!data.error && data.candles && data.candles.length > 0) {
-          if (data.reversal_lines && data.reversal_lines.length > 0)
-            lastReversals = data.reversal_lines.filter(r => r && r.price > 0);
-          updateChartData(data.candles, lastReversals);
-        }
-      })
-      .catch(err => console.warn('Silent refresh error:', err));
-  }
-
-  // ── Auto Refresh ──────────────────────────────────────────
-  let autoRefreshTimer = null;
-  let countdownTimer   = null;
-  let isAutoRefresh    = false;
-  let remainingSeconds = 0;
-
-  function toggleAutoRefresh() { isAutoRefresh ? stopAutoRefresh() : startAutoRefresh(); }
-
-  function startAutoRefresh() {
-    isAutoRefresh = true;
-    document.getElementById('auto-refresh-btn').classList.add('active');
-    document.getElementById('ar-icon').textContent  = '▶';
-    document.getElementById('ar-label').textContent = 'Auto ON';
-    document.getElementById('countdown-bar').classList.add('active');
-    document.getElementById('refresh-status').classList.add('active');
-    scheduleNext();
-  }
-
-  function stopAutoRefresh() {
-    isAutoRefresh = false;
-    clearTimeout(autoRefreshTimer);
-    clearInterval(countdownTimer);
-    document.getElementById('auto-refresh-btn').classList.remove('active');
-    document.getElementById('ar-icon').textContent  = '⏸';
-    document.getElementById('ar-label').textContent = 'Auto OFF';
-    document.getElementById('countdown-bar').classList.remove('active');
-    document.getElementById('refresh-status').classList.remove('active');
-    document.getElementById('countdown-fill').style.width = '100%';
-  }
-
-  function scheduleNext() {
-    if (!isAutoRefresh) return;
-    const seconds    = parseInt(document.getElementById('refresh-interval').value);
-    remainingSeconds = seconds;
-
-    const fill = document.getElementById('countdown-fill');
-    fill.style.transition = 'none';
-    fill.style.width = '100%';
-    setTimeout(() => {
-      fill.style.transition = `width ${seconds}s linear`;
-      fill.style.width = '0%';
-    }, 50);
-
-    clearInterval(countdownTimer);
-    updateCountdownText();
-    countdownTimer = setInterval(() => {
-      remainingSeconds--;
-      updateCountdownText();
-      if (remainingSeconds <= 0) clearInterval(countdownTimer);
-    }, 1000);
-
-    clearTimeout(autoRefreshTimer);
-    autoRefreshTimer = setTimeout(silentRefresh, seconds * 1000);
-  }
-
-  function updateCountdownText() {
-    const s = remainingSeconds;
-    document.getElementById('next-refresh').textContent =
-      (s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`) + ' में';
-  }
-
-  // ── Reversal toggle ───────────────────────────────────────
-  function toggleReversalLines() {
-    reversalVisible = !reversalVisible;
-    const btn = document.getElementById('reversal-toggle-btn');
-    btn.classList.toggle('active', reversalVisible);
-    document.getElementById('rv-label').textContent = reversalVisible ? 'Reversal ON' : 'Reversal OFF';
-    // ✅ सिर्फ reversal lines update करो, पूरा chart नहीं
-    updateReversalLines(window._lastCandles || [], reversalVisible ? lastReversals : [], []);
-  }
-
-  // ── Table toggle ──────────────────────────────────────────
-  function toggleTable() {
-    tableVisible = !tableVisible;
-    const section = document.getElementById('table-section');
-    section.style.display = tableVisible ? 'block' : 'none';
-    document.getElementById('table-toggle-btn').classList.toggle('active', tableVisible);
-    document.getElementById('table-icon').textContent  = tableVisible ? '✖' : '📋';
-    document.getElementById('table-label').textContent = tableVisible ? 'Table छुपाएं' : 'Table दिखाएं';
-    // ✅ Table सिर्फ तब build करो जब user खोले
-    if (tableVisible && window._lastCandles) buildTable(window._lastCandles);
-  }
-
-  // ── Interval options ──────────────────────────────────────
-  const intervalOptions = {
-    minutes: [1,2,3,5,10,15,20,25,30,60,120,180,240,300],
-    hours:   [1,2,3,4,5],
-    days:    [1],
-  };
-  function updateIntervalOptions() {
-    const unit   = document.getElementById('ctrl-unit').value;
-    const select = document.getElementById('ctrl-interval');
-    const prev   = select.value;
-    select.innerHTML = '';
-    intervalOptions[unit].forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v; opt.textContent = v;
-      if (String(v) === prev) opt.selected = true;
-      select.appendChild(opt);
-    });
-    if (!select.value) select.selectedIndex = 0;
-  }
-
-  // ── Helpers ───────────────────────────────────────────────
-  function showLoading(show) {
-    document.getElementById('loading').classList.toggle('show', show);
-  }
-  function showMsg(msg) {
-    const el = document.getElementById('message');
-    el.textContent = msg;
-    el.classList.add('show');
-  }
-  function hideMsg() {
-    document.getElementById('message').classList.remove('show');
-  }
-
-  // ── Page init ────────────────────────────────────────────
-  function onLibReady() {
-    initChart();
-    updateIntervalOptions();
-
-    if (initialCandles && initialCandles.length > 0) {
-      // Server ne data bheja (purana flow) — seedha render karo
-      window._lastCandles = initialCandles;
-      updateChartData(initialCandles, lastReversals);
-    } else {
-      // ✅ Fix: Server ne [] bheja — AJAX se load karo, error mat dikhao
-      loadChart();
+    if (data.error) {
+        showMsg('❌ ' + data.error);
+        return;
     }
-  }
 
-  // LightweightCharts defer hai — load hone tak wait karo
-  function waitForLib(cb) {
-    if (typeof LightweightCharts !== 'undefined') {
-      cb();
-    } else {
-      // Script tag ka load event
-      const s = document.querySelector('script[src*="lightweight-charts"]');
-      if (s) {
-        s.addEventListener('load', cb, { once: true });
-      } else {
-        // Last resort fallback
-        window.addEventListener('load', cb, { once: true });
-      }
+    if (!data.candles || data.candles.length === 0) { 
+        showMsg('❌ इस range में कोई candle नहीं मिली'); 
+        return; 
     }
-  }
 
-  // ── Symbol Autocomplete Fetcher ───────────────────────────────
-  function fetchSymbols(query) {
-    if (query.trim().length < 2) return; // 2 अक्षर से कम पर सर्च न करें
+    // असली डेटा को चार्ट में पास करें
+    lastReversals = data.reversal_lines || [];
+    window._chartInitialized = false;
     
-    fetch(`/api/symbols/?q=${encodeURIComponent(query)}`)
-      .then(r => r.json())
-      .then(data => {
-        const dataList = document.getElementById('symbol-list');
-        dataList.innerHTML = ''; // पुरानी लिस्ट क्लियर करें
-        
-        if (data.results && data.results.length > 0) {
-          data.results.forEach(item => {
-            const option = document.createElement('option');
-            option.value = item.symbol; // डेटाबेस वाला एकदम सही नाम
-            dataList.appendChild(option);
-          });
-        }
-      })
-      .catch(err => console.error("Symbol search error:", err));
+    updateChartData(data.candles, lastReversals);
+    
+    if (isAutoRefresh) {
+      document.getElementById('live-dot').style.display = 'block';
+    }
+  } catch (err) {
+    showLoading(false);
+    showMsg('❌ Server error: ' + err.message);
   }
-  waitForLib(onLibReady);
+}
+// ── Silent refresh ─────────────────────────────────── 
+// ── Silent refresh ─────────────────────────────────── 
+async function silentRefresh() {
+  if (!isAutoRefresh) return;
+  
+  // अगला टाइमर सेट करें
+  scheduleNext(); 
+
+  const symbol   = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
+  const unit     = document.getElementById('ctrl-unit').value;
+  const interval = parseInt(document.getElementById('ctrl-interval').value) || 5;
+  const fromDate = document.getElementById('ctrl-from').value;
+  const toDate   = document.getElementById('ctrl-to').value;
+  const reversal = reversalVisible ? '1' : '0';
+
+  try {
+    // API को साइलेंटली कॉल करें
+    const url = `/api/candle/?symbol=${symbol}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}&reversal=${reversal}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    // अगर कोई एरर है या डेटा नहीं है, तो पुराना चार्ट ही रहने दें (कचरा न दिखाएं)
+    if (data.error || !data.candles || data.candles.length === 0) {
+      console.warn("Auto-refresh skipped: No new data or error occurred.");
+      return; 
+    }
+
+    // नया डेटा सफलतापूर्वक मिलने पर चार्ट अपडेट करें
+    lastReversals = data.reversal_lines || [];
+    updateChartData(data.candles, lastReversals);
+
+  } catch (err) {
+    console.error("Auto-refresh failed:", err);
+  }
+}
+
+// ── Auto refresh ──────────────────────────────────────
+let autoRefreshTimer = null, countdownTimer = null;
+let isAutoRefresh = false, remainingSeconds = 0;
+
+function toggleAutoRefresh() { isAutoRefresh ? stopAutoRefresh() : startAutoRefresh(); }
+
+function startAutoRefresh() {
+  isAutoRefresh = true;
+  document.getElementById('auto-refresh-btn').classList.add('active');
+  document.getElementById('ar-icon').textContent  = '▶';
+  document.getElementById('ar-label').textContent = 'Auto ON';
+  document.getElementById('countdown-bar').classList.add('active');
+  document.getElementById('refresh-status').classList.add('active');
+  document.getElementById('live-dot').style.display = 'block';
+  scheduleNext();
+}
+
+function stopAutoRefresh() {
+  isAutoRefresh = false;
+  clearTimeout(autoRefreshTimer); clearInterval(countdownTimer);
+  document.getElementById('auto-refresh-btn').classList.remove('active');
+  document.getElementById('ar-icon').textContent  = '⏸';
+  document.getElementById('ar-label').textContent = 'Auto';
+  document.getElementById('countdown-bar').classList.remove('active');
+  document.getElementById('refresh-status').classList.remove('active');
+  document.getElementById('live-dot').style.display = 'none';
+  document.getElementById('countdown-fill').style.width = '100%';
+}
+
+function scheduleNext() {
+  if (!isAutoRefresh) return;
+  const seconds = parseInt(document.getElementById('refresh-interval').value);
+  remainingSeconds = seconds;
+  const fill = document.getElementById('countdown-fill');
+  fill.style.transition = 'none'; fill.style.width = '100%';
+  setTimeout(() => { fill.style.transition = `width ${seconds}s linear`; fill.style.width = '0%'; }, 50);
+  clearInterval(countdownTimer);
+  updateCountdownText();
+  countdownTimer = setInterval(() => { remainingSeconds--; updateCountdownText(); if (remainingSeconds <= 0) clearInterval(countdownTimer); }, 1000);
+  clearTimeout(autoRefreshTimer);
+  autoRefreshTimer = setTimeout(silentRefresh, seconds * 1000);
+}
+
+function updateCountdownText() {
+  const s = remainingSeconds;
+  document.getElementById('next-refresh').textContent = (s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`) + ' में';
+}
+
+// ── Reversal toggle ────────────────────────────────── 
+function toggleReversalLines() {
+  reversalVisible = !reversalVisible;
+  document.getElementById('reversal-toggle-btn').classList.toggle('active', reversalVisible);
+  document.getElementById('rv-label').textContent = reversalVisible ? 'Reversal ✓' : 'Reversal ✗';
+  updateReversalLines(window._lastCandles || [], reversalVisible ? lastReversals : [], []);
+}
+
+// ── Table toggle ───────────────────────────────────── 
+function toggleTable() {
+  tableVisible = !tableVisible;
+  document.getElementById('table-section').style.display = tableVisible ? 'block' : 'none';
+  document.getElementById('table-toggle-btn').classList.toggle('active', tableVisible);
+  document.getElementById('table-label').textContent = tableVisible ? 'Table ✓' : 'Table';
+  if (tableVisible && window._lastCandles) buildTable(window._lastCandles);
+}
+
+// ── Interval options ───────────────────────────────── 
+const intervalOptions = {
+  minutes: [1,2,3,5,10,15,20,25,30,60,120,180,240,300],
+  hours:   [1,2,3,4,5],
+  days:    [1],
+};
+function updateIntervalOptions() {
+  const unit   = document.getElementById('ctrl-unit').value;
+  const select = document.getElementById('ctrl-interval');
+  const prev   = select.value;
+  select.innerHTML = '';
+  intervalOptions[unit].forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    if (String(v) === prev) opt.selected = true;
+    select.appendChild(opt);
+  });
+  if (!select.value) select.selectedIndex = 0;
+}
+
+// ── Symbol autocomplete (Real Database Search) ──
+async function fetchSymbols(query) {
+  if (query.trim().length < 2) return; // कम से कम 2 अक्षर टाइप होने पर सर्च करें
+  
+  try {
+    const response = await fetch(`/api/symbols/?q=${query}`);
+    const data = await response.json();
+    
+    const dl = document.getElementById('symbol-list');
+    dl.innerHTML = ''; // पुरानी लिस्ट क्लियर करें
+    
+    // API से मिले रिजल्ट्स को लिस्ट में डालें
+    if (data.results && data.results.length > 0) {
+      data.results.forEach(item => {
+        const opt = document.createElement('option'); 
+        opt.value = item.symbol; 
+        dl.appendChild(opt);
+      });
+    }
+  } catch(e) {
+    console.error('Symbol search failed:', e);
+  }
+}
+
+// ── Helpers ────────────────────────────────────────── 
+function showLoading(show) { document.getElementById('loading').classList.toggle('show', show); }
+function showMsg(msg) { const el = document.getElementById('message'); el.textContent = msg; el.classList.add('show'); }
+function hideMsg() { document.getElementById('message').classList.remove('show'); }
+
+// ── Page init ──────────────────────────────────────── 
+// ── Page init ──────────────────────────────────────── 
+function setDefaultDates() {
+  const today = new Date();
+  // स्थानीय समय (Local Time) के अनुसार YYYY-MM-DD फॉर्मेट बनाना
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+
+  // 'From' और 'To' दोनों इनपुट में आज की तारीख सेट करें
+  document.getElementById('ctrl-from').value = todayStr;
+  document.getElementById('ctrl-to').value   = todayStr;
+}
+
+// ══════════════════════════════════════════════════════
+//  SOUND ALERTS & NOTIFICATIONS
+// ══════════════════════════════════════════════════════
+let alertsEnabled = false;
+let previousSpotPrice = null;
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+// 1. अलर्ट चालू/बंद करने का फंक्शन
+function toggleAlerts() {
+  alertsEnabled = !alertsEnabled;
+  const btn = document.getElementById('alert-toggle-btn');
+  btn.classList.toggle('active', alertsEnabled);
+  
+  if (alertsEnabled) {
+    document.getElementById('alert-label').textContent = '🔔 Alerts ON';
+    // ब्राउज़र पॉलिसी: ऑडियो प्ले करने के लिए यूजर इंटरेक्शन ज़रूरी है
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    showToast("✅ Sound Alerts Activated!");
+  } else {
+    document.getElementById('alert-label').textContent = '🔕 Alerts OFF';
+  }
+}
+
+// 2. बीप साउंड जनरेट करने का फंक्शन (बिना किसी ऑडियो फाइल के)
+function playBeep() {
+  if (!alertsEnabled) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz (हाई पिच साउंड)
+  gain.gain.setValueAtTime(0.15, audioCtx.currentTime);     // वॉल्यूम
+  
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.4); // 0.4 सेकंड तक बजेगा
+}
+
+// 3. स्क्रीन पर पॉपअप (Toast) दिखाने का फंक्शन
+function showToast(msg) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = msg;
+  container.appendChild(toast);
+  
+  // 5 सेकंड बाद पॉपअप हटा दें
+  setTimeout(() => toast.remove(), 5000); 
+}
+
+// 4. प्राइस क्रॉस चेक करने का फंक्शन
+function checkReversalAlerts(currentPrice, reversals) {
+  if (!alertsEnabled || !reversals || reversals.length === 0) return;
+
+  if (previousSpotPrice !== null) {
+    reversals.forEach(rev => {
+      const linePrice = parseFloat(rev.price);
+      if (linePrice > 0) {
+        // चेक करें कि क्या प्राइस ने लाइन को नीचे से ऊपर या ऊपर से नीचे काटा है
+        const crossedUp   = previousSpotPrice < linePrice && currentPrice >= linePrice;
+        const crossedDown = previousSpotPrice > linePrice && currentPrice <= linePrice;
+
+        if (crossedUp || crossedDown) {
+          playBeep();
+          const direction = crossedUp ? "↗ Crossed UP" : "↘ Crossed DOWN";
+          showToast(`🚨 ALERT: Price ${direction} ${rev.label || 'Level'} at ${linePrice}`);
+        }
+      }
+    });
+  }
+  previousSpotPrice = currentPrice;
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  setDefaultDates();
+  updateIntervalOptions();
+  initChart();
+  loadChart();
+});
 </script>
 </body>
 </html>
