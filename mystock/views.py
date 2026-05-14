@@ -148,13 +148,13 @@ class SmartCache:
     def set(self, key, value, timeout=None):
         try:
             caches['default'].set(key, value, timeout)
-            # print(f"✅ Cache Set in Redis for key: {key}", flush=True)
+            print(f"✅ Cache Set in Redis for key: {key}", flush=True)
         except Exception as e:
             print(f"🔴 REDIS SET ERROR ({key}): {e}", flush=True)
             # pass
         try:
             caches['db_cache'].set(key, value, timeout)
-            # print(f"✅ Cache Set in Database for key: {key}", flush=True)
+            print(f"✅ Cache Set in Database for key: {key}", flush=True)
         except Exception as e:
             print(f"🔴 DB CACHE SET ERROR ({key}): {e}", flush=True)
             # pass
@@ -331,7 +331,7 @@ def _get_nifty_chain_context(symbol='NIFTY'):
     CACHE_KEY = f'chain_ctx_{symbol}'
     cached = cache.get(CACHE_KEY)
     if cached is not None:
-        print(f"⚡ FAST: {symbol} Data served from 3s Function Cache")
+        print(f"⚡ FAST: {symbol} Data served from 10s Function Cache")
         return cached
 
     # 2. 🟢 मेमोरी (Cache) से लाइव डेटा उठाएं जो Async लूप ने सेव किया है
@@ -363,7 +363,7 @@ def _get_nifty_chain_context(symbol='NIFTY'):
                 break
         
         result = (latest_time, spot_price, expiry_date, display_data, live_data)
-        cache.set(CACHE_KEY, result, 3) 
+        cache.set(CACHE_KEY, result, 10) 
         return result
     
     else:
@@ -416,7 +416,7 @@ def _get_nifty_chain_context(symbol='NIFTY'):
                     break
 
         result = (latest_time, spot_price, expiry_date, display_data, all_data)
-        cache.set(CACHE_KEY, result, 3) 
+        cache.set(CACHE_KEY, result, 10) 
         return result
 
 def option_chain_dashboard(request):
@@ -1230,7 +1230,7 @@ def parse_candles(api_response: dict):
 # View 1: Chart Page (HTML render)
 # ─────────────────────────────────────────────
 @xframe_options_exempt
-def chart_view(request):
+def chart_view1(request):
     today_str = date.today().isoformat()
     symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
     unit      = request.GET.get("unit",      "minutes")
@@ -1305,6 +1305,28 @@ def chart_view(request):
         "error":          error,
         "symbol":         symbol,
         "instrument_key": instrument_key or "—",
+        "unit":           unit,
+        "interval":       interval,
+        "from_date":      from_date,
+        "to_date":        to_date,
+    }
+    return render(request, "mystock/chart.html", context)
+
+@xframe_options_exempt
+def chart_view(request):
+    # आज की तारीख (YYYY-MM-DD फॉर्मेट में)
+    today_str = date.today().isoformat()
+
+    symbol    = request.GET.get("symbol", "NIFTY").strip().upper()
+    unit      = request.GET.get("unit", "minutes")
+    interval  = request.GET.get("interval", "5")
+    
+    # अगर URL में डेट नहीं है, तो आज की डेट (today_str) का उपयोग करें
+    from_date = request.GET.get("from_date", today_str)
+    to_date   = request.GET.get("to_date", today_str)
+    
+    context = {
+        "symbol":         symbol,
         "unit":           unit,
         "interval":       interval,
         "from_date":      from_date,
@@ -1419,7 +1441,7 @@ def symbol_search(request):
 
 
 @xframe_options_exempt
-def dashboard_chart_view(request):
+def dashboard_chart_view1(request):
     today     = date.today()
     symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
     unit      = request.GET.get("unit",      "minutes")
@@ -1477,6 +1499,33 @@ def dashboard_chart_view(request):
         "candles":        candles,
         "reversal_lines": reversal_lines,
         "error":          error,
+        "symbol":         symbol,
+        "unit":           unit,
+        "interval":       interval,
+        "from_date":      from_date,
+        "to_date":        to_date,
+    }
+    return render(request, "mystock/dashboard_chart.html", context)
+
+@xframe_options_exempt
+def dashboard_chart_view(request):
+    """
+    यह व्यू अब सिर्फ खाली HTML शेल रेंडर करेगा।
+    डेटा लोड करने का सारा काम JS (AJAX) करेगा जिससे पेज इंस्टेंट खुलेगा।
+    """
+    today = date.today()
+    symbol    = request.GET.get("symbol", "NIFTY").strip().upper()
+    unit      = request.GET.get("unit", "minutes")
+    interval  = request.GET.get("interval", "5")
+    
+    req_from  = request.GET.get("from_date")
+    req_to    = request.GET.get("to_date")
+    
+    from_date = req_from if req_from else today.isoformat()
+    to_date   = req_to if req_to else today.isoformat()
+
+    # बस पैरामीटर्स पास कर रहे हैं, कोई API या DB Call नहीं!
+    context = {
         "symbol":         symbol,
         "unit":           unit,
         "interval":       interval,
@@ -2554,12 +2603,6 @@ def add_manual_trade_api(request):
   
 
 
-
-
-
-
-
-
 # test code 
 
 
@@ -2915,6 +2958,7 @@ def get_reversal_lines_for_replay(symbol: str, date_str: str,
         logger.exception("get_reversal_lines_for_replay failed | symbol=%s | date=%s", symbol, date_str)
         return []
     
+
 
 
 # ─────────────────────────────────────────────────────────────────────
