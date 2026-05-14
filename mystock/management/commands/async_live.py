@@ -1574,11 +1574,15 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
     r_level        = master_levels["R"]["entry"]
     r_target_level = master_levels["R"]["target"]
     r_sl_level     = master_levels["R"]["sl"]
+    r_tag          = master_levels["R"].get("tag", "R")
 
     eff_sup        = master_levels["S"]["strike"]
     s_level        = master_levels["S"]["entry"]
     s_target_level = master_levels["S"]["target"]
     s_sl_level     = master_levels["S"]["sl"]
+    s_tag          = master_levels["S"].get("tag", "S")
+
+    
 
     # 👇👇👇 यह FIX जोड़ें: स्पेस और कॉमा हटाकर Float में बदलें 👇👇👇
     r_level = float("".join(str(r_level).split()).replace(",", "")) if r_level else None
@@ -1590,23 +1594,30 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
     
     # print trend and gap for logging
     log_time = localtime().strftime("%H:%M:%S")
-    put_gap = (r_level - spot) if r_level else None
-    call_gap = (spot - s_level) if s_level else None
-    if put_gap > call_gap:
-        print(
-            f"[{log_time}] 📊 TICK: Spot={spot}" 
-            f" 🟢 Buy CALL @ S Strik {eff_sup} To Level {s_level} (Gap: {call_gap:.2f})"
-        )
-    else:
-        print(
-            f"[{log_time}] 📊 TICK: Spot={spot}" 
-            f" 🔴 Buy PUT @ R Strik {eff_res} To Level {r_level} (Gap: {put_gap:.2f})" 
-            )
+
     
+    put_gap = (r_level - spot) if r_level is not None else None
+    call_gap = (spot - s_level) if s_level is not None else None
+
+    # दोनों गैप मौजूद होने पर ही तुलना करें
+    if put_gap is not None and call_gap is not None:
+        if put_gap > call_gap:
+            print(f"[{log_time}] 📊 TICK: Spot={spot} 🟢 Buy CALL @ S Strike {eff_sup} To Level {s_level} (Gap: {call_gap:.2f})")
+        else:
+            print(f"[{log_time}] 📊 TICK: Spot={spot} 🔴 Buy PUT @ R Strike {eff_res} To Level {r_level} (Gap: {put_gap:.2f})")
+    elif call_gap is not None:
+        print(f"[{log_time}] 📊 TICK: Spot={spot} 🟢 Buy CALL @ S Strike {eff_sup} To Level {s_level} (Gap: {call_gap:.2f})")
+    elif put_gap is not None:
+        print(f"[{log_time}] 📊 TICK: Spot={spot} 🔴 Buy PUT @ R Strike {eff_res} To Level {r_level} (Gap: {put_gap:.2f})")
+    else:
+        print(f"[{log_time}] 📊 TICK: Spot={spot} ⚪ Waiting for valid Resistance/Support Levels...")
     # ==========================================
     # ── 3. EXIT LOGIC (सभी Open Trades के लिए) ──
     # ==========================================
     open_trades = PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="OPEN")
+    # print(f"[{current_time}] 🔍 Checking {open_trades.count()} open trades for exit conditions...")
+    # 👇 1. लूप के बाहर यह नया फ्लैग बनाएँ 👇
+    trade_closed_in_this_tick = False
 
     # 15:15 के बाद मार्केट क्लोज हो चुका होगा, तो सभी ट्रेड्स को क्लोज कर देना है
     local_current_time = localtime(current_time)
@@ -1617,6 +1628,7 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
         entry  = float(open_trade.entry_spot)
         ttype  = open_trade.trade_type
         entry_strike = float(open_trade.entry_strike) if open_trade.entry_strike else None
+        # print(f"    [Debug] Evaluating Trade ID {open_trade.id} | Type: {ttype} | Entry: {entry} | Entry Strike: {entry_strike}")
 
         # ✅ FIX Bug 1: trade की actual entry_strike से target/SL निकालो
         # master_levels में shifted strike हो सकती है — वो इस trade की नहीं
@@ -1644,7 +1656,7 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
 
             if spot <= (target + BUFFER): hit_target = True
             elif spot >= (sl - BUFFER):   hit_sl     = True
-            print(f"    [Debug] PUT Trade | Entry Strike: {entry_strike} | Target: {target} | SL: {sl} | Hit Target Gep: {spot - hit_target:.2f} | Hit SL: {hit_sl - spot:.2f}")
+            print(f"    [Debug] PUT Trade | Spot {spot} Entry Strike: {entry_strike} | Target: {target} | SL: {sl} | Hit Target Gep: {spot - target:.2f} | Hit SL: {sl - spot:.2f}")
         elif ttype == 'CALL':
             if entry_strike:
                 target = get_rev_val_direct(symbol, today, entry_strike + step, 'PE') or s_target_level or (entry + TARGET_PTS)
@@ -1671,11 +1683,18 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
             open_trade.save()
             print(f"[{current_time}] 🟢 TRADE CLOSED | {ttype} | Result: {open_trade.result} | PNL: {open_trade.pnl} | Strike: {entry_strike}")
 
+            # 👇 2. जैसे ही ट्रेड क्लोज़ हो, इस फ्लैग को True कर दें 👇
+            trade_closed_in_this_tick = True
     
     # 🛑 FIREWALL: OPEN trade है तो नई entry मत लो
     if PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="OPEN").exists():
         return "Trade is Running"
 
+    # 👇 3. NEW FIREWALL: अगर इसी टिक में ट्रेड क्लोज़ हुई है, तो तुरंत नई एंट्री मत लो! 👇
+    if trade_closed_in_this_tick:
+        print(f"[{current_time}] ⏳ Trade just closed. Waiting for next tick to refresh levels.")
+        return "Trade Just Closed"
+    
     # ==========================================
     # ── 4. TIME STOP LOGIC (लूप और फायरवॉल के बाहर) ──
     # ==========================================
@@ -1712,24 +1731,50 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
     # ==========================================
     
         
-    if r_level and spot >= (r_level - BUFFER):        # ← BUFFER add
+    # if r_level and spot >= (r_level - BUFFER):        # ← BUFFER add
+    #     PaperTrade.objects.create(
+    #         symbol=symbol, trade_type='PUT',
+    #         entry_time=current_time, entry_spot=spot,
+    #         trigger_level='R', trigger_price=r_level,
+    #         entry_strike=eff_res,
+    #     )
+    #     print(f"[{current_time}] 🔴 PUT ENTRY @ {spot} (R={r_level}, diff={spot-r_level:.2f})")
+    #     return "Put Trade Opened"
+
+    # elif s_level and spot <= (s_level + BUFFER):      # ← BUFFER add
+    #     PaperTrade.objects.create(
+    #         symbol=symbol, trade_type='CALL',
+    #         entry_time=current_time, entry_spot=spot,
+    #         trigger_level='S', trigger_price=s_level,
+    #         entry_strike=eff_sup,
+    #     )
+    #     print(f"[{current_time}] 🟢 CALL ENTRY @ {spot} (S={s_level}, diff={s_level-spot:.2f})")
+    #     return "Call Trade Opened"
+
+    # ==========================================
+    # ── 5. AUTOMATIC ENTRY LOGIC ──
+    # ==========================================
+    
+    if r_level and spot >= (r_level - BUFFER):
         PaperTrade.objects.create(
             symbol=symbol, trade_type='PUT',
             entry_time=current_time, entry_spot=spot,
-            trigger_level='R', trigger_price=r_level,
+            trigger_level=r_tag,  # 👈 यहाँ r_tag लगाएँ
+            trigger_price=r_level,
             entry_strike=eff_res,
         )
-        print(f"[{current_time}] 🔴 PUT ENTRY @ {spot} (R={r_level}, diff={spot-r_level:.2f})")
+        print(f"[{current_time}] 🔴 PUT ENTRY @ {spot} (Level={r_tag}, Strike={eff_res}, diff={spot-r_level:.2f})")
         return "Put Trade Opened"
 
-    elif s_level and spot <= (s_level + BUFFER):      # ← BUFFER add
+    elif s_level and spot <= (s_level + BUFFER):
         PaperTrade.objects.create(
             symbol=symbol, trade_type='CALL',
             entry_time=current_time, entry_spot=spot,
-            trigger_level='S', trigger_price=s_level,
+            trigger_level=s_tag,  # 👈 यहाँ s_tag लगाएँ
+            trigger_price=s_level,
             entry_strike=eff_sup,
         )
-        print(f"[{current_time}] 🟢 CALL ENTRY @ {spot} (S={s_level}, diff={s_level-spot:.2f})")
+        print(f"[{current_time}] 🟢 CALL ENTRY @ {spot} (Level={s_tag}, Strike={eff_sup}, diff={s_level-spot:.2f})")
         return "Call Trade Opened"
 
 def get_rev_val_direct(symbol, selected_date, strike, side, period=5):
