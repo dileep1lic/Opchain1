@@ -155,7 +155,7 @@ def get_master_levels(symbol, selected_date=None):
     if res_type == "SHIFTED WTT": eff_res = res_base + step
     elif res_type == "SHIFTED WTB" : eff_res = res_base + step
     elif res_type == "WTT" : eff_res = res_target - step
-    elif res_type == "WTB" : eff_res = res_target + step
+    elif res_type == "WTB" : eff_res = res_base
     elif res_type == "STRONG" : eff_res = res_base + step
      
     else: eff_res = res_base + step
@@ -169,58 +169,7 @@ def get_master_levels(symbol, selected_date=None):
         .first()
     )
 
-    is_r_paused = (
-        last_put is not None
-        and last_put.result == 'SL'
-        and (
-            float(last_put.entry_strike or 0) == float(eff_res) 
-            or float((last_put.entry_strike or 0) + step) == float(eff_res)
-        )
-    )
-    if is_r_paused:
-        # 1. पता करें कि पिछली एंट्री कहाँ हुई थी? (उदा: 22000)
-        last_entry_strike = float(last_put.entry_strike or 0)
-        
-        # 2. असली SL कहाँ हिट हुआ था? (Entry से 1 step ऊपर, उदा: 22050)
-        actual_sl_strike = last_entry_strike + step
-        
-        # 3. नया सुरक्षित रेजिस्टेंस इस SL वाली स्ट्राइक से भी 1 step ऊपर होगा (उदा: 22100)
-        new_safe_res = actual_sl_strike + step
-        
-        eff_res = new_safe_res  # हमारा नया रेजिस्टेंस अब यह है
-        is_r_paused = False     # बॉट को अन-पॉज़ (Unpause) कर दें
-        res_status += f" (FORCED SHIFT TO {eff_res})"
-
-    # ✅ FIX Bug 5: get_rev_val सिर्फ एक बार — result reuse
-    r_entry_val = None
-    # Repeat Shift सिर्फ तब जब SL नहीं लगा
-    if not is_r_paused:
-        r_entry_val = get_rev_val(eff_res, 'CE')
-        if r_entry_val:                              # ← सिर्फ एक check
-            r_already_traded = PaperTrade.objects.filter(
-                symbol=symbol, trade_date=selected_date, trade_type='PUT',
-                trigger_price__gte=r_entry_val - tolerance,
-                trigger_price__lte=r_entry_val + tolerance,
-            ).exists()
-            if r_already_traded:                     # ← r_entry_val के अंदर
-                # ✅ Shift से पहले check: नई shifted strike पर भी SL था?
-                new_eff_res = eff_res + step
-                last_put_on_new = PaperTrade.objects.filter(
-                    symbol=symbol, trade_date=selected_date,
-                    trade_type='PUT', result='SL',
-                    entry_strike=new_eff_res
-                ).exists()
-                
-                if last_put_on_new:
-                    # नई strike पर भी SL था — और shift मत करो
-                    is_r_paused = True
-                    res_status += " SL HIT SHIFTED (PAUSED)"
-                else:
-                    eff_res = new_eff_res
-                    res_status += " (REPEAT SHIFT)"
-                    r_entry_val = get_rev_val(eff_res, 'CE')
-
-    # न्यू टेस्टिंग===============
+   
     # 🟢 सबसे पहले मेन (API वाले) रेजिस्टेंस को याद कर लो
     original_eff_res = eff_res  
     
@@ -272,7 +221,7 @@ def get_master_levels(symbol, selected_date=None):
                 r_entry_val = get_rev_val(eff_res, 'CE') 
             else:
                 break
-    # end testing================
+
 
     levels["R"]["status"] = res_status
     levels["R"]["strike"] = eff_res
@@ -286,7 +235,7 @@ def get_master_levels(symbol, selected_date=None):
     # ==========================================
     if      sup_type =="SHIFTED WTT"    : eff_sup = sup_base - step
     elif    sup_type == "SHIFTED WTB"   : eff_sup = sup_base - step
-    elif    sup_type == "WTT"           : eff_sup = sup_target - step
+    elif    sup_type == "WTT"           : eff_sup = sup_base 
     elif    sup_type == "WTB"           : eff_sup = sup_target + step
     elif    sup_type == "STRONG"        : eff_sup = sup_base - step
     else: eff_sup = sup_base - step
@@ -300,57 +249,7 @@ def get_master_levels(symbol, selected_date=None):
         .first()
     )
 
-    # is_s_paused = (
-    #     last_call is not None
-    #     and last_call.result == 'SL'
-    #     and (
-    #         float(last_call.entry_strike or 0) == float(eff_sup) 
-    #         or float((last_call.entry_strike or 0) - step) == float(eff_sup)
-    #     )
-    # )
-    # # ── 2. Forced Shift Logic (अगर सपोर्ट पर SL कटा है, तो नीचे शिफ्ट हो जाओ) ──
-    # if is_s_paused:
-    #     # 1. पता करें कि पिछली एंट्री कहाँ हुई थी? (उदा: 22000)
-    #     last_entry_strike = float(last_call.entry_strike or 0)
-        
-    #     # 2. असली SL कहाँ हिट हुआ था? (Entry से 1 step नीचे, उदा: 21950)
-    #     actual_sl_strike = last_entry_strike - step
-        
-    #     # 3. नया सुरक्षित सपोर्ट इस SL वाली स्ट्राइक से भी 1 step नीचे होगा (उदा: 21900)
-    #     new_safe_sup = actual_sl_strike - step
-        
-    #     eff_sup = new_safe_sup  # हमारा नया सपोर्ट अब यह है
-    #     is_s_paused = False     # बॉट को अन-पॉज़ (Unpause) कर दें
-    #     sup_status += f" (FORCED SHIFT TO {eff_sup})"
-
-    # # ✅ FIX Bug 5: get_rev_val सिर्फ एक बार
-    # s_entry_val = None
-    # if not is_s_paused:
-    #     s_entry_val = get_rev_val(eff_sup, 'PE')
-    #     if s_entry_val:
-    #         s_already_traded = PaperTrade.objects.filter(
-    #             symbol=symbol, trade_date=selected_date, trade_type='CALL',
-    #             trigger_price__gte=s_entry_val - tolerance,
-    #             trigger_price__lte=s_entry_val + tolerance,
-    #         ).exists()
-    #         if s_already_traded:
-    #             # ✅ Shift से पहले check: नई shifted strike पर भी SL था?
-    #             new_eff_sup = eff_sup - step
-    #             last_call_on_new = PaperTrade.objects.filter(
-    #                 symbol=symbol, trade_date=selected_date,
-    #                 trade_type='CALL', result='SL',
-    #                 entry_strike=new_eff_sup
-    #             ).exists()
-    #             if last_call_on_new:
-    #                 # नई strike पर भी SL था — और shift मत करो
-    #                 is_s_paused = True
-    #                 sup_status += " SL HIT SHIFTED (PAUSED)"
-    #             else:  
-    #                 eff_sup     = eff_sup - step
-    #                 sup_status += " (REPEAT SHIFT)"
-    #                 s_entry_val = get_rev_val(eff_sup, 'PE')   # shift के बाद नई strike
-
-    # न्यू टेस्टिंग===============
+ 
     # 🟢 1. लूप शुरू होने से पहले असली (Main) सपोर्ट को याद रखें
     original_eff_sup = eff_sup  
     
