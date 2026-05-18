@@ -166,6 +166,9 @@
     </select>
 
     <button onclick="refresh()">↻ Refresh</button>
+    <button id="alert-toggle-btn" onclick="toggleAlerts()" style="border-color: #3d4262;">
+      🔕 Voice OFF
+    </button>
   </div>
 </div>
 
@@ -321,6 +324,8 @@ function updateUI(d) {
   const spot = t.spot;
   document.getElementById('srvTime').textContent = d.server_time || '--';
 
+  checkApproachingTrades(spot, t.r_trigger, t.s_trigger);
+
   // ── R Card ──────────────────────────────────────────────
   document.getElementById('rStrikeVal').textContent   = fmtI(t.r_strike);
   document.getElementById('rStatus').textContent      = t.r_status || '—';
@@ -466,6 +471,96 @@ async function refresh() {
     eb.innerHTML = '<strong>Connection Error:</strong> ' + e.message;
   }
     } finally { _liveInFlight = false; }
+}
+
+// ══════════════════════════════════════════════════════
+//  VOICE ALERTS & DISTANCE TRACKER (10 Point Logic)
+// ══════════════════════════════════════════════════════
+let alertsEnabled = false;
+let lastAnnouncedR = null; // पिछली बार R के लिए क्या पॉइंट बोला था
+let lastAnnouncedS = null; // पिछली बार S के लिए क्या पॉइंट बोला था
+let lastSpeakTime = 0;     // आवाज़ मिक्स न हो उसके लिए टाइमर
+
+function toggleAlerts() {
+  alertsEnabled = !alertsEnabled;
+  const btn = document.getElementById('alert-toggle-btn');
+  
+  if (alertsEnabled) {
+    btn.innerHTML = '🔔 Voice ON';
+    btn.style.borderColor = '#22c55e';
+    btn.style.color = '#22c55e';
+    speakAlert("अलर्ट सिस्टम चालू हो गया है।");
+  } else {
+    btn.innerHTML = '🔕 Voice OFF';
+    btn.style.borderColor = '#3d4262';
+    btn.style.color = '#e2e8f0';
+    window.speechSynthesis.cancel();
+  }
+}
+
+function speakAlert(text) {
+  if (!alertsEnabled || !('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel(); // पुरानी आवाज़ रोकें
+  const msg = new SpeechSynthesisUtterance(text);
+  msg.lang = 'hi-IN'; // शुद्ध हिंदी
+  msg.rate = 0.9; 
+  window.speechSynthesis.speak(msg);
+}
+
+function checkApproachingTrades(spot, r_trigger, s_trigger) {
+  if (!alertsEnabled || !spot) return;
+
+  const now = Date.now();
+  // अगर पिछले 10 सेकंड के अंदर कुछ बोला है, तो शांत रहें (Spam रोकने के लिए)
+  if (now - lastSpeakTime < 10000) return; 
+
+  let announced = false;
+
+  // 1. PUT ट्रेड चेक करें (Resistance / R-Level)
+  if (r_trigger && isFinite(r_trigger)) {
+    let diffR = r_trigger - spot; // Spot नीचे से ऊपर R की तरफ जाता है
+    
+    // अगर अंतर 10 पॉइंट या उससे कम है और 0 से ऊपर है
+    if (diffR > 0 && diffR <= 10) {
+      let pts = Math.round(diffR); // दशमलव हटाकर सीधा नंबर लें
+      if (lastAnnouncedR !== pts) { // सिर्फ तब बोलें जब पॉइंट बदलें
+        speakAlert(`पुट ट्रेड के लिए सिर्फ ${pts} पॉइंट बचे हैं।`);
+        lastAnnouncedR = pts;
+        announced = true;
+      }
+    } else if (diffR <= 0 && diffR >= -5 && lastAnnouncedR !== 0) {
+      speakAlert(`पुट ट्रेड का लेवल आ गया है!`);
+      lastAnnouncedR = 0;
+      announced = true;
+    } else if (diffR > 10) {
+      lastAnnouncedR = null; // मार्केट दूर चला गया तो रीसेट कर दें
+    }
+  }
+
+  // 2. CALL ट्रेड चेक करें (Support / S-Level)
+  if (!announced && s_trigger && isFinite(s_trigger)) {
+    let diffS = spot - s_trigger; // Spot ऊपर से नीचे S की तरफ जाता है
+    
+    // अगर अंतर 10 पॉइंट या उससे कम है और 0 से ऊपर है
+    if (diffS > 0 && diffS <= 10) {
+      let pts = Math.round(diffS);
+      if (lastAnnouncedS !== pts) {
+        speakAlert(`कॉल ट्रेड के लिए सिर्फ ${pts} पॉइंट बचे हैं।`);
+        lastAnnouncedS = pts;
+        announced = true;
+      }
+    } else if (diffS <= 0 && diffS >= -5 && lastAnnouncedS !== 0) {
+      speakAlert(`कॉल ट्रेड का लेवल आ गया है!`);
+      lastAnnouncedS = 0;
+      announced = true;
+    } else if (diffS > 10) {
+      lastAnnouncedS = null;
+    }
+  }
+
+  if (announced) {
+    lastSpeakTime = now;
+  }
 }
 
 // ── Smart Polling: AbortController + Visibility API ─────────────────
