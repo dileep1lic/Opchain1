@@ -49,6 +49,8 @@ if not DEBUG:
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -90,8 +92,19 @@ TEMPLATES = [
     },
 ]
 
+ASGI_APPLICATION = 'myproject.asgi.application'
+
 WSGI_APPLICATION = 'myproject.wsgi.application'
 
+# websocket के लिए channels का ASGI application सेट करें
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)], # आपका Redis एड्रेस
+        },
+    },
+}
 
 
 # ── Database ─────────────────────────────────────────────────────────────
