@@ -853,20 +853,88 @@ window.addEventListener('load', () => {
 // 2. Page Visibility: tab background में हो तो polling रुकेगी (CPU/battery save)
 // 3. setInterval की जगह setTimeout chain — request complete होने के बाद अगली शुरू होगी
 
-let _abortController = null;
-let _pollTimer = null;
+// let _abortController = null;
+// let _pollTimer = null;
 
-function refreshData() {
-    if (_refreshInFlight) return;
-    _refreshInFlight = true;
+// function refreshData() {
+//     if (_refreshInFlight) return;
+//     _refreshInFlight = true;
 
     // पिछली request abort करो (Broken pipe का असली कारण)
+//     if (_abortController) _abortController.abort();
+//     _abortController = new AbortController();
+
+//     const headers = {};
+//     if (_tableEtag) headers['If-None-Match'] = _tableEtag;
+
+//     fetch('/table-update-url/', { headers, signal: _abortController.signal })
+//     .then(response => {
+//         _refreshInFlight = false;
+//         if (response.status === 304) return null;
+//         if (!response.ok) return null;
+//         const newEtag = response.headers.get('ETag');
+//         if (newEtag) _tableEtag = newEtag;
+//         return response.text();
+//     })
+//     .then(html => {
+//         if (!html || html.trim() === "") return;
+//         document.getElementById('table-container').innerHTML = html;
+//         const newTime   = document.getElementById('hidden-latest-time')?.value;
+//         const newSpot   = document.getElementById('hidden-spot-price')?.value;
+//         const resStrike = document.getElementById('hidden-res-strike')?.value;
+//         const resStatus = document.getElementById('hidden-res-status')?.value;
+//         const supStrike = document.getElementById('hidden-sup-strike')?.value;
+//         const supStatus = document.getElementById('hidden-sup-status')?.value;
+//         const newExpiry = document.getElementById('hidden-expiry-date')?.value;
+//         if(newSpot) document.getElementById('header-spot').innerText = newSpot;
+//         if(newTime) document.getElementById('header-time').innerText = newTime;
+//         if(newExpiry) document.getElementById('header-expiry').innerText = newExpiry;
+//         if(resStrike) {
+//             document.getElementById('header-res').innerHTML = `${resStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${resStatus}]</span>`;
+//         }
+//         if(supStrike) {
+//             document.getElementById('header-sup').innerHTML = `${supStrike} <span style="font-size: 10px; opacity: 0.8; font-weight: normal;">[${supStatus}]</span>`;
+//         }
+//         fixTableColspans();
+//         setTimeout(() => { addSRLabelsToLine(); }, 50);
+//     })
+//     .catch(err => {
+//         _refreshInFlight = false;
+//         if (err.name !== 'AbortError') console.warn("Update Error:", err);
+//     });
+// }
+
+// function startPolling() {
+//     stopPolling();
+//     _pollTimer = setInterval(refreshData, 5000);
+// }
+// function stopPolling() {
+//     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+//     if (_abortController) { _abortController.abort(); _abortController = null; }
+//     _refreshInFlight = false;
+// }
+
+
+// ── WebSockets & Smart Polling (Push Architecture) ─────────────────────────
+
+let _abortController = null;
+let _refreshInFlight = false;
+let _pollTimer = null;
+let socket = null;
+let isSocketConnected = false;
+
+// 1. डेटा फेच करने वाला फंक्शन (वही रहेगा, बस अब ये WebSocket के कहने पर चलेगा)
+function refreshData() {
+    if (_refreshInFlight || document.hidden) return; // अगर टैब हाईड है तो रिफ्रेश मत करो
+    _refreshInFlight = true;
+
     if (_abortController) _abortController.abort();
     _abortController = new AbortController();
 
     const headers = {};
     if (_tableEtag) headers['If-None-Match'] = _tableEtag;
 
+    // यहाँ अपने URL को सही करें (जैसे '/api/table-update/')
     fetch('/table-update-url/', { headers, signal: _abortController.signal })
     .then(response => {
         _refreshInFlight = false;
@@ -886,6 +954,7 @@ function refreshData() {
         const supStrike = document.getElementById('hidden-sup-strike')?.value;
         const supStatus = document.getElementById('hidden-sup-status')?.value;
         const newExpiry = document.getElementById('hidden-expiry-date')?.value;
+        
         if(newSpot) document.getElementById('header-spot').innerText = newSpot;
         if(newTime) document.getElementById('header-time').innerText = newTime;
         if(newExpiry) document.getElementById('header-expiry').innerText = newExpiry;
@@ -904,15 +973,81 @@ function refreshData() {
     });
 }
 
-function startPolling() {
-    stopPolling();
-    _pollTimer = setInterval(refreshData, 5000);
+// 2. WebSocket कनेक्शन सेटअप
+function connectWebSocket() {
+    // HTTP के लिए 'ws://' और HTTPS के लिए 'wss://' का इस्तेमाल करें
+    const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const wsUrl = protocol + window.location.host + '/ws/options/';
+    
+    socket = new WebSocket(wsUrl);
+
+    socket.onopen = function(e) {
+        console.log('✅ WebSocket Connected!');
+        isSocketConnected = true;
+        stopPolling(); // अगर WebSocket कनेक्ट हो गया है, तो Polling बंद कर दें
+    };
+
+    socket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        const currentSymbol = document.querySelector('.symbol-val').innerText.trim() || "NIFTY";
+
+        // जब सर्वर से UPDATE_NOW का मैसेज आए और सिंबल मैच करे
+        if (data.message === "UPDATE_NOW" && data.symbol === currentSymbol) {
+            console.log(`⚡ Instant Update Triggered for ${currentSymbol}`);
+            refreshData(); 
+        }
+    };
+
+    socket.onclose = function(e) {
+        console.warn('⚠️ WebSocket Disconnected. Switching to Backup Polling...');
+        isSocketConnected = false;
+        startPolling(); // सॉकेट बंद होने पर 5 सेकंड वाली पोलिंग फिर से चालू करें
+        
+        // 5 सेकंड बाद दोबारा कनेक्ट करने की कोशिश करें
+        setTimeout(connectWebSocket, 5000);
+    };
+
+    socket.onerror = function(err) {
+        console.error('❌ WebSocket Error:', err);
+        socket.close(); // यह onclose ट्रिगर करेगा जिससे बैकअप पोलिंग चालू हो जाएगी
+    };
 }
+
+// 3. बैकअप पोलिंग (Fallback)
+function startPolling() {
+    if (!isSocketConnected) {
+        stopPolling();
+        _pollTimer = setInterval(refreshData, 5000);
+    }
+}
+
 function stopPolling() {
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
     if (_abortController) { _abortController.abort(); _abortController = null; }
     _refreshInFlight = false;
 }
+
+// 4. Tab Visibility हैडलर
+// document.addEventListener('visibilitychange', () => {
+//     if (document.hidden) {
+//         // टैब छुपने पर सब रोक दें
+//         stopPolling();
+//     } else {
+//         refreshData(); // वापस आने पर तुरंत रिफ्रेश करें
+//         if (!isSocketConnected) {
+//             startPolling(); // अगर WebSocket डाउन है तो पोलिंग चालू करें
+//         }
+//     }
+// });
+
+// Page unload पर cleanly cancel करो
+// window.addEventListener('beforeunload', () => {
+//     stopPolling();
+//     if (socket) socket.close();
+// });
+
+// === इनिशियलाइज़ करें ===
+connectWebSocket(); // सबसे पहले WebSocket कनेक्ट करने की कोशिश करें
 
 // ==========================================
 // --- DROPDOWN CLICK LOGIC (Hover Fix) ---
