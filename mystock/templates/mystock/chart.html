@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>📈 TradingView Option Chart</title>
+  <title>📈 Option Chart</title>
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 
@@ -714,6 +714,7 @@ async function loadChart() {
     showLoading(false);
     showMsg('❌ Server error: ' + err.message);
   }
+  saveSettings();
 }
 // ── Silent refresh ─────────────────────────────────── 
 // ── Silent refresh ─────────────────────────────────── 
@@ -755,7 +756,7 @@ async function silentRefresh() {
 let autoRefreshTimer = null, countdownTimer = null;
 let isAutoRefresh = false, remainingSeconds = 0;
 
-function toggleAutoRefresh() { isAutoRefresh ? stopAutoRefresh() : startAutoRefresh(); }
+function toggleAutoRefresh() { isAutoRefresh ? stopAutoRefresh() : startAutoRefresh(); saveSettings(); }
 
 function startAutoRefresh() {
   isAutoRefresh = true;
@@ -805,6 +806,7 @@ function toggleReversalLines() {
   document.getElementById('reversal-toggle-btn').classList.toggle('active', reversalVisible);
   document.getElementById('rv-label').textContent = reversalVisible ? 'Reversal ✓' : 'Reversal ✗';
   updateReversalLines(window._lastCandles || [], reversalVisible ? lastReversals : [], []);
+  saveSettings();
 }
 
 // ── Table toggle ───────────────────────────────────── 
@@ -814,6 +816,7 @@ function toggleTable() {
   document.getElementById('table-toggle-btn').classList.toggle('active', tableVisible);
   document.getElementById('table-label').textContent = tableVisible ? 'Table ✓' : 'Table';
   if (tableVisible && window._lastCandles) buildTable(window._lastCandles);
+  saveSettings();
 }
 
 // ── Interval options ───────────────────────────────── 
@@ -866,7 +869,6 @@ function showMsg(msg) { const el = document.getElementById('message'); el.textCo
 function hideMsg() { document.getElementById('message').classList.remove('show'); }
 
 // ── Page init ──────────────────────────────────────── 
-// ── Page init ──────────────────────────────────────── 
 function setDefaultDates() {
   const today = new Date();
   // स्थानीय समय (Local Time) के अनुसार YYYY-MM-DD फॉर्मेट बनाना
@@ -901,6 +903,7 @@ function toggleAlerts() {
   } else {
     document.getElementById('alert-label').textContent = '🔕 Alerts OFF';
   }
+  saveSettings();
 }
 
 // 2. बीप साउंड जनरेट करने का फंक्शन (बिना किसी ऑडियो फाइल के)
@@ -919,7 +922,24 @@ function playBeep() {
   gain.connect(audioCtx.destination);
   
   osc.start();
-  osc.stop(audioCtx.currentTime + 0.4); // 0.4 सेकंड तक बजेगा
+  osc.stop(audioCtx.currentTime + 0.6); // 0.6 सेकंड तक बजेगा
+}
+
+// 2.5 कंप्यूटर से बोलकर बताने वाला फंक्शन (Text-to-Speech)
+function speakAlert(text) {
+  if (!alertsEnabled || !('speechSynthesis' in window)) return;
+  
+  // अगर पहले से कुछ बोल रहा है, तो उसे रोक दें ताकि आवाज़ मिक्स न हो
+  window.speechSynthesis.cancel(); 
+  
+  const msg = new SpeechSynthesisUtterance(text);
+  
+  // आप चाहें तो 'en-IN' (Indian English) या 'hi-IN' (Hindi) सेट कर सकते हैं
+  msg.lang = 'hi-IN'; 
+  msg.rate = 1.0; // बोलने की स्पीड (1 normal है, 1.2 थोड़ा तेज़ है)
+  msg.pitch = 1.0; // आवाज़ का भारीपन
+  
+  window.speechSynthesis.speak(msg);
 }
 
 // 3. स्क्रीन पर पॉपअप (Toast) दिखाने का फंक्शन
@@ -947,14 +967,27 @@ function checkReversalAlerts(currentPrice, reversals) {
     reversals.forEach(rev => {
       const linePrice = parseFloat(rev.price);
       if (linePrice > 0) {
-        // चेक करें कि क्या प्राइस ने लाइन को नीचे से ऊपर या ऊपर से नीचे काटा है
         const crossedUp   = previousSpotPrice < linePrice && currentPrice >= linePrice;
         const crossedDown = previousSpotPrice > linePrice && currentPrice <= linePrice;
 
         if (crossedUp || crossedDown) {
-          playBeep();
-          const direction = crossedUp ? "↗ Crossed UP" : "↘ Crossed DOWN";
-          showToast(`🚨 ALERT: Price ${direction} ${rev.label || 'Level'} at ${linePrice}`);
+          playBeep(); // पहले बीप बजेगी
+          
+          const direction = crossedUp ? "Crossed UP" : "Crossed DOWN";
+          const levelName = rev.label || 'Level';
+          
+          // बोलने के लिए मैसेज तैयार करें
+          // const spokenMessage = `Alert. Price ${direction}, ${levelName}, at ${linePrice}`;
+          // 🗣️ बोलने के लिए शुद्ध हिंदी मैसेज
+          const spokenMessage = `अलर्ट! प्राइस ने ${levelName} को, ${linePrice} पर ${direction} किया है।`;
+          
+          // 💻 स्क्रीन पर इंग्लिश में ही दिखने दें (पढ़ने में आसान रहता है)
+          showToast(`🚨 ALERT: Price ${crossedUp ? 'Crossed UP' : 'Crossed DOWN'} ${levelName} at ${linePrice}`);
+          
+          showToast(`🚨 ${spokenMessage}`);
+          
+          // 👇 कंप्यूटर को बोलने का कमांड दें 👇
+          speakAlert(spokenMessage);
         }
       }
     });
@@ -962,12 +995,108 @@ function checkReversalAlerts(currentPrice, reversals) {
   previousSpotPrice = currentPrice;
 }
 
+// ══════════════════════════════════════════════════════
+//  LOCAL STORAGE (Save & Load Settings)
+// ══════════════════════════════════════════════════════
+
+function saveSettings() {
+  const settings = {
+    symbol: document.getElementById('ctrl-symbol').value,
+    unit: document.getElementById('ctrl-unit').value,
+    interval: document.getElementById('ctrl-interval').value,
+    fromDate: document.getElementById('ctrl-from').value,
+    toDate: document.getElementById('ctrl-to').value,
+    refreshInterval: document.getElementById('refresh-interval').value,
+    isAutoRefresh: isAutoRefresh,
+    reversalVisible: reversalVisible,
+    alertsEnabled: alertsEnabled,
+    tableVisible: tableVisible
+  };
+  localStorage.setItem('myChartSettings', JSON.stringify(settings));
+}
+
+function loadSettings() {
+  const saved = localStorage.getItem('myChartSettings');
+  
+  if (saved) {
+    try {
+      const settings = JSON.parse(saved);
+      
+      if(settings.symbol) document.getElementById('ctrl-symbol').value = settings.symbol;
+      
+      if(settings.unit) {
+          document.getElementById('ctrl-unit').value = settings.unit;
+          updateIntervalOptions(); // Unit बदलने पर interval लिस्ट अपडेट करना ज़रूरी है
+      }
+      if(settings.interval) document.getElementById('ctrl-interval').value = settings.interval;
+      if(settings.refreshInterval) document.getElementById('refresh-interval').value = settings.refreshInterval;
+
+      // Dates
+      if(settings.fromDate) document.getElementById('ctrl-from').value = settings.fromDate;
+      else setDefaultDates();
+      
+      if(settings.toDate) document.getElementById('ctrl-to').value = settings.toDate;
+      else setDefaultDates();
+
+      // Toggles & States
+      if (settings.isAutoRefresh) {
+        startAutoRefresh();
+      }
+      
+      if (settings.reversalVisible === false) {
+        reversalVisible = false;
+        document.getElementById('reversal-toggle-btn').classList.remove('active');
+        document.getElementById('rv-label').textContent = 'Reversal ✗';
+      }
+      
+      if (settings.alertsEnabled === true) {
+        alertsEnabled = true;
+        document.getElementById('alert-toggle-btn').classList.add('active');
+        document.getElementById('alert-label').textContent = '🔔 Alerts ON';
+      }
+      
+      if (settings.tableVisible === true) {
+        tableVisible = true;
+        document.getElementById('table-section').style.display = 'block';
+        document.getElementById('table-toggle-btn').classList.add('active');
+        document.getElementById('table-label').textContent = 'Table ✓';
+      }
+      
+    } catch (e) {
+      console.error("सेटिंग्स लोड करने में समस्या:", e);
+      setDefaultDates();
+      updateIntervalOptions();
+    }
+  } else {
+    // अगर पहली बार खोल रहे हैं तो डिफ़ॉल्ट लोड करें
+    setDefaultDates();
+    updateIntervalOptions();
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
-  setDefaultDates();
-  updateIntervalOptions();
+  // पहले सेटिंग्स लोड करें (यह setDefaultDates और updateIntervalOptions को भी हैंडल कर लेगा)
+  loadSettings(); 
+  
+  // चार्ट इनीशियलाइज़ करें
   initChart();
+  
+  // अंत में डेटा लोड करें
   loadChart();
+
+  // अगर यूज़र Dropdown या Input चेंज करे तो भी सेटिंग सेव हो जाए
+  document.getElementById('ctrl-unit').addEventListener('change', () => { updateIntervalOptions(); saveSettings(); });
+  document.getElementById('ctrl-interval').addEventListener('change', saveSettings);
+  document.getElementById('refresh-interval').addEventListener('change', saveSettings);
+  document.getElementById('ctrl-from').addEventListener('change', saveSettings);
+  document.getElementById('ctrl-to').addEventListener('change', saveSettings);
 });
+// window.addEventListener('DOMContentLoaded', () => {
+//   setDefaultDates();
+//   updateIntervalOptions();
+//   initChart();
+//   loadChart();
+// });
 </script>
 </body>
 </html>
