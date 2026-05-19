@@ -44,10 +44,10 @@ class OptionChain(models.Model):
     class Meta:
         ordering = ['-Time']
         indexes = [
-            models.Index(fields=['Symbol', 'Time']),
-            models.Index(fields=['Symbol', 'Strike_Price', 'Time']),
-            # FIX: यह index duplicate था (Symbol+Time+Strike = Strike+Time+Symbol same है)
-            # हटाया — extra index write को slow करते हैं
+            models.Index(fields=['Symbol', 'Time'], name='idx_oc_symbol_time'),
+            models.Index(fields=['Symbol', 'Strike_Price', 'Time'], name='idx_oc_symbol_strike_time'),
+            # ⚡ OPTIMIZATION: For bulk queries - use Time field for date-based filtering
+            models.Index(fields=['Symbol', 'Strike_Price'], name='idx_oc_symbol_strike'),
         ]
 
 
@@ -97,7 +97,9 @@ class SupportResistance(models.Model):
     class Meta:
         db_table = "Support_Resistance"
         indexes = [
-            models.Index(fields=['Symbol', '-Time']),
+            models.Index(fields=['Symbol', '-Time'], name='idx_sr_symbol_time'),
+            # ⚡ OPTIMIZATION: For daily queries - use Time field directly
+            models.Index(fields=['Symbol', 'Time'], name='idx_sr_symbol_time_asc'),
         ]
 
     def __str__(self):
@@ -248,9 +250,11 @@ class PaperTrade(models.Model):
 
     class Meta:
         indexes = [
-            # admin_status_api में हर बार यही query होती है
-            models.Index(fields=['trade_date', 'result']),
-            models.Index(fields=['symbol', 'result']),
+            # ⚡ OPTIMIZATION: Frequently used filters in admin_status_api & get_master_levels
+            models.Index(fields=['symbol', 'trade_date', 'result'], name='idx_pt_core'),
+            models.Index(fields=['symbol', 'trade_date', 'trade_type', 'result'], name='idx_pt_type_result'),
+            models.Index(fields=['trade_date', 'result'], name='idx_pt_date_result'),
+            models.Index(fields=['symbol', 'result'], name='idx_pt_symbol_result'),
         ]
 
     def __str__(self):
@@ -262,6 +266,7 @@ class BotSettings(models.Model):
     default_target = models.FloatField(default=50.0)
     default_sl = models.FloatField(default=50.0)
     reversal_buffer = models.FloatField(default=5.0)
+    user_name = models.CharField(max_length=50, default="सर")
 
     class Meta:
         verbose_name = "Bot Setting"
