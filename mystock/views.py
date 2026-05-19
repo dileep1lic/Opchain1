@@ -1,44 +1,3 @@
-# import requests
-# import time
-# from datetime import datetime, time, timedelta, date, time as dt_time
-# from django.shortcuts import render
-# from requests.exceptions import SSLError, ConnectionError, Timeout
-# from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, LiveSRData, BotSettings, PaperTrade
-# from django.utils import timezone
-# from django.db.models import OuterRef, Subquery, Q, Sum, F, Count
-# from django.views.decorators.cache import never_cache, cache_page
-# from django.http import HttpResponse, JsonResponse
-# from django.contrib.auth.decorators import login_required
-# from django.views.decorators.csrf import csrf_exempt
-# from .management.commands.async_live import get_instrument_from_db, update_instrument_store_bulk, run_live_paper_trading 
-# from .symbol import symbols as ALL_SYMBOLS
-# from django.views.decorators.clickjacking import xframe_options_exempt
-# import pytz
-# from django.utils.timezone import localtime
-# import json
-# from django.db.models.functions import Abs
-# from asgiref.sync import async_to_sync
-# from .trade_logic import get_master_levels
-# from django.core.cache import caches
-
-# from .credentials import access_token
-# from django.views.decorators.clickjacking import xframe_options_exempt
-# import math
-# from django.http import JsonResponse
-# from django.utils.timezone import localtime
-# import re, re as _re
-# from django.views.decorators.csrf import csrf_exempt
-# import json
-# import traceback
-# import logging
-# from datetime import date, datetime, timedelta, time as dt_time, timezone as dt_timezone
-# from django.contrib.auth.decorators import login_required
-# from django.utils import timezone
-# from django.views.decorators.http import require_GET
-# from django.shortcuts import render, redirect, get_object_or_404
-# from django.contrib import messages
-# from .models import TradingJournal, TradeStatus, TradeType, TradeLevel, OptionChain, LiveSRData, PaperTrade, InstrumentStore 
-
 # ── Standard Library ──────────────────────────────────────────────
 import json
 import logging
@@ -148,13 +107,13 @@ class SmartCache:
     def set(self, key, value, timeout=None):
         try:
             caches['default'].set(key, value, timeout)
-            print(f"✅ Cache Set in Redis for key: {key}", flush=True)
+            # print(f"✅ Cache Set in Redis for key: {key}", flush=True)
         except Exception as e:
             print(f"🔴 REDIS SET ERROR ({key}): {e}", flush=True)
             # pass
         try:
             caches['db_cache'].set(key, value, timeout)
-            print(f"✅ Cache Set in Database for key: {key}", flush=True)
+            # print(f"✅ Cache Set in Database for key: {key}", flush=True)
         except Exception as e:
             print(f"🔴 DB CACHE SET ERROR ({key}): {e}", flush=True)
             # pass
@@ -210,7 +169,8 @@ def admin_status_api(request):
         'settings': {
             'target': settings.default_target,
             'sl': settings.default_sl,
-            'buffer': settings.reversal_buffer
+            'buffer': settings.reversal_buffer,
+            'user_name': getattr(settings, 'user_name', 'बॉस')
         }
     })
 
@@ -227,6 +187,7 @@ def update_bot_settings_api(request):
             if 'target' in data: settings.default_target = float(data['target'])
             if 'sl' in data: settings.default_sl = float(data['sl'])
             if 'buffer' in data: settings.reversal_buffer = float(data['buffer'])
+            if 'user_name' in data: settings.user_name = str(data['user_name'])
             
             settings.save()
             return JsonResponse({'status': 'success', 'msg': 'Settings Updated Successfully!'})
@@ -322,7 +283,7 @@ def apply_ranking_styles(all_data, metric):
 
 from datetime import timedelta
 
-def _get_nifty_chain_context(symbol='NIFTY'):
+def _get_nifty_chain_context1(symbol='NIFTY'):
     """
     Shared helper — option chain data fetch करता है।
     option_chain_dashboard और table_update_api दोनों इसे use करते हैं।
@@ -331,7 +292,7 @@ def _get_nifty_chain_context(symbol='NIFTY'):
     CACHE_KEY = f'chain_ctx_{symbol}'
     cached = cache.get(CACHE_KEY)
     if cached is not None:
-        print(f"⚡ FAST: {symbol} Data served from 10s Function Cache")
+        print(f"⚡ FAST: {symbol} Data served from 6s Function Cache")
         return cached
 
     # 2. 🟢 मेमोरी (Cache) से लाइव डेटा उठाएं जो Async लूप ने सेव किया है
@@ -363,7 +324,7 @@ def _get_nifty_chain_context(symbol='NIFTY'):
                 break
         
         result = (latest_time, spot_price, expiry_date, display_data, live_data)
-        cache.set(CACHE_KEY, result, 10) 
+        cache.set(CACHE_KEY, result, 6) 
         return result
     
     else:
@@ -418,6 +379,104 @@ def _get_nifty_chain_context(symbol='NIFTY'):
         result = (latest_time, spot_price, expiry_date, display_data, all_data)
         cache.set(CACHE_KEY, result, 10) 
         return result
+
+
+
+def _get_nifty_chain_context(symbol='NIFTY'):
+    """
+    Shared helper — option chain data fetch करता है।
+    """
+    # 🟢 सीधे मेमोरी (Cache) से लाइव डेटा उठाएं जो Async लूप ने सेव किया है
+    live_data = cache.get(f'live_nifty_data_{symbol}')
+    spot_price = cache.get(f'live_nifty_spot_{symbol}')
+
+    if live_data and spot_price:
+        # print(f"🟢 SUCCESS: {symbol} Data served from Async Cache (0 DB Queries)")
+        
+        latest_time = live_data[0].get('Time') 
+        expiry_date = live_data[0].get('expiry') or live_data[0].get('Expiry_Date')
+        
+        
+        # 🚀 === NEW FIX: अगर Redis से String आई है, तो उसे Date में बदलें === 🚀
+        if isinstance(expiry_date, str):
+            from datetime import datetime
+            try:
+                # "YYYY-MM-DD" फॉर्मेट को Date ऑब्जेक्ट में बदलें
+                expiry_date = datetime.strptime(expiry_date, '%Y-%m-%d').date()
+            except Exception:
+                pass
+
+        # 🟢 कलर कोडिंग (Cache वाले Dict डेटा पर)
+        all_metrics = [
+            'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
+            'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent'
+        ]
+        for metric in all_metrics:
+            apply_ranking_styles(live_data, metric)
+            
+        # आपके display logic के हिसाब से ±15 strikes filter कर लें
+        closest_idx = min(range(len(live_data)), key=lambda i: abs(live_data[i]['Strike_Price'] - spot_price))
+        display_data = live_data[max(0, closest_idx - 15): min(len(live_data), closest_idx + 16)]
+        
+        # Spot Divider लॉजिक (Dict Syntax)
+        for row in display_data:
+            if row['Strike_Price'] > spot_price:
+                row['is_spot_divider'] = True
+                break
+        
+        result = (latest_time, spot_price, expiry_date, display_data, live_data)
+        return result
+    
+    else:
+        # 🔴 Fallback: जब Cache खाली हो तब Database से डेटा लाएं
+        # print(f"🔴 MISS: {symbol} Cache Empty! Fetching from Database (Fallback)")
+        
+        latest_entry = OptionChain.objects.filter(Symbol=symbol).order_by('-Time').first()
+        if not latest_entry:
+            return None, None, None, [], {}
+
+        latest_time = latest_entry.Time
+        spot_price  = latest_entry.Spot_Price
+        expiry_date = latest_entry.Expiry_Date
+
+        NEEDED_FIELDS = [
+            'Strike_Price', 'CE_OI', 'CE_OI_percent', 'CE_Volume', 'CE_Volume_percent',
+            'CE_COI', 'CE_COI_percent', 'CE_LTP', 'CE_IV', 'CE_Delta',
+            'PE_OI', 'PE_OI_percent', 'PE_Volume', 'PE_Volume_percent',
+            'PE_COI', 'PE_COI_percent', 'PE_LTP', 'PE_IV', 'PE_Delta',
+            'Reversl_Ce', 'Reversl_Pe', 'Spot_Price', 'Time', 'Symbol', 'Lot_size',
+        ]
+        
+        from datetime import timedelta
+        TIME_WINDOW = timedelta(seconds=1)
+        all_data = list(
+            OptionChain.objects.filter(
+                Symbol=symbol,
+                Time__range=(latest_time - TIME_WINDOW, latest_time + TIME_WINDOW)
+            ).only(*NEEDED_FIELDS).order_by('Strike_Price')
+        )
+
+        all_metrics = [
+            'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
+            'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent'
+        ]
+        for metric in all_metrics:
+            apply_ranking_styles(all_data, metric)
+
+        display_data = []
+        if all_data:
+            closest_idx = min(range(len(all_data)), key=lambda i: abs(all_data[i].Strike_Price - spot_price))
+            display_data = all_data[max(0, closest_idx - 15): min(len(all_data), closest_idx + 16)]
+            
+            for row in display_data:
+                if row.Strike_Price > spot_price:
+                    row.is_spot_divider = True
+                    break
+
+        result = (latest_time, spot_price, expiry_date, display_data, all_data)
+        return result
+
+
 
 def option_chain_dashboard(request):
     """
@@ -1440,72 +1499,6 @@ def symbol_search(request):
     return JsonResponse({"results": list(results)})
 
 
-@xframe_options_exempt
-def dashboard_chart_view1(request):
-    today     = date.today()
-    symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
-    unit      = request.GET.get("unit",      "minutes")
-    interval  = request.GET.get("interval",  "5")
-    
-    # URL से डेट लें, अगर नहीं है तो आज की डेट (today) सेट करें
-    req_from  = request.GET.get("from_date")
-    req_to    = request.GET.get("to_date")
-    
-    from_date = req_from if req_from else today.isoformat()
-    to_date   = req_to if req_to else today.isoformat()
-
-    candles = []
-    error = None
-    instrument_key = get_instrument_key(symbol)
-
-    if not instrument_key:
-        error = f"'{symbol}' symbol DB में नहीं मिला।"
-    else:
-        result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
-        if not result["success"]:
-            error = result["error"]
-        else:
-            candles = parse_candles(result["data"])
-
-        # =========================================================
-        # 🟢 FALLBACK LOGIC: अगर आज का चार्ट नहीं मिला (कैंडल्स खाली हैं) 
-        # और यूज़र ने कोई विशेष पुरानी डेट नहीं माँगी थी
-        # =========================================================
-        if not candles and not req_from and from_date == today.isoformat():
-            # पिछले 7 दिनों का डेटा मंगा लें (ताकि वीकेंड और छुट्टियाँ कवर हो जाएं)
-            fallback_from = (today - timedelta(days=7)).isoformat()
-            fallback_to   = (today - timedelta(days=1)).isoformat()
-            
-            fb_result = fetch_candle_data(instrument_key, unit, interval, fallback_to, fallback_from)
-            if fb_result["success"]:
-                fb_candles = parse_candles(fb_result["data"])
-                
-                if fb_candles:
-                    # सबसे आखिरी कैंडल की डेट (Last Trading Day) निकालें
-                    # fb_candles[-1] सबसे ताज़ा कैंडल होती है
-                    last_date_str = fb_candles[-1]['time'][:10] # 'YYYY-MM-DD' फॉर्मेट में
-                    
-                    # सिर्फ उस आखिरी दिन की कैंडल्स को फ़िल्टर करें
-                    candles = [c for c in fb_candles if c['time'].startswith(last_date_str)]
-                    
-                    # Reversal Lines और Frontend HTML के लिए डेट को अपडेट कर दें
-                    from_date = last_date_str
-                    to_date   = last_date_str
-                    error = None # एरर हटा दें
-
-    reversal_lines = get_reversal_lines(symbol, from_date, to_date)
-
-    context = {
-        "candles":        candles,
-        "reversal_lines": reversal_lines,
-        "error":          error,
-        "symbol":         symbol,
-        "unit":           unit,
-        "interval":       interval,
-        "from_date":      from_date,
-        "to_date":        to_date,
-    }
-    return render(request, "mystock/dashboard_chart.html", context)
 
 @xframe_options_exempt
 def dashboard_chart_view(request):
@@ -2130,11 +2123,24 @@ def live_trades_view(request):
     # ✅ Fix 2: DB aggregate, Python loop nahi
     net_pnl = trades.exclude(result='SKIPPED').aggregate(total=Sum('pnl'))['total'] or 0.0
 
-    # ✅ Fix 3: Heavy OptionChain queries page load pe nahi — sirf ek lightweight query
-    latest_oc = OptionChain.objects.filter(
-        Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-    ).only('Spot_Price').order_by('-Time').first()
-    current_spot = latest_oc.Spot_Price if latest_oc else None
+    current_spot = None
+    today = timezone.now().date()
+
+    # 1. अगर आज की तारीख है, तो पहले Cache से चेक करो (0 DB Query)
+    if selected_date == today:
+        # 'cache' आपका SmartCache ऑब्जेक्ट है जो views.py में सबसे ऊपर डिफाइन है
+        current_spot = cache.get(f'live_nifty_spot_{symbol}')
+        # print(f"Cache से Spot Price लिया: {current_spot}" if current_spot else "Cache में Spot Price नहीं मिला")
+
+    # 2. अगर कैश खाली है (Redis down) या तारीख पुरानी है, तब ही Database पर जाओ
+    if not current_spot:
+        latest_oc = OptionChain.objects.filter(
+            Symbol=symbol, Time__gte=day_start, Time__lte=day_end
+        ).only('Spot_Price', 'Time').order_by('-Time').first()
+        current_spot = latest_oc.Spot_Price if latest_oc else None
+
+    settings, _ = BotSettings.objects.get_or_create(id=1)
+    db_user_name = getattr(settings, 'user_name', 'बॉस')
 
     context = {
         'trades': trades,
@@ -2153,6 +2159,7 @@ def live_trades_view(request):
         'dir_r': '',
         'dir_s': '',
         'is_r_closer': False,
+        'user_name': db_user_name,
     }
 
     return render(request, 'mystock/live_trades.html', context)
