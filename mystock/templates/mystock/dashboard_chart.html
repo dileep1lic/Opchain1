@@ -79,6 +79,12 @@
 
 <div class="controls-bar">
     <div class="symbol-title">{{ symbol }}</div>
+	
+	  <div style="display: flex; align-items: center; gap: 10px; margin-left: 10px; font-family: var(--font);">
+        <span id="tp-close" style="font-weight: bold; font-size: 15px; color: #fff;">—</span>
+        <span id="tp-change" style="font-size: 11px; font-weight: 600;">—</span>
+    </div>
+
     <div class="controls-right">
         <select id="ctrl-unit" onchange="updateIntervalOptions(); loadChart();">
             <option value="minutes" {% if unit == "minutes" or not unit %}selected{% endif %}>Min</option>
@@ -141,6 +147,21 @@
     }
   }
 
+  function updateTopbar(candles) {
+    if (!candles || !candles.length) return;
+    const last   = candles[candles.length - 1];
+    const first  = candles[0];
+    const change = last.close - first.open;
+    const pct    = ((change / first.open) * 100).toFixed(2);
+    const isUp   = change >= 0;
+    const sign   = isUp ? '+' : '';
+
+    document.getElementById('tp-close').textContent = last.close.toFixed(2);
+    const chEl = document.getElementById('tp-change');
+    chEl.textContent = `${sign}${change.toFixed(2)} (${sign}${pct}%)`;
+    chEl.style.color = isUp ? 'var(--green)' : 'var(--red)';
+  }
+
   function playBeep() {
     if (!alertsEnabled) return;
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -158,7 +179,24 @@
     osc.start();
     osc.stop(audioCtx.currentTime + 0.4); 
   }
-
+  
+// 2.5 कंप्यूटर से बोलकर बताने वाला फंक्शन (Text-to-Speech)
+function speakAlert(text) {
+  if (!alertsEnabled || !('speechSynthesis' in window)) return;
+  
+  // अगर पहले से कुछ बोल रहा है, तो उसे रोक दें ताकि आवाज़ मिक्स न हो
+  window.speechSynthesis.cancel(); 
+  
+  const msg = new SpeechSynthesisUtterance(text);
+  
+  // आप चाहें तो 'en-IN' (Indian English) या 'hi-IN' (Hindi) सेट कर सकते हैं
+  msg.lang = 'hi-IN'; 
+  msg.rate = 1.0; // बोलने की स्पीड (1 normal है, 1.2 थोड़ा तेज़ है)
+  msg.pitch = 1.0; // आवाज़ का भारीपन
+  
+  window.speechSynthesis.speak(msg);
+}
+	
   function showToast(msg) {
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -174,26 +212,41 @@
     setTimeout(() => toast.remove(), 5000); 
   }
 
-  function checkReversalAlerts(currentPrice, reversals) {
-    if (!alertsEnabled || !reversals || reversals.length === 0) return;
+  // 4. प्राइस क्रॉस चेक करने का फंक्शन
+function checkReversalAlerts(currentPrice, reversals) {
+  if (!alertsEnabled || !reversals || reversals.length === 0) return;
 
-    if (previousSpotPrice !== null) {
-      reversals.forEach(rev => {
-        const linePrice = parseFloat(rev.price);
-        if (linePrice > 0) {
-          const crossedUp   = previousSpotPrice < linePrice && currentPrice >= linePrice;
-          const crossedDown = previousSpotPrice > linePrice && currentPrice <= linePrice;
+  if (previousSpotPrice !== null) {
+    reversals.forEach(rev => {
+      const linePrice = parseFloat(rev.price);
+      if (linePrice > 0) {
+        const crossedUp   = previousSpotPrice < linePrice && currentPrice >= linePrice;
+        const crossedDown = previousSpotPrice > linePrice && currentPrice <= linePrice;
 
-          if (crossedUp || crossedDown) {
-            playBeep();
-            const direction = crossedUp ? "↗ Crossed UP" : "↘ Crossed DOWN";
-            showToast(`🚨 ALERT: Price ${direction} ${rev.label || 'Level'} at ${linePrice}`);
-          }
+        if (crossedUp || crossedDown) {
+          playBeep(); // पहले बीप बजेगी
+          
+          const direction = crossedUp ? "Crossed UP" : "Crossed DOWN";
+          const levelName = rev.label || 'Level';
+          
+          // बोलने के लिए मैसेज तैयार करें
+          // const spokenMessage = `Alert. Price ${direction}, ${levelName}, at ${linePrice}`;
+          // 🗣️ बोलने के लिए शुद्ध हिंदी मैसेज
+          const spokenMessage = `अलर्ट! प्राइस ने स्ट्राइक ${levelName} को, ${linePrice} पर ${direction} किया है।`;
+          
+          // 💻 स्क्रीन पर इंग्लिश में ही दिखने दें (पढ़ने में आसान रहता है)
+          showToast(`🚨 ALERT: Price ${crossedUp ? 'Crossed UP' : 'Crossed DOWN'} ${levelName} at ${linePrice}`);
+          
+          showToast(`🚨 ${spokenMessage}`);
+          
+          // 👇 कंप्यूटर को बोलने का कमांड दें 👇
+          speakAlert(spokenMessage);
         }
-      });
-    }
-    previousSpotPrice = currentPrice;
+      }
+    });
   }
+  previousSpotPrice = currentPrice;
+}
   // ══════════════════════════════════════════════════════
 
   function buildCharts(candles, reversals = []) {
@@ -352,6 +405,7 @@
           if (!d.error) { 
               let incomingReversals = (d.reversal_lines||[]).filter(r=>r.price>0); 
               buildCharts(d.candles, incomingReversals); 
+              updateTopbar(d.candles);
           }
       }).catch(err => {
           document.getElementById("loading").style.display = "none";
