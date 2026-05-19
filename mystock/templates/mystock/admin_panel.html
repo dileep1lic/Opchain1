@@ -276,6 +276,9 @@
   <div class="mega-divider"></div>
 
   <span class="mega-label">⚙️ Bot Parameters</span>
+  <span title="User Name" style="font-size:12px; margin-left:4px;">👤 Name</span>
+  <input type="text" id="cfg-name" class="mega-input" placeholder="Name" style="width: 70px;">
+
   <span title="Target" style="font-size:12px;">🎯 Target</span>
   <input type="number" id="cfg-target" class="mega-input" placeholder="TGT" style="width: 50px;">
   
@@ -347,10 +350,7 @@
 <div class="section-title">⚡ Quick Actions</div>
 <div class="actions-grid" style="margin-bottom:28px;">
 
-  <!-- <a href="{% url 'update_expiries' %}" class="action-btn" onclick="return confirmAction('Expiry cache update होगा। Continue?')">
-    <div class="aicon" style="background:var(--amber-bg)">📅</div>
-    <div><div>Expiry Update</div><div class="atext">सभी symbols की expiry DB में refresh करें</div></div>
-  </a> -->
+  
   <div class="action-btn" onclick="updateExpiries()">
     <div class="aicon" style="background:var(--amber-bg)">📅</div>
     <div><div>Expiry Update</div><div class="atext">सभी symbols की expiry DB में refresh करें</div></div>
@@ -590,12 +590,13 @@ async function saveBotSettings() {
     const target = document.getElementById('cfg-target').value;
     const sl = document.getElementById('cfg-sl').value;
     const buffer = document.getElementById('cfg-buffer').value;
+    const userName = document.getElementById('cfg-name').value;
 
     try {
         const resp = await fetch('/api/update-bot-settings/', {
             method: 'POST',
             headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target, sl, buffer })
+            body: JSON.stringify({ target, sl, buffer, user_name: userName }) // 👈 user_name जोड़ा गया
         });
         const data = await resp.json();
         if (data.status === 'success') {
@@ -682,35 +683,7 @@ async function closeAllPositions() {
         showToast('API Connection Failed', 'err');
     }
 }
-// अपडेट Expiries के लिए नया फंक्शन जो API कॉल करेगा और UI को अपडेट करेगा
-// async function updateExpiries() {
-//     if (!confirm('Expiry cache update होगा। Continue?')) return;
-    
-//     try {
-//         // Fetch API के जरिए बैकग्राउंड में रिक्वेस्ट भेजें 
-//         const resp = await fetch("{% url 'update_expiries' %}", {
-//             method: 'GET', // पहले यह लिंक (<a>) था, इसलिए व्यू GET request ही ले रहा होगा
-//             headers: { 
-//                 'X-Requested-With': 'XMLHttpRequest'
-//             }
-//         });
-        
-//         const res = await resp.json();
-        
-//         if (res.status === 'success') {
-//             // आपका Toast और Log फंक्शन कॉल करें 
-//             showToast(res.message, 'ok');
-//             addLog('📅 Expiry Update: ' + res.message, 'ok');
-//         } else {
-//             // अगर बैकएंड से success नहीं आता है
-//             showToast('Error: ' + (res.message || 'Failed to update'), 'err');
-//             addLog('❌ Expiry Update Error', 'err');
-//         }
-//     } catch(e) {
-//         showToast('API Connection Failed', 'err');
-//         addLog('❌ API Error: ' + e.message, 'err');
-//     }
-// }
+
 async function updateExpiries() {
     if (!confirm('Expiry cache update होगा। Continue?')) return;
     
@@ -978,6 +951,7 @@ async function refreshStatus() {
       document.getElementById('cfg-target').value = data.settings.target;
       document.getElementById('cfg-sl').value     = data.settings.sl;
       document.getElementById('cfg-buffer').value = data.settings.buffer;
+      document.getElementById('cfg-name').value   = data.settings.user_name || 'बॉस';
       settingsLoaded = true;
     }
   } catch(e) {
