@@ -498,14 +498,43 @@ function toggleAlerts() {
   }
 }
 
+
+
 function speakAlert(text) {
   if (!alertsEnabled || !('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel(); // पुरानी आवाज़ रोकें
+  window.speechSynthesis.cancel(); 
+  
   const msg = new SpeechSynthesisUtterance(text);
-  msg.lang = 'hi-IN'; // शुद्ध हिंदी
-  msg.rate = 0.9; 
+  
+  // ब्राउज़र में मौजूद सारी आवाज़ें निकालें
+  let voices = window.speechSynthesis.getVoices();
+  
+  // चेक करें कि क्या सिस्टम में 'hi-IN' (हिंदी) की आवाज़ मौजूद है
+  let hindiVoice = voices.find(v => v.lang === 'hi-IN' || v.lang.includes('hi'));
+  
+  if (hindiVoice) {
+    // अगर हिंदी मिली, तो उसे सेट करें
+    msg.voice = hindiVoice;
+    msg.lang = 'hi-IN';
+  } else {
+    // अगर हिंदी नहीं मिली (जैसे Firefox में), तो चुप रहने के बजाय इंग्लिश सेट कर दें
+    msg.lang = 'en-IN'; 
+  }
+
+  msg.rate = 1.0; 
   window.speechSynthesis.speak(msg);
 }
+
+// पेज लोड होते ही आवाज़ें लोड करने का ट्रिगर (Firefox के लिए ज़रूरी)
+if (speechSynthesis.onvoiceschanged !== undefined) {
+  speechSynthesis.onvoiceschanged = function() {
+    window.speechSynthesis.getVoices();
+  };
+}
+
+// 👇 1. यहाँ अपना नाम सेट करें 👇
+//const myName = "दिलीप कुमार "; // आप यहाँ "राहुल", "सर", या अपना नाम लिख सकते हैं
+const myName = "{{ user_name }}";
 
 function checkApproachingTrades(spot, r_trigger, s_trigger) {
   if (!alertsEnabled || !spot) return;
@@ -518,39 +547,40 @@ function checkApproachingTrades(spot, r_trigger, s_trigger) {
 
   // 1. PUT ट्रेड चेक करें (Resistance / R-Level)
   if (r_trigger && isFinite(r_trigger)) {
-    let diffR = r_trigger - spot; // Spot नीचे से ऊपर R की तरफ जाता है
+    let diffR = r_trigger - spot; 
     
     // अगर अंतर 10 पॉइंट या उससे कम है और 0 से ऊपर है
     if (diffR > 0 && diffR <= 10) {
-      let pts = Math.round(diffR); // दशमलव हटाकर सीधा नंबर लें
-      if (lastAnnouncedR !== pts) { // सिर्फ तब बोलें जब पॉइंट बदलें
-        speakAlert(`पुट ट्रेड के लिए सिर्फ ${pts} पॉइंट बचे हैं।`);
+      let pts = Math.round(diffR); 
+      if (lastAnnouncedR !== pts) { 
+        // 🗣️ नाम के साथ अलर्ट
+        speakAlert(`सुनिए ${myName}, पुट ट्रेड के लिए सिर्फ ${pts} पॉइंट बचे हैं।`);
         lastAnnouncedR = pts;
         announced = true;
       }
     } else if (diffR <= 0 && diffR >= -5 && lastAnnouncedR !== 0) {
-      speakAlert(`पुट ट्रेड का लेवल आ गया है!`);
+      speakAlert(`${myName}, पुट ट्रेड का लेवल आ गया है! तैयार रहिए।`);
       lastAnnouncedR = 0;
       announced = true;
     } else if (diffR > 10) {
-      lastAnnouncedR = null; // मार्केट दूर चला गया तो रीसेट कर दें
+      lastAnnouncedR = null; 
     }
   }
 
   // 2. CALL ट्रेड चेक करें (Support / S-Level)
   if (!announced && s_trigger && isFinite(s_trigger)) {
-    let diffS = spot - s_trigger; // Spot ऊपर से नीचे S की तरफ जाता है
+    let diffS = spot - s_trigger; 
     
-    // अगर अंतर 10 पॉइंट या उससे कम है और 0 से ऊपर है
     if (diffS > 0 && diffS <= 10) {
       let pts = Math.round(diffS);
       if (lastAnnouncedS !== pts) {
-        speakAlert(`कॉल ट्रेड के लिए सिर्फ ${pts} पॉइंट बचे हैं।`);
+        // 🗣️ नाम के साथ अलर्ट
+        speakAlert(`सुनिए ${myName}, कॉल ट्रेड के लिए सिर्फ ${pts} पॉइंट बचे हैं।`);
         lastAnnouncedS = pts;
         announced = true;
       }
     } else if (diffS <= 0 && diffS >= -5 && lastAnnouncedS !== 0) {
-      speakAlert(`कॉल ट्रेड का लेवल आ गया है!`);
+      speakAlert(`${myName}, कॉल ट्रेड का लेवल आ गया है! तैयार रहिए।`);
       lastAnnouncedS = 0;
       announced = true;
     } else if (diffS > 10) {
