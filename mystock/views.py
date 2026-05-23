@@ -51,6 +51,17 @@ from .models import (
 )
 from .symbol import symbols as ALL_SYMBOLS
 from .trade_logic import get_master_levels
+from django.contrib.auth.decorators import user_passes_test
+from django.views.decorators.http import require_POST
+from django.contrib.auth.models import User
+from django.contrib.auth.decorators import user_passes_test
+from django.contrib import messages
+from django.contrib.sessions.models import Session
+from functools import wraps
+from django.utils.module_loading import import_string
+from django.conf import settings
+
+
 
 def safe_get(url, headers=None, params=None, retries=3, timeout=10):
     """
@@ -121,13 +132,130 @@ class SmartCache:
 cache = SmartCache()
 # ========================================================
 # ── 1. Admin Panel Page ─────────────────────────────────────
-@login_required
+def admin_only(view_func):
+    """यह डेकोरेटर चेक करता है कि यूज़र सुपरयूज़र है या नहीं। अगर नहीं, तो 403 पेज दिखाता है।"""
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        # अगर यूज़र लॉगिन नहीं है, तो लॉगिन पेज पर भेजें
+        if not request.user.is_authenticated:
+            return redirect('login')
+        
+        # अगर यूज़र लॉगिन है लेकिन एडमिन (superuser) नहीं है, तो 403 पेज दिखाएँ
+        if not request.user.is_superuser:
+            return render(request, 'registration/403.html', status=403)
+            
+        # अगर एडमिन है, तो पेज खुलने दें
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+# def is_superuser_check(user):
+#     return user.is_authenticated and user.is_superuser
+# @login_required
+# @user_passes_test(is_superuser_check, login_url='/dashboard/')
+@admin_only
 def admin_panel_view(request):
     """Admin control panel — सिर्फ page render करता है, data JS से आता है।"""
     return render(request, 'mystock/admin_panel.html')
 
+from django.contrib.auth import authenticate, login
+def login_view1(request):
+    # अगर यूजर पहले से लॉगिन है, तो उसे सीधे सही पेज पर भेज दें
+    if request.user.is_authenticated:
+        if request.user.is_superuser:
+            return redirect('admin_panel') 
+        else:
+            return redirect('dashboard') 
+
+    if request.method == 'POST':
+        username_or_email = request.POST.get('username')
+        passw = request.POST.get('password')
+
+        user = authenticate(request, username=username_or_email, password=passw)
+
+        if user is not None:
+            if user.is_active:
+                login(request, user)
+                
+                # 🚀 --- एक आईडी पर दो लॉगिन रोकने का लॉजिक (START) ---
+                # 1. मौजूदा (नए) सेशन को सेव करें
+                request.session.save()
+                current_session_key = request.session.session_key
+                
+                # 2. डेटाबेस से सभी सेशन निकालें
+                for session in Session.objects.all():
+                    # अगर सेशन नया वाला नहीं है...
+                    if session.session_key != current_session_key:
+                        session_data = session.get_decoded()
+                        # ...और यह इसी यूज़र का पुराना सेशन है, तो उसे डिलीट कर दें
+                        if str(user.pk) == str(session_data.get('_auth_user_id')):
+                            session.delete()
+                # 🚀 --- एक आईडी पर दो लॉगिन रोकने का लॉजिक (END) ---
+
+                next_url = request.POST.get('next')
+                if next_url:
+                    return redirect(next_url)
+
+                # सुपरयूज़र है तो एडमिन पैनल, नॉर्मल है तो डैशबोर्ड
+                if user.is_superuser:
+                    return redirect('admin_panel')
+                else:
+                    return redirect('dashboard')
+            else:
+                messages.error(request, "आपका अकाउंट अभी एडमिन द्वारा एक्टिवेट नहीं किया गया है।")
+        else:
+            messages.error(request, "यूज़रनेम/ईमेल या पासवर्ड गलत है।")
+
+    return render(request, 'registration/login.html')
+
+def login_view(request):
+    # अगर यूजर पहले से लॉगिन है, तो उसे सीधे सही पेज पर भेज दें
+    if request.user.is_authenticated:
+        if request.user.is_superuser:
+            return redirect('admin_panel') 
+        else:
+            return redirect('dashboard') 
+
+    if request.method == 'POST':
+        username_or_email = request.POST.get('username')
+        passw = request.POST.get('password')
+
+        user = authenticate(request, username=username_or_email, password=passw)
+
+        if user is not None:
+            if user.is_active:
+                
+                # 🚀 --- बुलेटप्रूफ 'किक-आउट' (Kick-out) लॉजिक ---
+                # नए लॉगिन से पहले इस यूज़र के पुराने सभी एक्टिव सेशन्स को डिलीट करें
+                active_sessions = Session.objects.filter(expire_date__gt=timezone.now())
+                for session in active_sessions:
+                    try:
+                        session_data = session.get_decoded()
+                        if str(user.pk) == str(session_data.get('_auth_user_id')):
+                            session.delete()
+                    except Exception:
+                        pass
+                # 🚀 -------------------------------------------
+
+                # अब नए डिवाइस/ब्राउज़र में सुरक्षित लॉगिन करें
+                login(request, user)
+                
+                next_url = request.POST.get('next')
+                if next_url:
+                    return redirect(next_url)
+
+                if user.is_superuser:
+                    return redirect('admin_panel')
+                else:
+                    return redirect('dashboard')
+            else:
+                messages.error(request, "आपका अकाउंट अभी एडमिन द्वारा एक्टिवेट नहीं किया गया है।")
+        else:
+            messages.error(request, "यूज़रनेम/ईमेल या密码 गलत है।")
+
+    return render(request, 'registration/login.html')
 
 # ── 2. Admin Status API ─────────────────────────────────────
+@admin_only
 def admin_status_api(request):
     """सभी loops का status + trade stats + Bot Settings — optimized & defensive"""
 
@@ -175,7 +303,8 @@ def admin_status_api(request):
     })
 
 # 2. यह नया फंक्शन सबसे नीचे जोड़ दें:
-@login_required
+# @login_required
+@admin_only
 @csrf_exempt
 def update_bot_settings_api(request):
     """एडमिन पैनल से सेटिंग्स अपडेट करने के लिए"""
@@ -194,7 +323,8 @@ def update_bot_settings_api(request):
         except Exception as e:
             return JsonResponse({'status': 'error', 'msg': str(e)})
     return JsonResponse({'status': 'invalid method'})
-@login_required
+# @login_required
+@admin_only
 @csrf_exempt
 def close_all_open_trades_api(request):
     """एडमिन पैनल से इमरजेंसी में सभी ओपन ट्रेड्स क्लोज करने के लिए"""
@@ -235,6 +365,58 @@ def close_all_open_trades_api(request):
         except Exception as e:
             return JsonResponse({'status': 'error', 'msg': str(e)})
     return JsonResponse({'status': 'invalid method'})
+
+# @user_passes_test(is_superuser_check, login_url='/dashboard/')
+@admin_only
+def user_approval_list(request):
+    """सभी नॉर्मल यूज़र्स की लिस्ट दिखाने के लिए (सुपरयूज़र को छोड़कर)"""
+    # नए रजिस्टर हुए यूज़र्स सबसे ऊपर दिखेंगे
+    managed_users = User.objects.filter(is_superuser=False).order_by('-date_joined')
+    return render(request, 'registration/user_approval.html', {'managed_users': managed_users})
+
+# @user_passes_test(is_superuser_check, login_url='/dashboard/')
+@admin_only
+@require_POST
+def toggle_user_status(request, user_id):
+    """यूज़र का स्टेटस बदलने के लिए (Active / Inactive)"""
+    user_to_modify = get_object_or_404(User, id=user_id)
+    
+    # स्टेटस को टॉगल (उल्टा) करें
+    user_to_modify.is_active = not user_to_modify.is_active
+    user_to_modify.save()
+    
+    status_str = "एक्टिवेट (Approved)" if user_to_modify.is_active else "इनएक्टिवेट (Deactivated)"
+    messages.success(request, f"यूज़र {user_to_modify.first_name} ({user_to_modify.email}) को सफलतापूर्वक {status_str} कर दिया गया है।")
+    
+    return redirect('user_approval_list')
+
+# यूजर रजिस्ट्रेशन के लिए एक नया view function:
+def register_user(request):
+    if request.method == 'POST':
+        name = request.POST.get('name')
+        email = request.POST.get('email')
+        password = request.POST.get('password')
+
+        # चेक करें कि ईमेल पहले से मौजूद तो नहीं है
+        if User.objects.filter(username=email).exists():
+            messages.error(request, 'यह ईमेल पहले से रजिस्टर्ड है।')
+            return redirect('register_user') # अपने URL का नाम डालें
+
+        # यूजर बनाएँ, लेकिन उसे inactive रखें (is_active=False)
+        user = User.objects.create_user(
+            username=email, 
+            email=email, 
+            password=password, 
+            first_name=name
+        )
+        user.is_active = False  # ⚠️ इसे False रखने से बिना एडमिन के लॉगिन नहीं होगा
+        user.save()
+
+        messages.success(request, 'रजिस्ट्रेशन सफल! एडमिन के अप्रूवल का इंतज़ार करें।')
+        return redirect('login') # अपने लॉगिन पेज के URL का नाम डालें
+
+    return render(request, 'registration/register.html')
+
 
 # Constants
 TIME_WINDOW = timedelta(seconds=1)
@@ -282,103 +464,6 @@ def apply_ranking_styles(all_data, metric):
                 setattr(row, base_class, color)
 
 from datetime import timedelta
-
-def _get_nifty_chain_context1(symbol='NIFTY'):
-    """
-    Shared helper — option chain data fetch करता है।
-    option_chain_dashboard और table_update_api दोनों इसे use करते हैं।
-    """
-    # 1. सबसे पहले फंक्शन का अपना 3-सेकंड वाला कैश चेक करें (सबसे तेज़)
-    CACHE_KEY = f'chain_ctx_{symbol}'
-    cached = cache.get(CACHE_KEY)
-    if cached is not None:
-        print(f"⚡ FAST: {symbol} Data served from 6s Function Cache")
-        return cached
-
-    # 2. 🟢 मेमोरी (Cache) से लाइव डेटा उठाएं जो Async लूप ने सेव किया है
-    live_data = cache.get(f'live_nifty_data_{symbol}')
-    spot_price = cache.get(f'live_nifty_spot_{symbol}')
-
-    if live_data and spot_price:
-        print(f"🟢 SUCCESS: {symbol} Data served from Async Cache (0 DB Queries)")
-        
-        latest_time = live_data[0].get('Time') 
-        expiry_date = live_data[0].get('Expiry_Date')
-        
-        # 🟢 कलर कोडिंग (Cache वाले Dict डेटा पर)
-        all_metrics = [
-            'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
-            'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent'
-        ]
-        for metric in all_metrics:
-            apply_ranking_styles(live_data, metric)
-            
-        # आपके display logic के हिसाब से ±15 strikes filter कर लें
-        closest_idx = min(range(len(live_data)), key=lambda i: abs(live_data[i]['Strike_Price'] - spot_price))
-        display_data = live_data[max(0, closest_idx - 15): min(len(live_data), closest_idx + 16)]
-        
-        # Spot Divider लॉजिक (Dict Syntax)
-        for row in display_data:
-            if row['Strike_Price'] > spot_price:
-                row['is_spot_divider'] = True
-                break
-        
-        result = (latest_time, spot_price, expiry_date, display_data, live_data)
-        cache.set(CACHE_KEY, result, 6) 
-        return result
-    
-    else:
-        # 🔴 Fallback: जब Cache खाली हो तब Database से डेटा लाएं
-        print(f"🔴 MISS: {symbol} Cache Empty! Fetching from Database (Fallback)")
-        
-        latest_entry = OptionChain.objects.filter(Symbol=symbol).order_by('-Time').first()
-        if not latest_entry:
-            return None, None, None, [], {}
-
-        latest_time = latest_entry.Time
-        spot_price  = latest_entry.Spot_Price
-        expiry_date = latest_entry.Expiry_Date
-
-        NEEDED_FIELDS = [
-            'Strike_Price', 'CE_OI', 'CE_OI_percent', 'CE_Volume', 'CE_Volume_percent',
-            'CE_COI', 'CE_COI_percent', 'CE_LTP', 'CE_IV', 'CE_Delta',
-            'PE_OI', 'PE_OI_percent', 'PE_Volume', 'PE_Volume_percent',
-            'PE_COI', 'PE_COI_percent', 'PE_LTP', 'PE_IV', 'PE_Delta',
-            'Reversl_Ce', 'Reversl_Pe', 'Spot_Price', 'Time', 'Symbol', 'Lot_size',
-        ]
-        
-        # 🔴 डेटाबेस से डेटा निकालें
-        TIME_WINDOW = timedelta(seconds=1)
-        all_data = list(
-            OptionChain.objects.filter(
-                Symbol=symbol,
-                Time__range=(latest_time - TIME_WINDOW, latest_time + TIME_WINDOW)
-            ).only(*NEEDED_FIELDS).order_by('Strike_Price')
-        )
-
-        # 🔴 कलर कोडिंग (Database वाले Object डेटा पर)
-        all_metrics = [
-            'CE_OI_percent', 'CE_Volume_percent', 'CE_COI_percent',
-            'PE_OI_percent', 'PE_Volume_percent', 'PE_COI_percent'
-        ]
-        for metric in all_metrics:
-            apply_ranking_styles(all_data, metric)
-
-        # Window filter ±15 strikes around spot
-        display_data = []
-        if all_data:
-            closest_idx = min(range(len(all_data)), key=lambda i: abs(all_data[i].Strike_Price - spot_price))
-            display_data = all_data[max(0, closest_idx - 15): min(len(all_data), closest_idx + 16)]
-            
-            # Spot Divider लॉजिक (Object Syntax)
-            for row in display_data:
-                if row.Strike_Price > spot_price:
-                    row.is_spot_divider = True
-                    break
-
-        result = (latest_time, spot_price, expiry_date, display_data, all_data)
-        cache.set(CACHE_KEY, result, 10) 
-        return result
 
 
 
@@ -477,7 +562,7 @@ def _get_nifty_chain_context(symbol='NIFTY'):
         return result
 
 
-
+@login_required
 def option_chain_dashboard(request):
     """
     FIX: Page load पर अब कोई DB query नहीं।
@@ -492,7 +577,7 @@ def option_chain_dashboard(request):
         'spot': None,
         'expiry_date': None,
     })
-
+@login_required
 def table_update_api(request):
     """
     AJAX table refresh — shared helper + ETag cache.
@@ -543,7 +628,7 @@ def table_update_api(request):
     response['Vary'] = 'Accept-Encoding'   # GZip के साथ correct caching
     return response
     
-# @login_required
+@login_required
 def toggle_sync(request, loop_name):
     """Loop चालू/बंद करने का API — FIX: .get() → get_or_create() (DoesNotExist crash fix)"""
     if request.method != "POST":
@@ -584,7 +669,7 @@ def all_stocks_dashboard(request):
 
     cache.set(CACHE_KEY, latest_data, 60)
     return render(request, 'mystock/all_stocks.html', {'stocks_data': latest_data})
-
+@login_required
 def stock_search_view(request):
     """
     Search view with Smart Expiry Logic and Auto-Refresh support.
@@ -702,7 +787,7 @@ def stock_search_view(request):
         return render(request, 'mystock/table_partial.html', context)
     
     return render(request, 'mystock/search_dashboard.html', context)
-
+@login_required
 def trigger_expiry_update(request):
     # symbols_to_update = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX","RELIANCE"]
     
@@ -980,47 +1065,47 @@ def render_chart_page_ltp(request):
     })
 
 
-def get_dynamic_strikes_and_atm(base_qs, spot_price, symbol, start_time, end_time):
-    """ स्पॉट प्राइस के आधार पर 15 CE, 15 PE और ATM स्ट्राइक निकालता है (optimized) """
+# def get_dynamic_strikes_and_atm(base_qs, spot_price, symbol, start_time, end_time):
+#     """ स्पॉट प्राइस के आधार पर 15 CE, 15 PE और ATM स्ट्राइक निकालता है (optimized) """
 
-    # DB से nearest strike निकालना (Python loop से बचा)
-    atm_record = OptionChain.objects.filter(
-        Time__range=(start_time, end_time),
-        Symbol=symbol
-    ).annotate(
-        diff=Abs(F('Strike_Price') - spot_price)
-    ).order_by('diff').values('Strike_Price').first()
+#     # DB से nearest strike निकालना (Python loop से बचा)
+#     atm_record = OptionChain.objects.filter(
+#         Time__range=(start_time, end_time),
+#         Symbol=symbol
+#     ).annotate(
+#         diff=Abs(F('Strike_Price') - spot_price)
+#     ).order_by('diff').values('Strike_Price').first()
 
-    if not atm_record:
-        return [], [], None
+#     if not atm_record:
+#         return [], [], None
 
-    atm_strike = atm_record['Strike_Price']
+#     atm_strike = atm_record['Strike_Price']
 
-    # सिर्फ ATM के आसपास के strikes खींचना (range filter)
-    available_strikes = list(
-        OptionChain.objects.filter(
-            Time__range=(start_time, end_time),
-            Symbol=symbol,
-            Strike_Price__range=(atm_strike - 500, atm_strike + 500)
-        ).values_list('Strike_Price', flat=True).distinct().order_by('Strike_Price')
-    )
+#     # सिर्फ ATM के आसपास के strikes खींचना (range filter)
+#     available_strikes = list(
+#         OptionChain.objects.filter(
+#             Time__range=(start_time, end_time),
+#             Symbol=symbol,
+#             Strike_Price__range=(atm_strike - 500, atm_strike + 500)
+#         ).values_list('Strike_Price', flat=True).distinct().order_by('Strike_Price')
+#     )
 
-    if not available_strikes:
-        return [], [], None
+#     if not available_strikes:
+#         return [], [], None
 
-    atm_idx = available_strikes.index(atm_strike)
+#     atm_idx = available_strikes.index(atm_strike)
 
-    # PE: ATM के नीचे के 15 स्ट्राइक (ATM को भी शामिल किया है)
-    start_pe = max(0, atm_idx - 3)
-    pe_selected = available_strikes[start_pe:atm_idx+1][::-1]  # reverse
+#     # PE: ATM के नीचे के 15 स्ट्राइक (ATM को भी शामिल किया है)
+#     start_pe = max(0, atm_idx - 3)
+#     pe_selected = available_strikes[start_pe:atm_idx+1][::-1]  # reverse
 
-    # CE: ATM के ऊपर के 15 स्ट्राइक (ATM को भी शामिल किया है)
-    ce_selected = available_strikes[atm_idx:atm_idx + 4]
+#     # CE: ATM के ऊपर के 15 स्ट्राइक (ATM को भी शामिल किया है)
+#     ce_selected = available_strikes[atm_idx:atm_idx + 4]
 
-    return ce_selected, pe_selected, atm_strike
+#     return ce_selected, pe_selected, atm_strike
 
 
-india_tz = pytz.timezone("Asia/Kolkata")
+# india_tz = pytz.timezone("Asia/Kolkata")
 
 
 
@@ -1288,89 +1373,7 @@ def parse_candles(api_response: dict):
 # ─────────────────────────────────────────────
 # View 1: Chart Page (HTML render)
 # ─────────────────────────────────────────────
-@xframe_options_exempt
-def chart_view1(request):
-    today_str = date.today().isoformat()
-    symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
-    unit      = request.GET.get("unit",      "minutes")
-    interval  = request.GET.get("interval",  "5")
-    from_date = request.GET.get("from_date", today_str)
-    to_date   = request.GET.get("to_date",   today_str)
-    show_reversal = request.GET.get("reversal", "1") != "0"
-
-    # ==========================================
-    # 1. 🟢 Cache Key
-    #    ✅ FIX: show_reversal हटाया — candle_api से match करने के लिए
-    #    (reversal lines का अपना अलग cache है get_reversal_lines में)
-    # ==========================================
-    cache_key = f"upstox_chart_{symbol}_{unit}_{interval}_{from_date}_{to_date}"
-
-    # 2. 🟢 Cache चेक करना
-    cached_data = cache.get(cache_key)
-
-    if cached_data:
-        candles        = cached_data.get("candles", [])
-        instrument_key = cached_data.get("instrument_key", "—")
-        # ✅ FIX: Reversal lines cache से नहीं — हर बार fresh (उनका अपना 60s cache है)
-        reversal_lines = get_reversal_lines(symbol, from_date, to_date) if show_reversal else []
-        error = None
-        print(f"⚡ FAST PAGE LOAD: {symbol} Chart Page served from CACHE 🚀")
-    else:
-        # 3. 🔴 Fallback: Upstox API से लाएं
-        candles        = []
-        reversal_lines = []
-        error          = None
-        instrument_key = get_instrument_key(symbol)
-
-        if not instrument_key:
-            error = f"'{symbol}' symbol DB में नहीं मिला।"
-        else:
-            result = fetch_candle_data(instrument_key, unit, interval, to_date, from_date)
-            if not result["success"]:
-                error = result["error"]
-            else:
-                candles = parse_candles(result["data"])
-                if not candles:
-                    error = "इस date range में कोई candle data नहीं मिली।"
-                else:
-                    # ✅ FIX: get_reversal_lines की जगह get_reversal_lines
-                    reversal_lines = get_reversal_lines(symbol, from_date, to_date) if show_reversal else []
-
-                    # ✅ FIX: Cache में सिर्फ candles save करो (reversal नहीं)
-                    candles_only = {
-                        "symbol": symbol, "instrument_key": instrument_key,
-                        "interval": interval, "unit": unit,
-                        "from_date": from_date, "to_date": to_date,
-                        "count": len(candles), "candles": candles,
-                    }
-
-                    if from_date == today_str:
-                        current_time    = datetime.now().time()
-                        market_end_time = dt_time(15, 30)
-
-                        if current_time > market_end_time:
-                            cache.set(cache_key, candles_only, timeout=28800)
-                            print(f"✅ SAVED PAGE: {symbol} cached for 8 hours.")
-                        else:
-                            cache.set(cache_key, candles_only, timeout=60)
-                            print(f"✅ SAVED PAGE: {symbol} cached for 60 seconds.")
-                    else:
-                        cache.set(cache_key, candles_only, timeout=86400)
-                        print(f"✅ SAVED PAGE: {symbol} Historical cached for 24 hours.")
-
-    context = {
-        "candles":        candles,
-        "reversal_lines": reversal_lines,
-        "error":          error,
-        "symbol":         symbol,
-        "instrument_key": instrument_key or "—",
-        "unit":           unit,
-        "interval":       interval,
-        "from_date":      from_date,
-        "to_date":        to_date,
-    }
-    return render(request, "mystock/chart.html", context)
-
+@login_required
 @xframe_options_exempt
 def chart_view(request):
     # आज की तारीख (YYYY-MM-DD फॉर्मेट में)
@@ -1483,6 +1486,7 @@ def candle_api(request):
 # ─────────────────────────────────────────────
 # View 3: Symbol Autocomplete Search
 # ─────────────────────────────────────────────
+@login_required
 def symbol_search(request):
     """
     ?q=REL → DB में RELIANCE, RELINFRA आदि ढूंढता है
@@ -1499,7 +1503,7 @@ def symbol_search(request):
     return JsonResponse({"results": list(results)})
 
 
-
+@login_required
 @xframe_options_exempt
 def dashboard_chart_view(request):
     """
@@ -2064,12 +2068,14 @@ def resistance_live_api(request):
 # ─────────────────────────────────────────────────────
 # Dashboard View
 # ─────────────────────────────────────────────────────
+@login_required
 def resistance_dashboard(request):
     return render(request, "mystock/resistance_dashboard.html")
 
 # Dashboard के लिए एक अलग व्यू जो Support और Resistance दोनों दिखाएगा। 
 # यह व्यू एक HTML पेज रेंडर करेगा जिसमें एक कैलेंडर होगा, जिससे यूज़र किसी भी दिन का डेटा देख सकेगा। 
 # डेटाबेस से डेटा फ़िल्टर करने के लिए चुनी गई तारीख का उपयोग किया जाएगा।
+@login_required
 def support_resistance_view(request):
     # IST टाइमज़ोन सेट करें
     ist_timezone = pytz.timezone('Asia/Kolkata')
@@ -2097,7 +2103,7 @@ def support_resistance_view(request):
     return render(request, 'mystock/sr_data_page.html', context)
 
 
-
+@login_required
 def live_trades_view(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
     selected_date_str = request.GET.get('date')
@@ -2134,6 +2140,7 @@ def live_trades_view(request):
 
     # 2. अगर कैश खाली है (Redis down) या तारीख पुरानी है, तब ही Database पर जाओ
     if not current_spot:
+        print("DB से Spot Price निकाल रहे हैं क्योंकि Cache खाली है या तारीख पुरानी है...")
         latest_oc = OptionChain.objects.filter(
             Symbol=symbol, Time__gte=day_start, Time__lte=day_end
         ).only('Spot_Price', 'Time').order_by('-Time').first()
@@ -2164,12 +2171,19 @@ def live_trades_view(request):
 
     return render(request, 'mystock/live_trades.html', context)
 
-
-
+@login_required
 def dashboard_data_api(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
     date_str = request.GET.get('date')
 
+    # 🚀 1. कैश की (Cache Key) बनाएँ
+    cache_key = f"dashboard_api_{symbol}_{date_str}"
+    
+    # 🚀 2. चेक करें कि क्या डेटा पहले से कैश में है?
+    cached_data = cache.get(cache_key)
+    if cached_data:
+        return JsonResponse(cached_data) # अगर है, तो तुरंत 0.01 सेकंड में भेज दें!
+    
     if date_str:
         selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
     else:
@@ -2178,17 +2192,22 @@ def dashboard_data_api(request):
     day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
     day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
 
-    # 1. Latest Spot Price
-    latest_oc = OptionChain.objects.filter(
-        Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-    ).only('Spot_Price', 'Time').order_by('-Time').first()
-    current_spot = latest_oc.Spot_Price if latest_oc else None
+    # 🚀 3. Latest Spot Price (Super Fast Approach)
+    current_spot = cache.get(f'live_nifty_spot_{symbol}')
+    latest_oc = None  # UnboundLocalError से बचने के लिए इसे None सेट किया गया है
+    
+    if not current_spot:
+        print(f"Cache में Spot Price नहीं मिला, DB से ले रहे हैं... ({symbol} {selected_date})")
+        latest_oc = OptionChain.objects.filter(
+            Symbol=symbol, Time__gte=day_start, Time__lte=day_end
+        ).only('Spot_Price', 'Time').order_by('-Time').first()
+        current_spot = latest_oc.Spot_Price if latest_oc else None
 
-    # 2. MASTER LEVELS
+    # 4. MASTER LEVELS
     master_levels = get_master_levels(symbol, selected_date)
     step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
 
-    # 3. Trades Query
+    # 5. Trades Query
     trades_qs = PaperTrade.objects.filter(
         symbol=symbol, trade_date=selected_date
     ).order_by('-entry_time')
@@ -2208,30 +2227,35 @@ def dashboard_data_api(request):
         total_pnl += current_pnl
 
         trade_side = "R" if tr.trade_type == "PUT" else "S"
-
-        # ✅ FIX Bug 3: Trade की actual entry_strike से target/SL निकालो
-        # master_levels में current shifted strike हो सकती है — वो इस trade की नहीं
         entry_strike = float(tr.entry_strike) if tr.entry_strike else None
 
-        if entry_strike:
-            if tr.trade_type == 'PUT':
-                # PUT trade: R side, CE option
-                trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'CE')
-                trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'CE')
-            else:
-                # CALL trade: S side, PE option
-                trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'PE')
-                trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'PE')
+        # ✅ SUPER OPTIMIZATION: क्लोज़्ड ट्रेड के लिए बार-बार लाइव डेटा नहीं निकालना है
+        trade_target = None
+        trade_sl = None
 
-            # Fallback: अगर DB में भी न मिले तो master_levels का use करो
-            if trade_target is None:
-                trade_target = master_levels[trade_side]["target"]
-            if trade_sl is None:
-                trade_sl = master_levels[trade_side]["sl"]
+        if tr.result == 'OPEN':
+            # 🟢 सिर्फ OPEN ट्रेड के लिए लाइव Cache/DB से डेटा निकालें
+            if entry_strike:
+                if tr.trade_type == 'PUT':
+                    trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'CE')
+                    trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'CE')
+                else:
+                    trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'PE')
+                    trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'PE')
+                
+                # Fallback: अगर लाइव वैल्यू न मिले
+                if trade_target is None:
+                    trade_target = master_levels[trade_side]["target"]
+                if trade_sl is None:
+                    trade_sl = master_levels[trade_side]["sl"]
         else:
-            # entry_strike नहीं है तो master_levels से लो
-            trade_target = master_levels[trade_side]["target"]
-            trade_sl     = master_levels[trade_side]["sl"]
+            # 🔴 CLOSED ट्रेड के लिए: सीधे ट्रेड की एंट्री प्राइस से फिक्स (स्टैटिक) टारगेट/SL निकाल लें 
+            if tr.trade_type == 'PUT':
+                trade_target = float(tr.entry_spot) - step
+                trade_sl     = float(tr.entry_spot) + step
+            else:
+                trade_target = float(tr.entry_spot) + step
+                trade_sl     = float(tr.entry_spot) - step
 
         # अगर फिर भी None हो तो safe default
         if trade_target is None:
@@ -2254,14 +2278,15 @@ def dashboard_data_api(request):
             'entry_strike': tr.entry_strike,
         })
 
-    # 4. Bot Status
+    # 6. Bot Status
     try:
         ctrl, _ = SyncControl.objects.get_or_create(name="bot_loop")
         bot_active = ctrl.is_active
     except Exception:
         bot_active = False
 
-    return JsonResponse({
+    # 🚀 7. रिस्पॉन्स डेटा को एक डिक्शनरी में सेव करें
+    response_data = {
         'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
         'bot_active': bot_active,
         'total_pnl': round(total_pnl, 2),
@@ -2276,54 +2301,76 @@ def dashboard_data_api(request):
             'data_time': latest_oc.Time.isoformat() if latest_oc else None,
         },
         'trades': trades_list,
-    })
+    }
+    
+    # 🚀 8. डेटा को 4 सेकंड के लिए कैश में सेव कर दें
+    cache.set(cache_key, response_data, 4) 
+    
+    return JsonResponse(response_data)
 
 
 def get_rev_val_for_dashboard(symbol, selected_date, strike, side):
     """
     Dashboard के लिए किसी specific strike की reversal value निकालना।
-    Trade की actual entry_strike पर target/SL दिखाने के लिए।
+    (Optimized Version - No Extra Imports Needed)
     """
+    symbol_upper = symbol.upper() 
+    cache_key = f"rev_val_{symbol_upper}_{selected_date}_{strike}_{side}"
+    
+    # यह आपका SmartCache इस्तेमाल कर रहा है
+    cached_val = cache.get(cache_key)
+    if cached_val is not None:
+        return cached_val
+
+    result = None
     try:
         today = timezone.now().date()
 
-        # आज है तो Redis से
         if selected_date == today:
-            from django.core.cache import cache as django_cache
-            history_key = f"moving_history_all_{symbol.upper()}"
-            history_data = django_cache.get(history_key)
+            history_key = f"moving_history_all_{symbol_upper}"
+            
+            # 🚀 बदलाव: django_cache की जगह सीधे caches['default'] का इस्तेमाल करें
+            history_data = caches['default'].get(history_key)
+            
             if history_data:
                 strike_float = float(strike)
                 if strike_float in history_data:
                     hist_key = 'ce_hist' if side == 'CE' else 'pe_hist'
                     full_hist = history_data[strike_float].get(hist_key, [])
-                    last_ticks = full_hist[-10:]
-                    vals = [float(t['value']) for t in last_ticks if float(t.get('value', 0)) > 0]
-                    if vals:
-                        return round(sum(vals) / len(vals), 2)
+                    
+                    for tick in reversed(full_hist):
+                        val = float(tick.get('value', 0))
+                        if val > 0:
+                            result = round(val, 2)
+                            break
 
-        # पुरानी date या cache miss → DB से
-        rows = (
-            OptionChain.objects
-            .filter(Symbol__iexact=symbol, Time__date=selected_date, Strike_Price=strike)
-            .order_by('-Time')[:10]
-        )
-        total_val, valid_count = 0.0, 0
-        for row in rows:
-            val = float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
-            if val and val > 0:
-                total_val += val
-                valid_count += 1
-        if valid_count > 0:
-            return round(total_val / valid_count, 2)
+        if result is None:
+            print(f"🔴 DB HIT for {symbol_upper} {strike} {side}")
+
+            col_name = 'Reversl_Ce' if side == 'CE' else 'Reversl_Pe'
+            
+            val = (
+                OptionChain.objects
+                .filter(Symbol=symbol_upper, Time__date=selected_date, Strike_Price=strike)
+                .order_by('-Time')
+                .values_list(col_name, flat=True)
+                .first() 
+            )
+           
+
+            if val and float(val) > 0:
+                result = round(float(val), 2)
 
     except Exception:
         pass
 
-    return None
+    if result is not None:
+        # यह आपका SmartCache इस्तेमाल कर रहा है
+        cache.set(cache_key, result, 60) 
+        
+    return result
 
-
-@login_required
+@admin_only
 @csrf_exempt
 def skip_trade_api(request):
     if request.method == "POST":
@@ -2358,7 +2405,7 @@ def skip_trade_api(request):
 #  DB Cleanup API — Admin Panel से पुराना data delete करने के लिए
 # ════════════════════════════════════════════════════════════════
 @csrf_exempt
-@login_required
+@admin_only
 def db_cleanup_api(request):
     """
     Admin Panel → DB Cleanup section से call होता है।
@@ -2456,7 +2503,7 @@ def db_cleanup_api(request):
         }, status=500)
 
 
-@login_required
+@admin_only
 def db_cleanup_preview_api(request):
     """
     Delete से पहले count दिखाता है — confirmation के लिए।
@@ -2512,6 +2559,7 @@ def db_cleanup_preview_api(request):
 
 
 # पुराने ट्रेड्स और डैशबोर्ड के लिए व्यू
+@login_required
 def trade_dashboard(request):
     today = timezone.now().date()
 
@@ -2658,7 +2706,7 @@ def _serialize_row(row: dict, time_str: str) -> dict:
     return serialized
 
 
-# @login_required
+@login_required
 def market_replay_view(request):
     """सिर्फ HTML पेज रेंडर करेगा"""
     context = {
@@ -2667,7 +2715,7 @@ def market_replay_view(request):
     return render(request, 'mystock/market_replay.html', context)
 
 
-# @login_required
+@login_required
 def market_replay_data_api(request):
     """
     चुनी गई Date का सारा Option Chain और SR Data एक साथ (Bulk)
@@ -2979,6 +3027,7 @@ def get_reversal_lines_for_replay(symbol: str, date_str: str,
 # ─────────────────────────────────────────────────────────────────────
 # View 1: HTML Page
 # ─────────────────────────────────────────────────────────────────────
+@login_required
 def backtest_view(request):
     return render(request, 'mystock/backtesta.html')
 
@@ -2986,6 +3035,7 @@ def backtest_view(request):
 # ─────────────────────────────────────────────────────────────────────
 # View 2: AJAX API — Backtest Run
 # ─────────────────────────────────────────────────────────────────────
+@login_required
 @require_GET
 def backtest_run_api(request):
     symbol     = request.GET.get('symbol', 'NIFTY').strip().upper()
