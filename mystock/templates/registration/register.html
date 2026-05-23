@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpChain — Register</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0a0c10; --card: #111318; --border: #1e2230;
+            --accent: #3b82f6; --accent2: #6366f1; --green: #22c55e;
+            --text: #f1f5f9; --muted: #64748b; --input-bg: #0f1117;
+        }
+        body {
+            font-family: 'Inter','Segoe UI',system-ui,sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; display: flex;
+            align-items: center; justify-content: center;
+            position: relative; overflow: hidden;
+        }
+        body::before {
+            content: ''; position: fixed; inset: 0;
+            background-image: linear-gradient(rgba(59,130,246,.03) 1px,transparent 1px),
+                              linear-gradient(90deg,rgba(59,130,246,.03) 1px,transparent 1px);
+            background-size: 40px 40px; pointer-events: none;
+        }
+        .orb { position: fixed; border-radius: 50%; filter: blur(80px); opacity: .12; pointer-events: none; animation: drift 8s ease-in-out infinite alternate; }
+        .orb-1 { width:400px;height:400px;background:var(--accent);top:-100px;left:-100px; }
+        .orb-2 { width:350px;height:350px;background:var(--accent2);bottom:-80px;right:-80px;animation-delay:-4s; }
+        @keyframes drift { from{transform:translate(0,0) scale(1)} to{transform:translate(30px,20px) scale(1.05)} }
+        .card {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 20px; padding: 44px 40px;
+            width: 100%; max-width: 420px; position: relative; z-index: 10;
+            box-shadow: 0 25px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.03) inset;
+            animation: slideUp .4s cubic-bezier(.16,1,.3,1);
+        }
+        @keyframes slideUp { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
+        .logo-wrap { display:flex;align-items:center;gap:12px;margin-bottom:32px; }
+        .logo-icon {
+            width:46px;height:46px;
+            background:linear-gradient(135deg,var(--accent),var(--accent2));
+            border-radius:13px;display:flex;align-items:center;justify-content:center;
+            font-size:22px;box-shadow:0 4px 16px rgba(59,130,246,.3);flex-shrink:0;
+        }
+        .logo-text h1 { font-size:21px;font-weight:700;letter-spacing:-.3px; }
+        .logo-text p  { font-size:12px;color:var(--muted);margin-top:2px; }
+        
+        /* Message Alert Boxes */
+        .alert-success {
+            background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);
+            border-radius:8px;padding:10px 14px;font-size:13px;color:#86efac;
+            display:flex;align-items:center;gap:8px;margin-bottom:20px;
+        }
+        .error-box {
+            background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);
+            border-radius:8px;padding:10px 14px;font-size:13px;color:#fca5a5;
+            display:flex;align-items:center;gap:8px;margin-bottom:20px;
+        }
+
+        .form-group { margin-bottom:20px; }
+        .form-group label {
+            display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;
+            letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;
+        }
+        .input-wrap { position:relative; }
+        .input-icon { position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:15px;pointer-events:none; }
+        
+        /* Added input[type="email"] for Register Form */
+        input[type="text"], input[type="email"], input[type="password"] {
+            width:100%;padding:13px 42px;background:var(--input-bg);
+            border:1px solid var(--border);border-radius:10px;
+            color:var(--text);font-size:14px;font-family:inherit;
+            transition:border-color .2s,box-shadow .2s;
+            -webkit-appearance: none; appearance: none;
+        }
+        input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus {
+            outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.15);
+        }
+        
+        .pw-toggle {
+            position:absolute;right:12px;top:50%;transform:translateY(-50%);
+            background:none;border:none;color:var(--muted);cursor:pointer;
+            font-size:16px;padding:4px;transition:color .15s;
+        }
+        .pw-toggle:hover { color:var(--text); }
+        
+        .btn-login {
+            width:100%;padding:14px;
+            background:linear-gradient(135deg,var(--accent),var(--accent2));
+            color:white;border:none;border-radius:10px;
+            font-size:14px;font-weight:700;letter-spacing:.3px;cursor:pointer;
+            margin-top:8px;position:relative;overflow:hidden;
+            transition:opacity .2s,transform .1s;
+        }
+        .btn-login:hover { opacity:.92; }
+        .btn-login:active { transform:scale(.98); }
+        .btn-login:disabled { opacity:.5;cursor:not-allowed; }
+        .btn-login::after {
+            content:'';position:absolute;top:0;left:-100%;width:60%;height:100%;
+            background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);
+            transition:left .5s;
+        }
+        .btn-login:hover::after { left:150%; }
+        
+        /* Links Style */
+        .register-text {
+            text-align: center;
+            margin-top: 16px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .register-text a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+        .register-text a:hover {
+            color: var(--accent2);
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="card">
+    <div class="logo-wrap">
+        <div class="logo-icon">✨</div>
+        <div class="logo-text">
+            <h1>नया अकाउंट बनाएँ</h1>
+            <p>OpChain में शामिल हों</p>
+        </div>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+            {% if message.tags == 'error' %}
+                <div class="error-box">⚠️ {{ message }}</div>
+            {% else %}
+                <div class="alert-success">✅ {{ message }}</div>
+            {% endif %}
+        {% endfor %}
+    {% endif %}
+
+    <form method="POST" action="{% url 'register_user' %}" id="registerForm">
+        {% csrf_token %}
+        
+        <div class="form-group">
+            <label>👤 पूरा नाम</label>
+            <div class="input-wrap">
+                <span class="input-icon">📝</span>
+                <input type="text" name="name" id="name" required placeholder="अपना नाम दर्ज करें">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>📧 ईमेल एड्रेस</label>
+            <div class="input-wrap">
+                <span class="input-icon">@</span>
+                <input type="email" name="email" id="email" autocapitalize="none" required placeholder="example@mail.com">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>🔑 पासवर्ड</label>
+            <div class="input-wrap">
+                <span class="input-icon">🔐</span>
+                <input type="password" name="password" id="id_password" required placeholder="एक मजबूत पासवर्ड चुनें">
+                <button type="button" class="pw-toggle" id="pwToggle1" title="Show/Hide">👁</button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>🔑 पासवर्ड की पुष्टि करें</label>
+            <div class="input-wrap">
+                <span class="input-icon">🔐</span>
+                <input type="password" name="confirm_password" id="id_confirm_password" required placeholder="अपना पासवर्ड दोबारा डालें">
+                <button type="button" class="pw-toggle" id="pwToggle2" title="Show/Hide">👁</button>
+            </div>
+        </div>
+        
+        <button type="submit" class="btn-login" id="registerBtn">रजिस्टर करें →</button>
+        
+        <div class="register-text">
+            पहले से अकाउंट है? <a href="{% url 'login' %}">लॉगिन करें</a>
+        </div>
+    </form>
+</div>
+
+<script>
+    // पहले पासवर्ड के लिए
+    const pwToggle1 = document.getElementById('pwToggle1');
+    const pwInput1  = document.getElementById('id_password');
+    pwToggle1.addEventListener('click', () => {
+        const hidden = pwInput1.type === 'password';
+        pwInput1.type = hidden ? 'text' : 'password';
+        pwToggle1.textContent = hidden ? '🙈' : '👁';
+    });
+
+    // दूसरे (कंफर्म) पासवर्ड के लिए
+    const pwToggle2 = document.getElementById('pwToggle2');
+    const pwInput2  = document.getElementById('id_confirm_password');
+    pwToggle2.addEventListener('click', () => {
+        const hidden = pwInput2.type === 'password';
+        pwInput2.type = hidden ? 'text' : 'password';
+        pwToggle2.textContent = hidden ? '🙈' : '👁';
+    });
+
+    document.getElementById('registerForm').addEventListener('submit', function(e) {
+        // आप चाहें तो JS में भी सबमिट होने से पहले मैच चेक कर सकते हैं:
+        if (pwInput1.value !== pwInput2.value) {
+            e.preventDefault(); // फॉर्म को सबमिट होने से रोकें
+            alert("पासवर्ड मैच नहीं हो रहे हैं!");
+            return;
+        }
+
+        const btn = document.getElementById('registerBtn');
+        btn.disabled = true;
+        btn.textContent = 'Account Creating...';
+    });
+</script>
+</body>
+</html>
