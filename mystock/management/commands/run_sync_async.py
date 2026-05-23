@@ -284,82 +284,82 @@ class Command(BaseCommand):
                             ) for _, row in filtered_df.iterrows()]
                             
                             await bulk_create_async(entries)
-                            # print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
-                            last_db_save_time = current_time  # अपडेट करें जब DB में सेव किया गया")
-                        # Last deta save time 
-                        # print(f"⏱️ [NIFTY] Processed expiry {expiry} - DB last saved at {datetime.fromtimestamp(last_db_save_time).strftime('%H:%M:%S')} - Current time {datetime.now().strftime('%H:%M:%S')}")
-                        # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
-                        await save_live_sr_async(df, fixes_sym)
-                    
-                        # 🟢 Incremental History Update — FIXED
-                        try:
-                            # ✅ FIX Bug 4: master_levels एक बार निकालो
-                            master_levels = await sync_to_async(get_master_levels)(fixes_sym)
-                            eff_res = master_levels["R"]["strike"]
-                            eff_sup = master_levels["S"]["strike"]
-                            t_str   = datetime.now().isoformat()
-
-                            history_key  = f"moving_history_all_{fixes_sym.upper()}"
-                            history_data = await get_cache_async(history_key) or {}
-
-                            for _, row in df.iterrows():
-                                s = float(row['Strike_Price'])
-                                if s not in history_data:
-                                    history_data[s] = {'ce_hist': [], 'pe_hist': []}
-
-                                ce_val = row.get('Reversl_Ce')
-                                if ce_val is not None and float(ce_val) > 0:
-                                    history_data[s]['ce_hist'].append({"time": t_str, "value": float(ce_val)})
-                                    history_data[s]['ce_hist'] = history_data[s]['ce_hist'][-500:]
-
-                                pe_val = row.get('Reversl_Pe')
-                                if pe_val is not None and float(pe_val) > 0:
-                                    history_data[s]['pe_hist'].append({"time": t_str, "value": float(pe_val)})
-                                    history_data[s]['pe_hist'] = history_data[s]['pe_hist'][-500:]
-
-                            # ✅ FIX Bug 3: Strike price नहीं — Reversal VALUE save करो
-                            if "master_res" not in history_data: history_data["master_res"] = []
-                            if "master_sup" not in history_data: history_data["master_sup"] = []
-
-                            res_val = None
-                            sup_val = None
-
-                            for _, row in df.iterrows():
-                                if float(row['Strike_Price']) == eff_res and row.get('Reversl_Ce') and float(row['Reversl_Ce']) > 0:
-                                    res_val = float(row['Reversl_Ce'])
-                                if float(row['Strike_Price']) == eff_sup and row.get('Reversl_Pe') and float(row['Reversl_Pe']) > 0:
-                                    sup_val = float(row['Reversl_Pe'])
-
-                            if res_val is not None:
-                                history_data["master_res"].append({"time": t_str, "value": res_val})
-                                history_data["master_res"] = history_data["master_res"][-500:]
-
-                            if sup_val is not None:
-                                history_data["master_sup"].append({"time": t_str, "value": sup_val})
-                                history_data["master_sup"] = history_data["master_sup"][-500:]
-
-                            await set_cache_async(history_key, history_data, 43200)
-
-                        except Exception as e:
-                            print(f"❌ History Update Error: {e}")
-
-                        # 🤖 Bot trading trigger 
-                        # (यहाँ डुप्लीकेट self.is_trading_hourst() हटा दिया गया है)
-                        bot_ctrl, _ = await get_control_async(name="bot_loop") # नाम बदल दिया ताकि कन्फ्यूजन न हो
-                        if bot_ctrl.is_active:
-                            if self.is_trad_hours():  # Bot trading hours check
-                                await sync_to_async(run_live_paper_trading)(
-                                    df=df,
-                                    symbol=fixes_sym,
-                                    master_levels=master_levels, 
-                                )
-                            else:
-                                print("⏸️ Bot Loop Outside Side Trading Hours., Stop trades.")
-                        else:
-                            print("🤖 Bot Loop is Paused. Data saving, no trades.")
-                            
+                            print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
+                            # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
+                            await save_live_sr_async(df, fixes_sym)
                     else:
                         print("⏸️  NIFTY Loop Outside Trading Hours.")
+                    
+                
+                    # 🟢 Incremental History Update — FIXED
+                    try:
+                        # ✅ FIX Bug 4: master_levels एक बार निकालो
+                        master_levels = await sync_to_async(get_master_levels)(fixes_sym)
+                        eff_res = master_levels["R"]["strike"]
+                        eff_sup = master_levels["S"]["strike"]
+                        t_str   = datetime.now().isoformat()
+
+                        history_key  = f"moving_history_all_{fixes_sym.upper()}"
+                        history_data = await get_cache_async(history_key) or {}
+
+                        for _, row in df.iterrows():
+                            s = float(row['Strike_Price'])
+                            if s not in history_data:
+                                history_data[s] = {'ce_hist': [], 'pe_hist': []}
+
+                            ce_val = row.get('Reversl_Ce')
+                            if ce_val is not None and float(ce_val) > 0:
+                                history_data[s]['ce_hist'].append({"time": t_str, "value": float(ce_val)})
+                                history_data[s]['ce_hist'] = history_data[s]['ce_hist'][-500:]
+
+                            pe_val = row.get('Reversl_Pe')
+                            if pe_val is not None and float(pe_val) > 0:
+                                history_data[s]['pe_hist'].append({"time": t_str, "value": float(pe_val)})
+                                history_data[s]['pe_hist'] = history_data[s]['pe_hist'][-500:]
+
+                        # ✅ FIX Bug 3: Strike price नहीं — Reversal VALUE save करो
+                        if "master_res" not in history_data: history_data["master_res"] = []
+                        if "master_sup" not in history_data: history_data["master_sup"] = []
+
+                        res_val = None
+                        sup_val = None
+
+                        for _, row in df.iterrows():
+                            if float(row['Strike_Price']) == eff_res and row.get('Reversl_Ce') and float(row['Reversl_Ce']) > 0:
+                                res_val = float(row['Reversl_Ce'])
+                            if float(row['Strike_Price']) == eff_sup and row.get('Reversl_Pe') and float(row['Reversl_Pe']) > 0:
+                                sup_val = float(row['Reversl_Pe'])
+
+                        if res_val is not None:
+                            history_data["master_res"].append({"time": t_str, "value": res_val})
+                            history_data["master_res"] = history_data["master_res"][-500:]
+
+                        if sup_val is not None:
+                            history_data["master_sup"].append({"time": t_str, "value": sup_val})
+                            history_data["master_sup"] = history_data["master_sup"][-500:]
+
+                        await set_cache_async(history_key, history_data, 43200)
+
+                    except Exception as e:
+                        print(f"❌ History Update Error: {e}")
+
+                    # 🤖 Bot trading trigger 
+                    # (यहाँ डुप्लीकेट self.is_trading_hourst() हटा दिया गया है)
+                    bot_ctrl, _ = await get_control_async(name="bot_loop") # नाम बदल दिया ताकि कन्फ्यूजन न हो
+                    if bot_ctrl.is_active:
+                        if self.is_trad_hours():  # Bot trading hours check
+                            await sync_to_async(run_live_paper_trading)(
+                                df=df,
+                                symbol=fixes_sym,
+                                master_levels=master_levels, 
+                            )
+                        else:
+                            print("⏸️ Bot Loop Outside Side Trading Hours., Stop trades.")
+                    else:
+                        print("🤖 Bot Loop is Paused. Data saving, no trades.")
+                        
+                    # else:
+                    #     print("⏸️  NIFTY Loop Outside Trading Hours.")
                         
                 else:
                     print(f"⚠️ [NIFTY] No data returned for expiry {expiry}.")
