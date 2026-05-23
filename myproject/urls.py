@@ -16,10 +16,21 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from mystock import views as mystock_views
+
+# urlpatterns = [
+#     path('admin/', admin.site.urls),
+#     path('accounts/', include('django.contrib.auth.urls')),
+#     path('', include('mystock.urls')),
+    
+# ]
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    
+    # 🚀 हमारी कस्टम लॉगिन व्यू को डिफ़ॉल्ट auth.urls से ऊपर रखें
+    path('accounts/login/', mystock_views.login_view, name='login'),
+    
     path('accounts/', include('django.contrib.auth.urls')),
     path('', include('mystock.urls')),
-    # path('paper/', include('mystock.paper_trade_urls')),
 ]
