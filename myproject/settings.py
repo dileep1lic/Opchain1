@@ -70,6 +70,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'mystock.middleware.KickOutMiddleware',
 ]
 
 ROOT_URLCONF = 'myproject.urls'
@@ -96,15 +97,6 @@ ASGI_APPLICATION = 'myproject.asgi.application'
 
 WSGI_APPLICATION = 'myproject.wsgi.application'
 
-# websocket के लिए channels का ASGI application सेट करें
-# CHANNEL_LAYERS = {
-#     "default": {
-#         "BACKEND": "channels_redis.core.RedisChannelLayer",
-#         "CONFIG": {
-#             "hosts": [("127.0.0.1", 6379)], # आपका Redis एड्रेस
-#         },
-#     },
-# }
 
 
 # ── Database ─────────────────────────────────────────────────────────────
@@ -255,15 +247,25 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 
-# लॉगिन के लिए डिफ़ॉल्ट URL
-LOGIN_URL = '/accounts/login/'
+# # लॉगिन के लिए डिफ़ॉल्ट URL
+# LOGIN_URL = '/accounts/login/'
 
-# लॉगिन सफल होने के बाद कहाँ जाना है (अगर URL में ?next= नहीं है तो)
-LOGIN_REDIRECT_URL = '/admin-panel/' 
+# # लॉगिन सफल होने के बाद कहाँ जाना है (अगर URL में ?next= नहीं है तो)
+# LOGIN_REDIRECT_URL = '/admin-panel/' 
 
-# लॉगआउट होने के बाद कहाँ जाना है
-LOGOUT_REDIRECT_URL = '/accounts/login/'
+# # लॉगआउट होने के बाद कहाँ जाना है
+# LOGOUT_REDIRECT_URL = '/accounts/login/'
 
+# लॉगिन पेज का रास्ता (urls.py में दिए गए नाम के अनुसार)
+LOGIN_URL = 'login'
+
+# लॉगिन सफल होने के बाद फॉलबैक रास्ता (View के काम न करने पर बैकअप के लिए)
+LOGIN_REDIRECT_URL = 'dashboard'
+
+# लॉगआउट होने के बाद सीधे लॉगिन पेज पर भेजने के लिए
+LOGOUT_REDIRECT_URL = 'login'
+
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # ═══════════════════════════════════════════════════════
 # यह block settings.py के END में add करें
