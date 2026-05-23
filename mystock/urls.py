@@ -14,6 +14,15 @@ urlpatterns = [
     path('api/close-all-trades/', views.close_all_open_trades_api, name='close_all_open_trades_api'),
     path('api/db-cleanup/',       views.db_cleanup_api,            name='db_cleanup_api'),
     path('api/db-cleanup-preview/', views.db_cleanup_preview_api,  name='db_cleanup_preview_api'),
+    
+    path('admin-panel/users/', views.user_approval_list, name='user_approval_list'),
+    path('admin-panel/users/toggle/<int:user_id>/', views.toggle_user_status, name='toggle_user_status'),
+
+    # यह लाइन जोड़ें ताकि Django हमारे कस्टम लॉगिन व्यू को कॉल करे
+    path('accounts/login/', views.login_view, name='login'), 
+    
+    # रजिस्टर का URL (अगर आपने पहले जोड़ लिया है तो ठीक है)
+    path('register/', views.register_user, name='register_user'),
 
     # लूप्स को चालू/बंद करने वाला URL (जैसे: /toggle/nifty_loop/)
     path('toggle/<str:loop_name>/', views.toggle_sync, name='toggle_sync'),
