@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpChain — User Management</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0a0c10; --card: #111318; --border: #1e2230;
+            --accent: #3b82f6; --accent2: #6366f1; --green: #22c55e;
+            --red: #ef4444; --text: #f1f5f9; --muted: #64748b; 
+            --input-bg: #0f1117;
+        }
+        body {
+            font-family: 'Inter','Segoe UI',system-ui,sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; padding: 40px 20px;
+            display: flex; flex-direction: column; align-items: center;
+            position: relative; overflow-x: hidden;
+        }
+        body::before {
+            content: ''; position: fixed; inset: 0;
+            background-image: linear-gradient(rgba(59,130,246,.02) 1px,transparent 1px),
+                              linear-gradient(90deg,rgba(59,130,246,.02) 1px,transparent 1px);
+            background-size: 40px 40px; pointer-events: none;
+        }
+        .orb { position: fixed; border-radius: 50%; filter: blur(100px); opacity: .1; pointer-events: none; }
+        .orb-1 { width:500px; height:500px; background:var(--accent); top:-150px; left:-100px; }
+        .orb-2 { width:450px; height:450px; background:var(--accent2); bottom:-100px; right:-100px; }
+
+        .container { width: 100%; max-width: 900px; position: relative; z-index: 10; }
+        
+        .header-section { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        .logo-wrap { display: flex; align-items: center; gap: 12px; }
+        .logo-icon {
+            width: 44px; height: 44px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border-radius: 12px; display: flex; align-items: center; justify-content: center;
+            font-size: 20px; box-shadow: 0 4px 16px rgba(59,130,246,.25);
+        }
+        .logo-text h1 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+        .logo-text p { font-size: 12px; color: var(--muted); }
+        
+        .btn-back {
+            padding: 10px 16px; background: var(--card); border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px;
+            transition: all .2s; font-weight: 600;
+        }
+        .btn-back:hover { border-color: var(--accent); background: rgba(59,130,246,.05); }
+
+        /* Messages */
+        .alert-success {
+            background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.25);
+            border-radius: 10px; padding: 12px 16px; font-size: 13px; color: #86efac;
+            margin-bottom: 24px; display: flex; align-items: center; gap: 8px;
+        }
+
+        /* Glassmorphic Table Card */
+        .table-card {
+            background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+            padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,.4); overflow: hidden;
+        }
+        .table-responsive { width: 100%; overflow-x: auto; }
+        
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        th { padding: 14px 16px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        td { padding: 16px; border-bottom: 1px solid rgba(255,255,255,.02); color: var(--text); vertical-align: middle; }
+        tr:hover td { background: rgba(255,255,255,0.01); }
+
+        .user-name { font-weight: 600; color: var(--text); display: block; }
+        .user-email { font-size: 12px; color: var(--muted); margin-top: 2px; display: block; }
+
+        /* Badges */
+        .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-active { background: rgba(34,197,94,.1); color: #4ade80; border: 1px solid rgba(34,197,94,.2); }
+        .badge-pending { background: rgba(239,68,68,.1); color: #fca5a5; border: 1px solid rgba(239,68,68,.2); }
+        .dot { width: 6px; height: 6px; border-radius: 50%; }
+        .badge-active .dot { background: var(--green); }
+        .badge-pending .dot { background: var(--red); }
+
+        /* Action Button */
+        .btn-action {
+            padding: 8px 14px; border: none; border-radius: 8px; font-size: 12px; font-weight: 700;
+            cursor: pointer; transition: all .2s; width: 100px; color: #fff;
+        }
+        .btn-approve { background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 4px 12px rgba(34,197,94,.2); }
+        .btn-approve:hover { opacity: .9; transform: translateY(-1px); }
+        .btn-reject { background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 4px 12px rgba(239,68,68,.2); }
+        .btn-reject:hover { opacity: .9; transform: translateY(-1px); }
+        .btn-action:active { transform: translateY(0); }
+
+        .empty-state { text-align: center; padding: 40px 0; color: var(--muted); font-size: 14px; }
+    </style>
+</head>
+<body>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<div class="container">
+    <div class="header-section">
+        <div class="logo-wrap">
+            <div class="logo-icon">👥</div>
+            <div class="logo-text">
+                <h1>यूज़र मैनेजमेंट पैनल</h1>
+                <p>अकाउंट वेरिफिकेशन और अप्रूवल सिस्टम</p>
+            </div>
+        </div>
+        <a href="{% url 'admin_panel' %}" class="btn-back">← Admin Panel</a>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert-success">✅ {{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="table-card">
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>👤 यूज़र विवरण</th>
+                        <th>📅 जॉइनिंग डेट</th>
+                        <th>⚡ स्थिति (Status)</th>
+                        <th>⚙️ एक्शन</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in managed_users %}
+                    <tr>
+                        <td>
+                            <span class="user-name">{{ u.first_name }}</span>
+                            <span class="user-email">{{ u.username }}</span>
+                        </td>
+                        <td>{{ u.date_joined|date:"d M, Y" }}</td>
+                        <td>
+                            {% if u.is_active %}
+                                <div class="badge badge-active"><span class="dot"></span>Approved</div>
+                            {% else %}
+                                <div class="badge badge-pending"><span class="dot"></span>Pending</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="POST" action="{% url 'toggle_user_status' u.id %}">
+                                {% csrf_token %}
+                                {% if u.is_active %}
+                                    <button type="submit" class="btn-action btn-reject">Deactivate</button>
+                                {% else %}
+                                    <button type="submit" class="btn-action btn-approve">Approve</button>
+                                {% endif %}
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="empty-state">
+                            अभी तक कोई भी यूज़र रजिस्टर्ड नहीं हुआ है।
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</body>
+</html>
