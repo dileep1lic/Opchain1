@@ -125,7 +125,9 @@
   let savedRange = null;
   let lastCandles = [];
   let lastReversals = [];
-
+  let candleSeries = null;          // <--- नया (चार्ट डेटा को अपडेट रखने के लिए)
+  let currentChartSettings = "";    // <--- नया (सिंबल या टाइमफ्रेम बदलने को ट्रैक करने के लिए)
+ 
   // ══════════════════════════════════════════════════════
   //  SOUND ALERTS & NOTIFICATIONS LOGIC
   // ══════════════════════════════════════════════════════
@@ -249,125 +251,151 @@ function checkReversalAlerts(currentPrice, reversals) {
 }
   // ══════════════════════════════════════════════════════
 
+  // ── OHLC Hover Update Function ──
+  function updateLegend(data) {
+      const legend = document.getElementById('ohlc-legend');
+      if (!legend) return;
+      const isUp = data.close >= data.open;
+      const color = isUp ? 'var(--green)' : 'var(--red)';
+      legend.innerHTML = `
+          <span class="ohlc-lbl">O</span> <span class="ohlc-val" style="color:${color}">${data.open.toFixed(2)}</span>
+          <span class="ohlc-lbl">H</span> <span class="ohlc-val" style="color:var(--green)">${data.high.toFixed(2)}</span>
+          <span class="ohlc-lbl">L</span> <span class="ohlc-val" style="color:var(--red)">${data.low.toFixed(2)}</span>
+          <span class="ohlc-lbl">C</span> <span class="ohlc-val" style="color:${color}">${data.close.toFixed(2)}</span>
+      `;
+      legend.style.display = 'block';
+  }
+
   function buildCharts(candles, reversals = []) {
-    lastCandles = candles;
-    lastReversals = reversals;
-    const chartContainer = document.getElementById("chart");
+      lastCandles = candles;
+      lastReversals = reversals;
+      const chartContainer = document.getElementById("chart");
 
-    if (mainChart) { mainChart.remove(); mainChart = null; }
-    chartContainer.innerHTML = "";
+      if (!candles || candles.length === 0) { 
+          document.getElementById("message").style.display = "block"; 
+          document.getElementById("message").innerText = "No Data Available"; 
+          return; 
+      }
+      document.getElementById("message").style.display = "none";
 
-    if (!candles || candles.length === 0) { 
-        document.getElementById("message").style.display = "block"; 
-        document.getElementById("message").innerText = "No Data Available"; 
-        return; 
-    }
-    document.getElementById("message").style.display = "none";
+      // मौजूदा सिंबल और टाइमफ्रेम को चेक करें
+      const sym = document.getElementById("ctrl-symbol").value || "default";
+      const intv = document.getElementById("ctrl-interval").value || "5";
+      const chartSettingsKey = `${sym}_${intv}`;
+      const zoomStorageKey = `chart_zoom_${chartSettingsKey}`;
 
-    const cWidth = chartContainer.clientWidth || window.innerWidth || 800;
-    const cHeight = chartContainer.clientHeight || window.innerHeight || 400;
+      // 1. अगर सिंबल या टाइमफ्रेम बदला है, तो ही पुराने चार्ट को डिलीट करें
+      if (mainChart && currentChartSettings !== chartSettingsKey) {
+          mainChart.remove();
+          mainChart = null;
+          candleSeries = null;
+      }
+      currentChartSettings = chartSettingsKey;
 
-    mainChart = LightweightCharts.createChart(chartContainer, {
-        width: cWidth,
-        height: cHeight,
-        layout: { background: { color: "#0d1117" }, textColor: "#8b949e" },
-        grid: { vertLines: { color: "#21262d" }, horzLines: { color: "#21262d" } },
-        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        rightPriceScale: { borderColor: "#30363d" },
-        timeScale: { borderColor: "#30363d", timeVisible: true },
-    });
+      // 2. डेटा को टाइमस्टैम्प में बदलें
+      const IST_OFFSET = 19800;
+      let cdData = [];
+      let seenTimes = new Set();
+      
+      candles.forEach(c => {
+          let t = Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET;
+          if (!seenTimes.has(t)) {
+              seenTimes.add(t);
+              cdData.push({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
+          }
+      });
+      cdData.sort((a, b) => a.time - b.time);
 
-    new ResizeObserver(entries => {
-        if(entries.length === 0 || !mainChart) return;
-        const newRect = entries[0].contentRect;
-        if(newRect.width > 0 && newRect.height > 0) {
-            mainChart.applyOptions({ width: newRect.width, height: newRect.height });
-        }
-    }).observe(chartContainer);
+      // 3. अगर चार्ट नहीं है (यानी पेज रिफ्रेश हुआ है), तो नया चार्ट बनाएँ
+      if (!mainChart) {
+          chartContainer.innerHTML = "";
+          const cWidth = chartContainer.clientWidth || window.innerWidth || 800;
+          const cHeight = chartContainer.clientHeight || window.innerHeight || 400;
 
-    const candleSeries = mainChart.addCandlestickSeries({ 
-        upColor: "#3fb950", downColor: "#f85149", 
-        borderUpColor: "#3fb950", borderDownColor: "#f85149", 
-        wickUpColor: "#3fb950", wickDownColor: "#f85149",
-    });
+          mainChart = LightweightCharts.createChart(chartContainer, {
+              width: cWidth, height: cHeight,
+              layout: { background: { color: "#0d1117" }, textColor: "#8b949e" },
+              grid: { vertLines: { color: "#21262d" }, horzLines: { color: "#21262d" } },
+              crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+              rightPriceScale: { borderColor: "#30363d" },
+              timeScale: { borderColor: "#30363d", timeVisible: true },
+          });
 
-    const IST_OFFSET = 19800;
-    let cdData = [];
-    let seenTimes = new Set();
-    
-    candles.forEach(c => {
-        let t = Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET;
-        if (!seenTimes.has(t)) {
-            seenTimes.add(t);
-            cdData.push({ time: t, open: c.open, high: c.high, low: c.low, close: c.close });
-        }
-    });
-    cdData.sort((a, b) => a.time - b.time);
-    candleSeries.setData(cdData);
+          candleSeries = mainChart.addCandlestickSeries({ 
+              upColor: "#3fb950", downColor: "#f85149", 
+              borderUpColor: "#3fb950", borderDownColor: "#f85149", 
+              wickUpColor: "#3fb950", wickDownColor: "#f85149",
+          });
 
-    // ── OHLC Hover Logic ──
-    const legend = document.getElementById('ohlc-legend');
-    
-    const updateLegend = (data) => {
-        const isUp = data.close >= data.open;
-        const color = isUp ? 'var(--green)' : 'var(--red)';
-        legend.innerHTML = `
-            <span class="ohlc-lbl">O</span> <span class="ohlc-val" style="color:${color}">${data.open.toFixed(2)}</span>
-            <span class="ohlc-lbl">H</span> <span class="ohlc-val" style="color:var(--green)">${data.high.toFixed(2)}</span>
-            <span class="ohlc-lbl">L</span> <span class="ohlc-val" style="color:var(--red)">${data.low.toFixed(2)}</span>
-            <span class="ohlc-lbl">C</span> <span class="ohlc-val" style="color:${color}">${data.close.toFixed(2)}</span>
-        `;
-        legend.style.display = 'block';
-    };
+          new ResizeObserver(entries => {
+              if(entries.length === 0 || !mainChart) return;
+              const newRect = entries[0].contentRect;
+              if(newRect.width > 0 && newRect.height > 0) {
+                  mainChart.applyOptions({ width: newRect.width, height: newRect.height });
+              }
+          }).observe(chartContainer);
 
-    if (cdData.length > 0) {
-        updateLegend(cdData[cdData.length - 1]);
-        // Alert Check Call
-        checkReversalAlerts(cdData[cdData.length - 1].close, reversals);
-    }
+          mainChart.subscribeCrosshairMove(param => {
+              if (param.time) {
+                  const data = param.seriesData.get(candleSeries);
+                  if (data) { updateLegend(data); }
+              }
+          });
 
-    mainChart.subscribeCrosshairMove(param => {
-        if (param.time) {
-            const data = param.seriesData.get(candleSeries);
-            if (data) { updateLegend(data); }
-        }
-    });
+          // --- ज़ूम को रीस्टोर और सेव करने का लॉजिक ---
+          const savedTimeRangeStr = localStorage.getItem(zoomStorageKey);
+          setTimeout(() => {
+              if (savedTimeRangeStr) {
+                  try {
+                      const savedTimeRange = JSON.parse(savedTimeRangeStr);
+                      mainChart.timeScale().setVisibleRange(savedTimeRange);
+                  } catch (e) {
+                      mainChart.timeScale().fitContent();
+                  }
+              } else {
+                  mainChart.timeScale().fitContent();
+              }
+          }, 50);
 
-    // ── Reversal Lines: सिर्फ Straight Lines ──
-    if (window._reversalSeries) {
-        window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
-    }
-    window._reversalSeries = [];
+          mainChart.timeScale().subscribeVisibleTimeRangeChange(range => { 
+              if (range) {
+                  localStorage.setItem(zoomStorageKey, JSON.stringify(range));
+              }
+          });
+      } // -- नया चार्ट बनाने का काम खत्म --
 
-    if (reversalMode === 1) {
-        const validReversals = reversals.filter(r => r && r.price > 0);
+      // 4. ऑटो रिफ्रेश होने पर: सिर्फ डेटा अपडेट करें (चार्ट डिलीट किए बिना)
+      if (candleSeries) {
+          candleSeries.setData(cdData); // <--- यही लाइन ज़ूम को टूटने नहीं देगी
+      }
 
-        validReversals.forEach(rev => {
-            try {
-                const ls = mainChart.addLineSeries({ 
-                    color: rev.color, 
-                    lineWidth: rev.width || 1, 
-                    lineStyle: rev.dash || 0, 
-                    priceLineVisible: false, 
-                    lastValueVisible: true, 
-                    title: rev.label || '' 
-                });
+      if (cdData.length > 0) {
+          updateLegend(cdData[cdData.length - 1]);
+          checkReversalAlerts(cdData[cdData.length - 1].close, reversals);
+      }
 
-                const lineData = cdData.map(c => ({ time: c.time, value: Number(rev.price) }));
-                if (lineData.length > 0) { ls.setData(lineData); }
-                window._reversalSeries.push(ls);
-            } catch (e) {
-                console.warn("Reversal line error:", e.message);
-            }
-        });
-    }
+      // 5. Reversal Lines (Straight Lines) अपडेट करें
+      if (window._reversalSeries) {
+          window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
+      }
+      window._reversalSeries = [];
 
-    if (savedRange) mainChart.timeScale().setVisibleLogicalRange(savedRange);
-    else mainChart.timeScale().fitContent();
-    
-    mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => { 
-        if (range) savedRange = range; 
-    });
+      if (reversalMode === 1) {
+          const validReversals = reversals.filter(r => r && r.price > 0);
+          validReversals.forEach(rev => {
+              try {
+                  const ls = mainChart.addLineSeries({ 
+                      color: rev.color, lineWidth: rev.width || 1, lineStyle: rev.dash || 0, 
+                      priceLineVisible: false, lastValueVisible: true, title: rev.label || '' 
+                  });
+                  const lineData = cdData.map(c => ({ time: c.time, value: Number(rev.price) }));
+                  if (lineData.length > 0) { ls.setData(lineData); }
+                  window._reversalSeries.push(ls);
+              } catch (e) {
+                  console.warn("Reversal line error:", e.message);
+              }
+          });
+      }
   }
 
   function toggleReversalLines() {
