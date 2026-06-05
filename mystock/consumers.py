@@ -18,5 +18,9 @@ class OptionChainConsumer(AsyncWebsocketConsumer):
         # फ्रंटएंड को JSON मेसेज भेजें
         await self.send(text_data=json.dumps({
             'symbol': event['symbol'],
-            'message': event['message']
+            'message': event['message'],
+            "symbol": event.get("symbol"),           # 👈 यह लाइन जोड़ें
+            "spot_price": event.get("spot_price"),   # 👈 यह लाइन जोड़ें
+            "data_time": event.get("data_time"),      # 👈 यह लाइन जोड़ें
         }))
+        
