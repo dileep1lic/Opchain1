@@ -16,6 +16,6 @@ python manage.py run_sync_async &
 
 # 3. मुख्य वेब सर्वर शुरू करें (Main Web Server)
 # यह सबसे अंत में होना चाहिए और इसके पीछे '&' नहीं लगाना है।
-# यह Foreground में चलेगा ताकि Render को पता चले कि वेबसाइट लाइव है।
+# यह Foreground में चलेगा ताकि Render को पता चले कि वेबसाइट लाइव है।   python manage.py run_sync_async & gunicorn myproject.wsgi:application --bind 0.0.0.0:$PORT --timeout 120 --log-file -
 echo "Starting Gunicorn Server..."
 gunicorn myproject.wsgi

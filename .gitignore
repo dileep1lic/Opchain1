@@ -6,8 +6,8 @@ stock_sync/
 __pycache__/
 
 # Local Database (लोकल डेटाबेस को कभी अपलोड न करें)
-# db.sqlite3
-# db.sqlite3-journal
+db.sqlite3
+db.sqlite3-journal
 
 # Environments (वर्चुअल एनवायरनमेंट)
 .env
