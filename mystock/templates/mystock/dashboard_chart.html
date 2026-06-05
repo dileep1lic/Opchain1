@@ -127,6 +127,7 @@
   let lastReversals = [];
   let candleSeries = null;          // <--- नया (चार्ट डेटा को अपडेट रखने के लिए)
   let currentChartSettings = "";    // <--- नया (सिंबल या टाइमफ्रेम बदलने को ट्रैक करने के लिए)
+  let currentBar = null;           // <--- नया (लाइव कैंडल को ट्रैक करने के लिए)
  
   // ══════════════════════════════════════════════════════
   //  SOUND ALERTS & NOTIFICATIONS LOGIC
@@ -368,6 +369,19 @@ function checkReversalAlerts(currentPrice, reversals) {
       if (candleSeries) {
           candleSeries.setData(cdData); // <--- यही लाइन ज़ूम को टूटने नहीं देगी
       }
+      // 👇 यहाँ से यह नया कोड जोड़ें 👇
+      if (cdData.length > 0) {
+          const last = cdData[cdData.length - 1];
+          currentBar = {
+              time: last.time,
+              open: last.open,
+              high: last.high,
+              low: last.low,
+              close: last.close
+          };
+          updateLegend(last);
+          checkReversalAlerts(last.close, reversals);
+      }
 
       if (cdData.length > 0) {
           updateLegend(cdData[cdData.length - 1]);
@@ -486,6 +500,67 @@ function checkReversalAlerts(currentPrice, reversals) {
     if(!sel.value) sel.selectedIndex = 0;
   }
   
+  // ══════════════════════════════════════════════════════
+  //  WEBSOCKET LIVE TICKER FOR DASHBOARD
+  // ══════════════════════════════════════════════════════
+  function updateLiveCandle(liveSpotPrice, serverTimeStr) {
+      if (!candleSeries || !currentBar) return;
+
+      const unit = document.getElementById('ctrl-unit').value;
+      const interval = parseInt(document.getElementById('ctrl-interval').value) || 5;
+      const now = serverTimeStr ? new Date(serverTimeStr) : new Date();
+
+      if (unit === 'minutes') {
+          const roundedMinutes = Math.floor(now.getMinutes() / interval) * interval;
+          now.setMinutes(roundedMinutes, 0, 0);
+      } else if (unit === 'hours') {
+          const roundedHours = Math.floor(now.getHours() / interval) * interval;
+          now.setHours(roundedHours, 0, 0, 0);
+      } else {
+          now.setHours(0, 0, 0, 0);
+      }
+
+      const currentTimestamp = Math.floor(now.getTime() / 1000) + 19800; // IST Offset
+
+      if (currentBar.time !== currentTimestamp) {
+          currentBar = { time: currentTimestamp, open: liveSpotPrice, high: liveSpotPrice, low: liveSpotPrice, close: liveSpotPrice };
+      } else {
+          currentBar.close = liveSpotPrice;
+          if (liveSpotPrice > currentBar.high) currentBar.high = liveSpotPrice;
+          if (liveSpotPrice < currentBar.low)  currentBar.low  = liveSpotPrice;
+      }
+
+      candleSeries.update(currentBar);
+      document.getElementById('tp-close').textContent = liveSpotPrice.toFixed(2);
+  }
+
+  let liveSocket = null;
+  function startLiveTicker() {
+      if (liveSocket) liveSocket.close();
+
+      const symbol = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
+      const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${wsScheme}://${window.location.host}/ws/options/`; 
+
+      liveSocket = new WebSocket(wsUrl);
+
+      liveSocket.onopen = function() { console.log("🟢 Dashboard WS Connected!"); };
+
+      liveSocket.onmessage = function(e) {
+          if (!isAutoRefresh) return;
+          try {
+              const data = JSON.parse(e.data);
+              if (data.symbol === symbol && data.spot_price) {
+                  let spotPrice = parseFloat(data.spot_price);
+                  const serverTime = data.data_time; 
+                  updateLiveCandle(spotPrice, serverTime);
+              }
+          } catch (err) { console.warn("WS error:", err); }
+      };
+
+      liveSocket.onclose = function() { setTimeout(startLiveTicker, 3000); };
+  }
+
   // अगर Django से date नहीं आई है, तो JS से आज की डेट सेट करें
   function setDefaultDates() {
     const today = new Date();
@@ -505,6 +580,7 @@ function checkReversalAlerts(currentPrice, reversals) {
   updateIntervalOptions();
   loadChart();
   startAutoRefresh(); 
+  startLiveTicker();
 </script>
 </body>
 </html>
