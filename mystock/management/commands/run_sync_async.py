@@ -237,6 +237,8 @@ class Command(BaseCommand):
                         {
                             "type": "send_data_update",
                             "symbol": fixes_sym,
+                            "spot_price": float(spot_price),               
+                            "data_time": datetime.now().isoformat(),
                             "message": "UPDATE_NOW"
                         }
                     )
@@ -246,7 +248,7 @@ class Command(BaseCommand):
 
                     if self.is_trading_hours():
                         # 👈 2. यहाँ चेक करें कि क्या पिछले DB सेव से 5 सेकंड बीत चुके हैं?
-                        if current_time - last_db_save_time >= 20:
+                        if current_time - last_db_save_time >= 5:
                             entries = [OptionChain(
                                 Time=row.get('Time'),
                                 Symbol=row.get('Symbol'),
@@ -284,9 +286,10 @@ class Command(BaseCommand):
                             ) for _, row in filtered_df.iterrows()]
                             
                             await bulk_create_async(entries)
-                            print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
+                            # print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
                             # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
                             await save_live_sr_async(df, fixes_sym)
+                            last_db_save_time = current_time
                     else:
                         print("⏸️  NIFTY Loop Outside Trading Hours.")
                     
@@ -393,7 +396,7 @@ class Command(BaseCommand):
         while True:
             ctrl, _ = await get_control_async(name="others_loop")
             if not ctrl.is_active:
-                print("⏸️  Others Loop Paused.")
+                # print("⏸️  Others Loop Paused.")
                 await asyncio.sleep(10); continue
             
             if self.is_trading_hours():
