@@ -271,15 +271,23 @@
     <div class="stat-label">Win Rate</div>
     <div class="stat-val" style="color: var(--accent);" id="stat-winrate">{{ win_rate }}%</div>
   </div>
-  <div class="stat-card">
+  <!-- <div class="stat-card">
     <div class="stat-label">Net PnL (pts)</div>
     <div class="stat-val" style="color: {% if total_pnl >= 0 %}var(--green){% else %}var(--red){% endif %};" id="stat-pnl">
       {% if total_pnl > 0 %}+{% endif %}{{ total_pnl }}
     </div>
   </div>
-</div>
-
-<div class="table-wrap">
+</div> -->
+  <div class="stat-card">
+    <div class="stat-label">Net PnL (₹ & pts)</div>
+    <div class="stat-val" style="color: {% if total_pnl_rupees >= 0 %}var(--green){% else %}var(--red){% endif %};" id="stat-pnl">
+      {% if total_pnl_rupees > 0 %}+{% endif %}₹{{ total_pnl_rupees|floatformat:2|default:"0.00" }}
+      <div style="font-size: 13px; color: var(--muted); font-weight: normal; margin-top: 4px;">
+        ({% if total_pnl > 0 %}+{% endif %}{{ total_pnl|floatformat:2 }} pts)
+      </div>
+    </div>
+  </div>
+</div> <div class="table-wrap">
   <table id="trades-table">
     <thead>
       <tr>
@@ -292,7 +300,8 @@
         <th>Exit Time</th>
         <th>Exit Spot</th>
         <th>Result</th>
-        <th style="text-align:right">PnL (pts)</th>
+        <!-- <th style="text-align:right">PnL (pts)</th> -->
+         <th style="text-align:right">PnL (Pts & ₹)</th>
       </tr>
     </thead>
     <tbody>
@@ -324,11 +333,25 @@
             {{ trade.result }}
           </span>
         </td>
-        <td class="pnl-cell" style="color: {% if trade.pnl > 0 %}var(--green){% elif trade.pnl < 0 %}var(--red){% else %}var(--muted){% endif %};">
+        <!-- <td class="pnl-cell" style="color: {% if trade.pnl > 0 %}var(--green){% elif trade.pnl < 0 %}var(--red){% else %}var(--muted){% endif %};">
           {% if trade.result == 'SKIPPED' %}
             <span class="text-muted" style="text-decoration:line-through;">{{ trade.pnl|floatformat:2 }}</span>
           {% else %}
             {% if trade.pnl > 0 %}+{% endif %}{{ trade.pnl|floatformat:2 }}
+          {% endif %}
+        </td> -->
+        </div>
+        <td class="pnl-cell">
+          {% if trade.result == 'SKIPPED' %}
+            <div style="color: var(--muted); text-decoration: line-through;">{{ trade.pnl|floatformat:2 }} pts</div>
+          {% else %}
+            <div style="color: {% if trade.pnl > 0 %}var(--green){% elif trade.pnl < 0 %}var(--red){% else %}var(--muted){% endif %}; font-weight: bold;">
+              {% if trade.pnl > 0 %}+{% endif %}{{ trade.pnl|floatformat:2 }} pts
+            </div>
+            <div style="font-size: 11px; color: var(--muted); font-weight: normal; margin-top: 3px;">
+              {% if trade.pnl_rupees > 0 %}+{% endif %}₹{{ trade.pnl_rupees|floatformat:2|default:"0.00" }}
+            </div>
+            </div>
           {% endif %}
         </td>
       </tr>
@@ -431,18 +454,40 @@
         });
 
         // ── Collect table data ──
+        // const rows = [];
+        // document.querySelectorAll('#trades-table tbody tr').forEach(tr => {
+        //   const tds = tr.querySelectorAll('td');
+        //   if (tds.length < 10) return; // skip empty state row
+        //   const cells = Array.from(tds).map(td => td.textContent.trim().replace(/\s+/g, ' '));
+        //   rows.push(cells);
+        // });
+
+        // ── Collect table data ──
         const rows = [];
         document.querySelectorAll('#trades-table tbody tr').forEach(tr => {
           const tds = tr.querySelectorAll('td');
           if (tds.length < 10) return; // skip empty state row
-          const cells = Array.from(tds).map(td => td.textContent.trim().replace(/\s+/g, ' '));
+          
+          const cells = Array.from(tds).map((td, index) => {
+            // 1. ₹ सिंबल को 'Rs.' से बदलें क्योंकि jsPDF ₹ सपोर्ट नहीं करता
+            let text = td.textContent.trim().replace(/\s+/g, ' ').replace(/₹/g, 'Rs. ');
+            
+            // 2. PnL कॉलम (इंडेक्स 9) में Points और Rs. के बीच लाइन ब्रेक (\n) लगाएँ
+            if (index === 9) {
+              text = text.replace('pts +Rs.', 'pts \n+Rs.')
+                         .replace('pts -Rs.', 'pts \n-Rs.')
+                         .replace('pts Rs.', 'pts \nRs.');
+            }
+            return text;
+          });
+          
           rows.push(cells);
         });
-
         // ── AutoTable ──
         doc.autoTable({
           startY: 52,
-          head: [['Date','Symbol','Type','Entry Time','Entry Spot','Trig','Exit Time','Exit Spot','Result','PnL (pts)']],
+          // head: [['Date','Symbol','Type','Entry Time','Entry Spot','Trig','Exit Time','Exit Spot','Result','PnL (pts)']],
+          head: [['Date','Symbol','Type','Entry Time','Entry Spot','Trig','Exit Time','Exit Spot','Result','PnL (Pts & ₹)']],
           body: rows,
           theme: 'plain',
           styles: {
@@ -472,10 +517,20 @@
           },
           // Color PnL column dynamically
           didParseCell: function(data) {
+            // if (data.section === 'body' && data.column.index === 9) {
+            //   const val = parseFloat(data.cell.raw.replace(/[^0-9.\-]/g, ''));
+            //   if (!isNaN(val)) {
+            //     data.cell.styles.textColor = val > 0 ? [0,212,160] : val < 0 ? [255,94,114] : [107,112,144];
+            //   }
+            // }
             if (data.section === 'body' && data.column.index === 9) {
-              const val = parseFloat(data.cell.raw.replace(/[^0-9.\-]/g, ''));
-              if (!isNaN(val)) {
-                data.cell.styles.textColor = val > 0 ? [0,212,160] : val < 0 ? [255,94,114] : [107,112,144];
+              const textVal = data.cell.raw;
+              if (textVal.includes('+')) {
+                data.cell.styles.textColor = [0,212,160]; // Green
+              } else if (textVal.includes('-')) {
+                data.cell.styles.textColor = [255,94,114]; // Red
+              } else {
+                data.cell.styles.textColor = [107,112,144]; // Grey
               }
             }
             if (data.section === 'body' && data.column.index === 8) {

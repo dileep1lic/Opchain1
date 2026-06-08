@@ -94,6 +94,7 @@ TEMPLATES = [
 ]
 
 ASGI_APPLICATION = 'myproject.asgi.application'
+ASGI_THREADS = 20  # Default ~5 से बढ़ाएं — polling APIs के लिए ज़रूरी
 
 WSGI_APPLICATION = 'myproject.wsgi.application'
 
@@ -119,6 +120,7 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
+            'CONN_HEALTH_CHECKS': True,
             'OPTIONS': {
                 'timeout': 20,
                 'init_command': (
@@ -126,7 +128,9 @@ else:
                     'PRAGMA synchronous=NORMAL;'
                     'PRAGMA cache_size=-32000;'
                     'PRAGMA temp_store=MEMORY;'
+                    
                 ),
+                
             }
         }
     }
@@ -188,7 +192,8 @@ CACHES = {
 # websocket के लिए channels का ASGI application सेट करें
 CHANNEL_LAYERS = {
     "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        # "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "BACKEND": "channels_redis.pubsub.RedisPubSubChannelLayer",
         "CONFIG": {
             "hosts": [REDIS_URL],  # 👈 यहाँ REDIS_URL डाल दें (ताकि यह Render का Redis यूज़ करे)
         },
@@ -320,3 +325,7 @@ LOGGING = {
         },
     },
 }
+
+
+# अपनी कॉपी की हुई Groq Key यहाँ पेस्ट करें
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")

@@ -159,6 +159,8 @@ def get_master_levels(symbol, selected_date=None):
     elif res_type == "STRONG" : eff_res = res_base + step
      
     else: eff_res = res_base + step
+    
+       
 
     # ✅ FIX Bug 2: float() cast — Decimal vs float mismatch fix
     last_put   = (
@@ -238,7 +240,7 @@ def get_master_levels(symbol, selected_date=None):
     elif    sup_type == "WTT"           : eff_sup = sup_base 
     elif    sup_type == "WTB"           : eff_sup = sup_target + step
     elif    sup_type == "STRONG"        : eff_sup = sup_base - step
-    else: eff_sup = sup_base - step
+    else: eff_sup = sup_base - step                                    
 
     # ✅ FIX Bug 2: float() cast
     last_call   = (

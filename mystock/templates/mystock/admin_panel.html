@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Control Panel</title>
 <style>
+  
   :root {
     --bg: #0d0f14; --surface: #13161e; --card: #1a1d27; --border: #252836;
     --text: #e8eaf0; --muted: #6b7090;
@@ -170,6 +171,7 @@
   <a href="{% url 'market_replay' %}"    class="nav-link">⏮️ Replay</a>
   <a href="{% url 'journal_list' %}"     class="nav-link">📓 Add Trade</a>
   <a href="{% url 'user_approval_list' %}"     class="nav-link">👥 Manage Usersr</a>
+  <a href="{% url 'calling' %}"     class="nav-link">✨🗣️ Voice Commands</a>
 </div>
 
 <!-- ── Server Offline Banner ── -->
@@ -504,7 +506,7 @@ function updateClock() {
   badge.textContent = isOpen ? '🟢 Market Open' : '🔴 Market Closed';
   badge.className = 'market-badge ' + (isOpen ? 'market-open' : 'market-close');
 }
-setInterval(updateClock, 1000);
+setInterval(updateClock, 3000);
 updateClock();
 
 // ── Log ─────────────────────────────────────────────────
@@ -898,7 +900,7 @@ function _showOffline(retryIn) {
     if (cd) cd.textContent = sec > 0 ? `${sec}s में retry` : 'Retrying...';
     sec--;
     if (sec < 0) clearInterval(_cdTimer);
-  }, 1000);
+  }, 5000);
 }
 
 function _showOnline() {

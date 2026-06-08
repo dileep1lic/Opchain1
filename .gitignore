@@ -11,11 +11,11 @@ db.sqlite3-journal
 
 # Environments (वर्चुअल एनवायरनमेंट)
 .env
-.venv
-env/
+.myvenv
+myvenv/
 venv/
 ENV/
-
+call aap/
 # Django Media / Static Files (यूजर द्वारा अपलोड की गई फाइलें)
 media/
 # static/ (अगर आप डेवलपमेंट के दौरान स्टैटिक फाइल्स को इग्नोर करना चाहते हैं, 
@@ -41,3 +41,9 @@ mystock/fetch_access_token_auto.py
 mystock/views1.py
 templates/dashboard.html
 templates/sr.html
+
+db.sqlite3
+db.sqlite3
+.gitignore
+.gitignore
+clean_option_chain.csv

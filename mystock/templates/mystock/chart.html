@@ -551,6 +551,18 @@ function updateChartData(candles, reversals) {
   candleSeries.setData(cdData);
   updateReversalLines(candles, reversals, cdData);
 
+  // 👇 यह नया कोड यहाँ जोड़ें (आखिरी कैंडल का डेटा currentBar में सेव करें) 👇
+  if (candles.length > 0) {
+      const last = candles[candles.length - 1];
+      currentBar = {
+          time: Math.floor(new Date(last.time).getTime() / 1000) + IST_OFFSET,
+          open: last.open,
+          high: last.high,
+          low: last.low,
+          close: last.close
+      };
+  }
+
   if (!window._chartInitialized) {
     mainChart.timeScale().fitContent();
     window._chartInitialized = true;
@@ -564,33 +576,80 @@ function updateChartData(candles, reversals) {
   checkReversalAlerts(candles[candles.length - 1].close, reversals);
 }
 
+
+// मान लीजिए यह वेरिएबल आपके चार्ट की आखिरी कैंडल का डेटा रखता है
+let currentBar = {
+    time: null, 
+    open: null, 
+    high: null, 
+    low: null, 
+    close: null
+};
+
+// यह फंक्शन हर 2 सेकंड में कॉल होगा
+// अब यह फंक्शन स्पॉट प्राइस के साथ-साथ सर्वर का टाइम भी लेगा
+function updateLiveCandle(liveSpotPrice, serverTimeStr) {
+    if (!candleSeries) return;
+
+    const unit = document.getElementById('ctrl-unit').value;
+    const interval = parseInt(document.getElementById('ctrl-interval').value) || 5;
+
+    // 💡 बदलाव: कंप्यूटर के टाइम की जगह API से आए टाइम का इस्तेमाल करें
+    const now = serverTimeStr ? new Date(serverTimeStr) : new Date();
+
+    if (unit === 'minutes') {
+        const roundedMinutes = Math.floor(now.getMinutes() / interval) * interval;
+        now.setMinutes(roundedMinutes, 0, 0);
+    } else if (unit === 'hours') {
+        const roundedHours = Math.floor(now.getHours() / interval) * interval;
+        now.setHours(roundedHours, 0, 0, 0);
+    } else {
+        now.setHours(0, 0, 0, 0);
+    }
+
+    const currentTimestamp = Math.floor(now.getTime() / 1000) + IST_OFFSET;
+
+    if (currentBar.time !== currentTimestamp) {
+        currentBar = {
+            time: currentTimestamp,
+            open: liveSpotPrice,
+            high: liveSpotPrice,
+            low: liveSpotPrice,
+            close: liveSpotPrice
+        };
+    } else {
+        currentBar.close = liveSpotPrice;
+        if (liveSpotPrice > currentBar.high) currentBar.high = liveSpotPrice;
+        if (liveSpotPrice < currentBar.low)  currentBar.low  = liveSpotPrice;
+    }
+
+    candleSeries.update(currentBar);
+    document.getElementById('tp-close').textContent = liveSpotPrice.toFixed(2);
+}
+
 // ── Reversal lines ────────────────────────────────────
 function updateReversalLines(candles, reversals) {
-  reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
+  // 1. पुरानी लाइनों को चार्ट से हटाएं
+  reversalSeries.forEach(pLine => { 
+      try { candleSeries.removePriceLine(pLine); } catch(e){} 
+  });
   reversalSeries = [];
+
   if (!reversalVisible || !reversals?.length || !candles?.length) return;
 
-  const lastDate = new Date(candles[candles.length - 1].time);
-  const startD = new Date(lastDate); startD.setHours(9, 15, 0, 0);
-  const endD   = new Date(lastDate); endD.setHours(15, 30, 0, 0);
-  const t1 = Math.floor(startD.getTime() / 1000) + IST_OFFSET;
-  const t2 = Math.floor(endD.getTime()   / 1000) + IST_OFFSET;
-
+  // 2. नई PriceLines जनरेट करें
   reversals.filter(r => r?.price > 0).forEach(rev => {
     try {
-      const ls = mainChart.addLineSeries({
-        color:            rev.color,
-        lineWidth:        rev.width || 1,
-        lineStyle:        rev.dash  || 0,
-        priceLineVisible: false,
-        lastValueVisible: true,
-        title:            rev.label || '',
+      // LineSeries की जगह built-in createPriceLine का इस्तेमाल
+      const pLine = candleSeries.createPriceLine({
+        price: +rev.price,
+        color: rev.color,
+        lineWidth: rev.width || 2,
+        lineStyle: rev.dash || 0, // 0 = Solid, 1 = Dotted, 2 = Dashed
+        axisLabelVisible: true,
+        title: rev.label || '',
       });
-      ls.setData([
-        { time: t1, value: +rev.price },
-        { time: t2, value: +rev.price },
-      ]);
-      reversalSeries.push(ls);
+      reversalSeries.push(pLine);
     } catch(e) { console.warn('Reversal error:', e.message); }
   });
 }
@@ -716,7 +775,6 @@ async function loadChart() {
   }
   saveSettings();
 }
-// ── Silent refresh ─────────────────────────────────── 
 // ── Silent refresh ─────────────────────────────────── 
 async function silentRefresh() {
   if (!isAutoRefresh) return;
@@ -1074,29 +1132,83 @@ function loadSettings() {
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  // पहले सेटिंग्स लोड करें (यह setDefaultDates और updateIntervalOptions को भी हैंडल कर लेगा)
-  loadSettings(); 
-  
-  // चार्ट इनीशियलाइज़ करें
-  initChart();
-  
-  // अंत में डेटा लोड करें
-  loadChart();
 
-  // अगर यूज़र Dropdown या Input चेंज करे तो भी सेटिंग सेव हो जाए
+
+// ══════════════════════════════════════════════════════
+//  WEBSOCKET LIVE TICKER (ZERO LATENCY)
+// ══════════════════════════════════════════════════════
+let liveSocket = null;
+
+function startLiveTicker() {
+    // अगर कोई पुराना कनेक्शन खुला है, तो उसे बंद करें
+    if (liveSocket) {
+        liveSocket.close();
+    }
+
+    const symbol = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
+    
+    // WebSocket URL बनाएं (HTTP है तो ws://, HTTPS है तो wss://)
+    const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+    
+    // 👇 यहाँ हमने आपके routing.py के अनुसार URL सेट कर दिया है 👇
+    const wsUrl = `${wsScheme}://${window.location.host}/ws/options/`; 
+
+    liveSocket = new WebSocket(wsUrl);
+
+    liveSocket.onopen = function(e) {
+        console.log("🟢 WebSocket Connected for Live Ticks on /ws/options/ !");
+    };
+
+    // जब भी सर्वर से नया प्राइस आएगा, यह तुरंत चलेगा
+    liveSocket.onmessage = function(e) {
+        if (!isAutoRefresh) return; // अगर यूज़र ने ऑटो-रिफ्रेश रोका है, तो अपडेट न करें
+        
+        try {
+            const data = JSON.parse(e.data);
+            
+           if (data.symbol === symbol && data.spot_price) {
+                let spotPrice = parseFloat(data.spot_price);   // ✅ इसे 'let' कर दें
+                const serverTime = data.data_time; 
+
+                // 👇 TESTING CODE START (कल सुबह लाइव मार्केट से पहले इसे हटा दें) 👇
+               // const fakeOffset = (Math.random() * 20) - 10; 
+               // spotPrice = spotPrice + fakeOffset;
+                
+                // तुरंत कैंडल अपडेट करें! 🚀
+                updateLiveCandle(spotPrice, serverTime);
+            }
+
+        } catch (err) {
+            console.warn("WebSocket parse error:", err);
+        }
+    };
+
+    liveSocket.onclose = function(e) {
+        console.warn("⚠️ WebSocket Disconnected. 3 सेकंड में दोबारा कनेक्ट हो रहा है...");
+        // Auto-Reconnect लॉजिक: कनेक्शन टूटने पर खुद वापस जुड़ेगा
+        setTimeout(startLiveTicker, 3000); 
+    };
+
+    liveSocket.onerror = function(err) {
+        console.error("❌ WebSocket Error:", err);
+    };
+}
+
+// पेज लोड होने पर इस टिकर को स्टार्ट करना न भूलें
+window.addEventListener('DOMContentLoaded', () => {
+  loadSettings(); 
+  initChart();
+  loadChart();
+  
+  // 👇 यहाँ टिकर चालू करें 👇
+  startLiveTicker();
+
   document.getElementById('ctrl-unit').addEventListener('change', () => { updateIntervalOptions(); saveSettings(); });
   document.getElementById('ctrl-interval').addEventListener('change', saveSettings);
   document.getElementById('refresh-interval').addEventListener('change', saveSettings);
   document.getElementById('ctrl-from').addEventListener('change', saveSettings);
   document.getElementById('ctrl-to').addEventListener('change', saveSettings);
 });
-// window.addEventListener('DOMContentLoaded', () => {
-//   setDefaultDates();
-//   updateIntervalOptions();
-//   initChart();
-//   loadChart();
-// });
 </script>
 </body>
 </html>

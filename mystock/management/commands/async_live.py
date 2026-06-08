@@ -235,7 +235,7 @@ async def get_option_chain_async(session, symbol, expiry_Date, retries=2):
     
     # 2. Setup
     url = "https://api.upstox.com/v2/option/chain"
-    params = {"instrument_key": key, "expiry_date": str(expiry_Date)}
+    params = {"instrument_key": key, "expiry_date": str(expiry_Date), "mode": "full"}
     headers = {"Accept": "application/json", "Authorization": f"Bearer {access_token}"}
     timeout = aiohttp.ClientTimeout(total=15)
 
@@ -300,6 +300,16 @@ async def calculate_data_async_optimized(session, symbol, expiry_Date):
     
     response_data = await get_option_chain_async(session, symbol, expiry_Date)
     
+    # df = pd.DataFrame(response_data) 
+
+    # # अगर डेटा नेस्टेड (nested) है, तो आप pd.json_normalize का इस्तेमाल कर सकते हैं:
+    # # df = pd.json_normalize(response_data)
+
+    # # DataFrame को CSV फ़ाइल में सेव करें
+    # df.to_csv(f"option_chain_data.csv", index=False)
+
+    # print("डेटा सफलतापूर्वक CSV में सेव हो गया है!")
+
 
     if not response_data or 'data' not in response_data:
         logger.warning(f"⚠️ डेटा नहीं मिला: {symbol} तारीख {expiry_Date}")
@@ -1241,7 +1251,7 @@ def save_live_sr_async(df, symbol: str) -> bool:
 
 
 
-def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
+def run_live_paper_trading1(df, symbol="NIFTY", master_levels=None):
     today        = timezone.now().date()
     spot         = float(df["Spot_Price"].iloc[0])
     current_time = df["Time"].iloc[0]
@@ -1337,9 +1347,24 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
         hit_target = hit_sl = False
 
         # अगर 15:15 हो चुके हैं तो सीधे फोर्स क्लोज करें
+        # if force_close:
+        #     hit_target = True
+        #     print(f"[Debug] Market Close Time Reached | Force Closing Trade")
+        # 🕒 मार्केट बंद होने का समय (15:15) आने पर फ़ोर्स क्लोज़ लॉजिक
         if force_close:
-            hit_target = True
             print(f"[Debug] Market Close Time Reached | Force Closing Trade")
+            
+            # वर्तमान स्पॉट और एंट्री के आधार पर तत्काल PnL चेक करें
+            if ttype == 'CALL':
+                current_pnl = spot - entry
+            else:  # PUT के लिए
+                current_pnl = entry - spot
+                
+            # अगर प्रॉफिट प्लस या 0 है तो TARGET, अन्यथा SL
+            if current_pnl >= 0:
+                hit_target = True
+            else:
+                hit_sl = True
      
         elif ttype == 'PUT':
             if entry_strike:
@@ -1453,7 +1478,246 @@ def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
         print(f"[{current_time}] 🟢 CALL ENTRY @ {spot} (Level={s_tag}, Strike={eff_sup}, diff={s_level-spot:.2f})")
         return "Call Trade Opened"
 
-def get_rev_val_direct(symbol, selected_date, strike, side, period=5):
+from django.core.cache import cache
+def get_bot_settings():
+    # पहले cache में चेक करें
+    settings = cache.get('bot_settings_cache')
+    
+    if not settings:
+        # अगर cache में नहीं है, तो DB से निकालें
+        settings, _ = BotSettings.objects.get_or_create(id=1)
+        # 300 सेकंड (5 मिनट) के लिए cache में सेव कर दें
+        cache.set('bot_settings_cache', settings, 300)
+        
+    return settings
+
+def run_live_paper_trading(df, symbol="NIFTY", master_levels=None):
+
+    # ==========================================
+    # ── 1. LIVE ADMIN SETTINGS ──
+    # ==========================================
+    settings = get_bot_settings()
+    
+    if not settings.trading_enabled:
+        return "Trading Disabled via Admin"
+
+    TARGET_PTS = settings.default_target
+    SL_PTS     = settings.default_sl
+    BUFFER     = settings.reversal_buffer
+    #==========================================
+
+    today        = timezone.now().date()
+    spot         = float(df["Spot_Price"].iloc[0])
+    current_time = df["Time"].iloc[0]
+    
+    # 🟢 DataFrame से लॉट साइज़ निकालें
+    lot_size     = int(df["Lot_size"].iloc[0]) if "Lot_size" in df.columns else 1
+    step         = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+
+    # ==========================================
+    # ── HELPER: LTP निकालने का फंक्शन (BUG FIXED) ──
+    # ==========================================
+    def get_current_ltp(strike, ttype):
+        """करेंट DataFrame (df) से उस स्ट्राइक का LTP निकालता है"""
+        try:
+            # 🟢 FIX: Data-Type Mismatch से बचने के लिए दोनों को float में बदलें
+            match_df = df[df["Strike_Price"].astype(float) == float(strike)]
+            if not match_df.empty:
+                val = float(match_df["CE_LTP"].iloc[0]) if ttype == 'CALL' else float(match_df["PE_LTP"].iloc[0])
+                return val if val > 0 else None
+        except Exception as e:
+            print(f"Error fetching LTP for {strike} {ttype}: {e}")
+        return None 
+
+    # ==========================================
+    # ── 2. MASTER LEVEL CALCULATION ──
+    # ==========================================
+    if master_levels is None:
+        master_levels = get_master_levels(symbol, today)
+
+    eff_res        = master_levels["R"]["strike"]
+    r_level        = master_levels["R"]["entry"]
+    r_target_level = master_levels["R"]["target"]
+    r_sl_level     = master_levels["R"]["sl"]
+    r_tag          = master_levels["R"].get("tag", "R")
+
+    eff_sup        = master_levels["S"]["strike"]
+    s_level        = master_levels["S"]["entry"]
+    s_target_level = master_levels["S"]["target"]
+    s_sl_level     = master_levels["S"]["sl"]
+    s_tag          = master_levels["S"].get("tag", "S")
+
+    # स्पेस और कॉमा हटाकर Float में बदलें
+    r_level = float("".join(str(r_level).split()).replace(",", "")) if r_level else None
+    s_level = float("".join(str(s_level).split()).replace(",", "")) if s_level else None
+
+    if not eff_res or not eff_sup:
+        return "No SR Data"
+    
+    # ==========================================
+    # ── 3. EXIT LOGIC (सभी Open Trades के लिए) ──
+    # ==========================================
+    open_trades = PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="OPEN")
+    trade_closed_in_this_tick = False
+
+    local_current_time = localtime(current_time)
+    market_close_time = local_current_time.replace(hour=15, minute=15, second=0, microsecond=0)
+    force_close = local_current_time >= market_close_time
+
+    for open_trade in open_trades:
+        entry  = float(open_trade.entry_spot)
+        ttype  = open_trade.trade_type
+        entry_strike = float(open_trade.entry_strike) if open_trade.entry_strike else None
+        
+        current_exit_ltp = get_current_ltp(entry_strike, ttype) if entry_strike else None
+
+        hit_target = hit_sl = force_exit = False
+
+        if force_close:
+            print(f"[Debug] Market Close Time Reached | Force Closing Trade")
+            force_exit = True
+     
+        elif ttype == 'PUT':
+            if entry_strike:
+                target = get_rev_val_direct(symbol, today, entry_strike - step, 'CE') or r_target_level or (entry - TARGET_PTS)
+                sl     = get_rev_val_direct(symbol, today, entry_strike + step, 'CE') or r_sl_level     or (entry + SL_PTS)
+            else:
+                target = r_target_level or (entry - TARGET_PTS)
+                sl     = r_sl_level     or (entry + SL_PTS)
+
+            if sl <= entry: sl = entry + SL_PTS
+            if spot <= (target + BUFFER): hit_target = True
+            elif spot >= (sl + BUFFER):   hit_sl     = True
+            
+        elif ttype == 'CALL':
+            if entry_strike:
+                target = get_rev_val_direct(symbol, today, entry_strike + step, 'PE') or s_target_level or (entry + TARGET_PTS)
+                sl     = get_rev_val_direct(symbol, today, entry_strike - step, 'PE') or s_sl_level     or (entry - SL_PTS)
+            else:
+                target = s_target_level or (entry + TARGET_PTS)
+                sl     = s_sl_level     or (entry - SL_PTS)
+
+            if sl >= entry: sl = entry - SL_PTS
+            if spot >= (target - BUFFER): hit_target = True
+            elif spot <= (sl - BUFFER):   hit_sl     = True
+            
+        if hit_target or hit_sl or force_exit:
+            open_trade.exit_spot = spot
+            open_trade.exit_time = current_time
+            
+            if force_exit:
+                open_trade.result = "CLOSED" 
+            else:
+                open_trade.result = "TARGET" if hit_target else "SL"
+            
+            open_trade.exit_ltp = current_exit_ltp if current_exit_ltp is not None else 0.0
+            trade_lot_size = open_trade.lot_size if open_trade.lot_size else lot_size
+
+            # Fallback PnL Logic (यह आपका बहुत अच्छा लॉजिक है, इसे छेड़ा नहीं गया है)
+            if open_trade.entry_ltp and current_exit_ltp is not None and current_exit_ltp > 0:
+                pnl_points = round(current_exit_ltp - float(open_trade.entry_ltp), 2)
+            else:
+                pnl_points = round((spot - entry) if ttype == 'CALL' else (entry - spot), 2)
+            
+            open_trade.pnl = pnl_points
+            open_trade.pnl_rupees = round(pnl_points * trade_lot_size, 2)
+                
+            open_trade.save()
+            print(f"[{current_time}] 🟢 TRADE EXITED | {ttype} | Result: {open_trade.result} | PNL: {pnl_points} Pts | Profit: ₹{open_trade.pnl_rupees}")
+
+            trade_closed_in_this_tick = True
+    
+    if PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="OPEN").exists():
+        return "Trade is Running"
+
+    if trade_closed_in_this_tick:
+        return "Trade Just Closed"
+    
+    # ==========================================
+    # ── 4. TIME STOP LOGIC ──
+    # ==========================================
+    market_stop_time = local_current_time.replace(hour=14, minute=30, second=0, microsecond=0)
+    if local_current_time >= market_stop_time:
+        return "Market Stop Time Reached"
+    
+    # ==========================================
+    # ── 5. MANUAL PENDING TRADES LOGIC (BUG FIXED) ──
+    # ==========================================
+    pending_trades = PaperTrade.objects.filter(symbol=symbol, trade_date=today, result="PENDING")
+
+    for pt in pending_trades:
+        if pt.trade_type == 'CALL' and spot <= pt.trigger_price:
+            ltp_val = get_current_ltp(pt.entry_strike, 'CALL') if pt.entry_strike else None
+            
+            if pt.entry_strike and ltp_val is None:
+                print(f"[{current_time}] ⚠️ MANUAL CALL: LTP Missing. Taking entry via Spot Price instead.")
+                # 🟢 FIX: यहाँ `continue` हटा दिया है। LTP न मिलने पर भी ट्रेड एग्जीक्यूट होगा।
+                
+            pt.result     = 'OPEN'
+            pt.entry_spot = spot
+            pt.entry_time = current_time
+            pt.entry_ltp  = ltp_val
+            pt.lot_size   = lot_size
+            pt.save()
+            print(f"[{current_time}] 🎯 MANUAL ENTRY: BUY CALL @ Spot {spot} | LTP {pt.entry_ltp} | Lot: {lot_size}")
+            return "Manual Trade Opened"
+
+        elif pt.trade_type == 'PUT' and spot >= pt.trigger_price:
+            ltp_val = get_current_ltp(pt.entry_strike, 'PUT') if pt.entry_strike else None
+            
+            if pt.entry_strike and ltp_val is None:
+                print(f"[{current_time}] ⚠️ MANUAL PUT: LTP Missing. Taking entry via Spot Price instead.")
+                
+            pt.result     = 'OPEN'
+            pt.entry_spot = spot
+            pt.entry_time = current_time
+            pt.entry_ltp  = ltp_val
+            pt.lot_size   = lot_size
+            pt.save()
+            print(f"[{current_time}] 🎯 MANUAL ENTRY: BUY PUT @ Spot {spot} | LTP {pt.entry_ltp} | Lot: {lot_size}")
+            return "Manual Trade Opened"
+
+    # ==========================================
+    # ── 6. AUTOMATIC ENTRY LOGIC (BUG FIXED) ──
+    # ==========================================
+    if r_level and spot >= (r_level - BUFFER):
+        entry_premium = get_current_ltp(eff_res, 'PUT')
+        
+        if entry_premium is None:
+            print(f"[{current_time}] ⚠️ PUT LTP Missing for Strike {eff_res}. Executing Trade based on Spot Price...")
+            # 🟢 FIX: 'return "LTP Missing"' को हटा दिया गया है ताकि ट्रेड रिजेक्ट न हो।
+            
+        PaperTrade.objects.create(
+            symbol=symbol, trade_type='PUT',
+            entry_time=current_time, entry_spot=spot,
+            trigger_level=r_tag,
+            trigger_price=r_level,
+            entry_strike=eff_res,
+            entry_ltp=entry_premium,
+            lot_size=lot_size
+        )
+        print(f"[{current_time}] 🔴 PUT ENTRY @ Spot {spot} | Strike {eff_res} | LTP {entry_premium} | Lot: {lot_size}")
+        return "Put Trade Opened"
+
+    elif s_level and spot <= (s_level + BUFFER):
+        entry_premium = get_current_ltp(eff_sup, 'CALL')
+        
+        if entry_premium is None:
+            print(f"[{current_time}] ⚠️ CALL LTP Missing for Strike {eff_sup}. Executing Trade based on Spot Price...")
+            
+        PaperTrade.objects.create(
+            symbol=symbol, trade_type='CALL',
+            entry_time=current_time, entry_spot=spot,
+            trigger_level=s_tag,
+            trigger_price=s_level,
+            entry_strike=eff_sup,
+            entry_ltp=entry_premium,
+            lot_size=lot_size
+        )
+        print(f"[{current_time}] 🟢 CALL ENTRY @ Spot {spot} | Strike {eff_sup} | LTP {entry_premium} | Lot: {lot_size}")
+        return "Call Trade Opened"
+    
+def get_rev_val_direct(symbol, selected_date, strike, side, period=1):
     """
     ✅ FIX Bug 1 के लिए helper:
     किसी specific strike की reversal value निकालना।
