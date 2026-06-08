@@ -5,16 +5,22 @@ stock_sync/
 *~
 __pycache__/
 
-# Local Database (लोकल डेटाबेस को कभी अपलोड न करें)
+# Local Database
 db.sqlite3
 db.sqlite3-journal
 
-# Environments (वर्चुअल एनवायरनमेंट)
-# .env
+# Environments
+.env
+**/.env
 .venv
 env/
 venv/
 ENV/
+myenv/
+
+# Temp scripts
+amend.bat
+editor.bat
 
 # Django Media / Static Files (यूजर द्वारा अपलोड की गई फाइलें)
 media/
