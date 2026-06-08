@@ -43,7 +43,15 @@ templates/dashboard.html
 templates/sr.html
 
 db.sqlite3
-db.sqlite3
-.gitignore
 .gitignore
 clean_option_chain.csv
+
+mystock/templates/trade_logic.py
+mystock/templates/trade_logic1.py
+mystock/templates/voice_commands.html
+mystock/tests.py
+Opchain.bat
+logs/stock_sync.log
+db.sqlite3-shm
+logs/stock_sync.log
+db.sqlite3-wal
