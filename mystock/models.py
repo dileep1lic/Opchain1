@@ -247,6 +247,10 @@ class PaperTrade(models.Model):
     pnl = models.FloatField(default=0.0)
     entry_strike = models.FloatField(null=True, blank=True)
     is_replay = models.BooleanField(default=False)
+    entry_ltp = models.FloatField(null=True, blank=True)
+    exit_ltp = models.FloatField(null=True, blank=True)
+    lot_size = models.IntegerField(null=True, blank=True)
+    pnl_rupees = models.FloatField(null=True, blank=True)
 
     class Meta:
         indexes = [
@@ -359,3 +363,18 @@ class TradingJournal(models.Model):
     def __str__(self):
         return f"{self.date} | {self.trade_type.upper()} | {self.get_trade_level_display()}"
 
+
+class VoiceCommand(models.Model):
+    order      = models.PositiveIntegerField(default=0, db_index=True)   # क्रम नंबर
+    text       = models.TextField(verbose_name="कमांड टेक्स्ट")          # बोला जाने वाला टेक्स्ट
+    is_active  = models.BooleanField(default=True)                        # चालू/बंद
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering            = ['order']
+        verbose_name        = "Voice Command"
+        verbose_name_plural = "Voice Commands"
+
+    def __str__(self):
+        return f"#{self.order} — {self.text[:60]}"

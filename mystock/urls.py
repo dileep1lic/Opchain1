@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import views, seed_voice
 from . import replay_views
 
 
@@ -85,5 +85,12 @@ urlpatterns = [
     path('journal/add/',                views.journal_create, name='journal_create'),
     path('journal/edit/<int:pk>/',      views.journal_edit,   name='journal_edit'),
     path('journal/delete/<int:pk>/',    views.journal_delete, name='journal_delete'),
+
+
+
+    # ── Voice Command Player ──────────────────────────────
+    path('calling', seed_voice.index, name='calling'),
+    path('api/voice-chat/', seed_voice.voice_chat_api, name='voice_chat_api'),
+
     
 ]

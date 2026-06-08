@@ -10,7 +10,7 @@ db.sqlite3
 db.sqlite3-journal
 
 # Environments (वर्चुअल एनवायरनमेंट)
-.env
+# .env
 .venv
 env/
 venv/
@@ -24,6 +24,7 @@ staticfiles/
 
 # Security / Secrets (आपके प्रोजेक्ट के सीक्रेट्स)
 .env
+**/.env
 local_settings.py
 secrets.json
 credentials1.py
@@ -41,3 +42,8 @@ mystock/fetch_access_token_auto.py
 mystock/views1.py
 templates/dashboard.html
 templates/sr.html
+
+db.sqlite3
+.gitignore
+clean_option_chain.csv
+Opchain.zip

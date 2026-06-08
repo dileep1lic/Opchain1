@@ -18,6 +18,10 @@ import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / '.env')
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -26,7 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 import os, dj_database_url
 
 # ── Secret Key — Render पर Environment Variable से आएगा ──────────────────
-SECRET_KEY = os.environ.get('SECRET_KEY', 'fallback-only-for-local-dev')
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # ── Debug — Render पर False, local पर True ───────────────────────────────
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
@@ -44,7 +48,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE   = True
     CSRF_COOKIE_SECURE      = True
 
-# DEBUG = True
+DEBUG = True
 
 # Application definition
 
@@ -94,6 +98,7 @@ TEMPLATES = [
 ]
 
 ASGI_APPLICATION = 'myproject.asgi.application'
+ASGI_THREADS = 20  # Default ~5 से बढ़ाएं — polling APIs के लिए ज़रूरी
 
 WSGI_APPLICATION = 'myproject.wsgi.application'
 
@@ -119,6 +124,7 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
+            'CONN_HEALTH_CHECKS': True,
             'OPTIONS': {
                 'timeout': 20,
                 'init_command': (
@@ -126,7 +132,9 @@ else:
                     'PRAGMA synchronous=NORMAL;'
                     'PRAGMA cache_size=-32000;'
                     'PRAGMA temp_store=MEMORY;'
+                    
                 ),
+                
             }
         }
     }
@@ -320,3 +328,6 @@ LOGGING = {
         },
     },
 }
+
+# Groq API Key - loaded from .env file
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')

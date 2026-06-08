@@ -102,6 +102,7 @@
   .bo { background: #2d2b1a; color: #facc15; }
   .bt { background: #1a3a25; color: #4ade80; }
   .bs { background: #3f1f1f; color: #f87171; }
+  .b-closed { background: #1e3a5f; color: #60a5fa; }  
   .b-skip { background: #334155; color: #cbd5e1; border: 1px dashed #475569; }
 
   .pp { color: #4ade80; font-weight: 600; }
@@ -116,8 +117,8 @@
   .exit-time-text { font-size:10px; color:#94a3b8; margin-top:3px; }
 
   /* ✅ Date input style */
-  input[type="date"] { background: #252836; color: #e2e8f0; border: 1px solid #3d4262; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
-  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+  /* input[type="date"] { background: #252836; color: #e2e8f0; border: 1px solid #3d4262; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); } */
 
   .btn-journal {
     background: #252836;
@@ -154,7 +155,7 @@
       📓 Trade Journal
     </a>
 
-    <input type="date" id="datePicker" onchange="refresh()" title="तारीख चुनें">
+    <!-- <input type="date" id="datePicker" onchange="refresh()" title="तारीख चुनें"> -->
 
     <!-- ✅ Bug 3 Fix: selected="{{ symbol }}" — dropdown sahi symbol dikhayega -->
     <select id="symSel" onchange="sym=this.value; refresh()">
@@ -165,7 +166,7 @@
       <option value="SENSEX"      {% if symbol == 'SENSEX' %}selected{% endif %}>SENSEX</option>
     </select>
 
-    <button onclick="refresh()">↻ Refresh</button>
+    <button id="refreshBtn" onclick="refresh(true)">↻ Refresh</button>
     <button id="alert-toggle-btn" onclick="toggleAlerts()" style="border-color: #3d4262;">
       🔕 Voice OFF
     </button>
@@ -306,13 +307,13 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('symSel').value = sym;
 
   // Date picker: URL में date हो तो वो दिखाओ, वरना आज की तारीख
-  const urlDate = new URLSearchParams(window.location.search).get('date');
-  const dp = document.getElementById('datePicker');
-  if (urlDate) {
-    dp.value = urlDate;
-  } else {
-    dp.value = '{{ selected_date }}'; // Django से आई तारीख
-  }
+  // const urlDate = new URLSearchParams(window.location.search).get('date');
+  // const dp = document.getElementById('datePicker');
+  // if (urlDate) {
+  //   dp.value = urlDate;
+  // } else {
+  //   dp.value = '{{ selected_date }}'; // Django से आई तारीख
+  // }
 });
 
 function fmt(v)  { return (v != null && isFinite(v)) ? parseFloat(v).toFixed(2) : '—'; }
@@ -390,12 +391,16 @@ function updateUI(d) {
     document.getElementById('progR').textContent = 'R ' + fmt(t.r_trigger);
   }
 
-  // ── Trades Table ─────────────────────────────────────────
+
+// ── Trades Table ─────────────────────────────────────────
   const trades = d.trades || [];
-  const total  = d.total_pnl || 0;
+  const totalPoints  = d.total_pnl || 0;
+  const totalRupees  = d.total_pnl_rupees || 0; // 👈 रुपयों वाला डेटा लिया
+
   const pel = document.getElementById('totalPnl');
-  pel.textContent = 'Total PnL: ' + (total >= 0 ? '+' : '') + total + ' pts';
-  pel.className   = 'pnl-badge ' + (total > 0 ? 'pnl-pos' : total < 0 ? 'pnl-neg' : 'pnl-zero');
+  // 🟢 टोटल PnL में रुपये (₹) और पॉइंट्स (pts) दोनों दिखाएं
+  pel.textContent = 'Total PnL: ' + (totalRupees >= 0 ? '+₹' : '-₹') + Math.abs(totalRupees) + ' (' + totalPoints + ' pts)';
+  pel.className   = 'pnl-badge ' + (totalRupees > 0 ? 'pnl-pos' : totalRupees < 0 ? 'pnl-neg' : 'pnl-zero');
 
   const wrap = document.getElementById('tradesWrap');
   if (!trades.length) {
@@ -403,25 +408,33 @@ function updateUI(d) {
     return;
   }
 
+  // 🟢 Table Header में PnL (₹) जोड़ें
   let html = '<table><thead><tr>' +
     '<th>Type</th><th>Entry Time</th>' +
     '<th>Strike</th><th>Reversal (Entry यहाँ)</th>' +
     '<th>Entry Spot</th><th>Target</th><th>SL</th>' +
-    '<th>Exit Spot & Time</th><th>Result</th><th>PnL</th>' +
+    '<th>Exit Spot & Time</th><th>Result</th><th>PnL (Pts & ₹)</th>' + // 👈 हेडिंग बदली
     '</tr></thead><tbody>';
 
   for (const tr of trades) {
     const isC    = tr.type === 'CALL';
     const btype  = isC ? 'bc' : 'bp';
     const isSkip = tr.result === 'SKIPPED';
-    const bres   = tr.result === 'OPEN' ? 'bo' : tr.result === 'TARGET' ? 'bt' : isSkip ? 'b-skip' : 'bs';
+    const bres   = tr.result === 'OPEN' ? 'bo' : tr.result === 'TARGET' ? 'bt' : tr.result === 'CLOSED' ? 'b-closed' : isSkip ? 'b-skip' : 'bs'; 
     const pc     = isSkip ? 'p-skip' : (tr.pnl > 0 ? 'pp' : (tr.pnl < 0 ? 'pn' : ''));
     const rvc    = isC ? 'tr-rev-s' : 'tr-rev-r';
     const strikeKey = tr.entry_strike != null ? tr.entry_strike : (tr.trigger_level === 'R' ? t.r_strike : t.s_strike);
 
     const exitSpotText = tr.exit_spot != null ? fmt(tr.exit_spot) : '—';
     const exitTimeText = tr.exit_time !== '—' ? tr.exit_time : '';
-
+    
+    // 🟢 हर रो (row) के लिए रुपयों का टेक्स्ट
+    // const rsText = tr.pnl_rupees != null && !isSkip ? (' <br><span style="font-size:10px;color:#94a3b8">₹' + tr.pnl_rupees + '</span>') : '';
+    const rsSign = tr.pnl_rupees >= 0 ? '+₹' : '-₹';
+    const rsText = tr.pnl_rupees != null && !isSkip
+        ? (' <br><span style="font-size:10px;color:#94a3b8">'
+          + rsSign + Math.abs(tr.pnl_rupees) + '</span>')
+        : '';
     html += '<tr>' +
       '<td><span class="badge ' + btype + '">' + tr.type + '</span></td>' +
       '<td>' + tr.entry_time + '</td>' +
@@ -435,44 +448,78 @@ function updateUI(d) {
       '<td><div class="exit-spot-text">' + exitSpotText + '</div>' +
           '<div class="exit-time-text">' + exitTimeText + '</div></td>' +
       '<td><span class="badge ' + bres + '">' + tr.result + '</span></td>' +
-      '<td class="' + pc + '">' + (tr.result === 'OPEN' ? '~' : '') + (tr.pnl >= 0 && !isSkip ? '+' : '') + tr.pnl + ' pts</td>' +
+      // 🟢 PnL कॉलम में पॉइंट्स के नीचे रुपये दिखाएं
+      '<td class="' + pc + '">' + (tr.result === 'OPEN' ? '~' : '') + (tr.pnl >= 0 && !isSkip ? '+' : '') + tr.pnl + ' pts' + rsText + '</td>' +
       '</tr>';
   }
 
   html += '</tbody></table>';
   wrap.innerHTML = html;
 }
-
 // ✅ Bug 4 Fix: API call में date parameter भी भेजो
 let _liveInFlight = false;
-async function refresh() {
+
+// 👈 isManual parameter जोड़ा
+async function refresh(isManual = false) {
     if (_liveInFlight) return;
     _liveInFlight = true;
+
+    // 👈 सिर्फ manual click पर button बदलें
+    const btn = document.getElementById('refreshBtn');
+    if (isManual && btn) {
+        btn.textContent = '⏳ Loading...';
+        btn.disabled = true;
+    }
+
     try {
-  const eb = document.getElementById('errBox');
-  try {
-    const dateVal = document.getElementById('datePicker').value;
-    const url = `/api/dashboard-data/?symbol=${sym}` + (dateVal ? `&date=${dateVal}` : '');
+        const eb = document.getElementById('errBox');
+        try {
+            // const dateVal = document.getElementById('datePicker').value;
+            // const url = `/api/dashboard-data/?symbol=${sym}` + (dateVal ? `&date=${dateVal}` : '');
+              const url = `/api/dashboard-data/?symbol=${sym}`;
 
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
-    const dash = await resp.json();
-    if (dash.triggers && dash.triggers.error) {
-      eb.style.display = 'block';
-      eb.innerHTML = '<strong>Status:</strong> ' + dash.triggers.error;
-    } else { eb.style.display = 'none'; }
+            const dash = await resp.json();
+            if (dash.triggers && dash.triggers.error) {
+                eb.style.display = 'block';
+                eb.innerHTML = '<strong>Status:</strong> ' + dash.triggers.error;
+            } else { eb.style.display = 'none'; }
 
-    updateUI(dash);
-    document.getElementById('liveDot').style.background = '#22c55e';
-  } catch(e) {
-    document.getElementById('liveDot').style.background = '#ef4444';
-    eb.style.display = 'block';
-    eb.innerHTML = '<strong>Connection Error:</strong> ' + e.message;
-  }
-    } finally { _liveInFlight = false; }
+            updateUI(dash);
+            document.getElementById('liveDot').style.background = '#22c55e';
+
+            if (isManual && btn) {
+                btn.textContent = '✅ Done!';
+                btn.style.borderColor = '#22c55e';
+                btn.style.color = '#22c55e';
+            }
+
+        } catch(e) {
+            document.getElementById('liveDot').style.background = '#ef4444';
+            eb.style.display = 'block';
+            eb.innerHTML = '<strong>Connection Error:</strong> ' + e.message;
+
+            if (isManual && btn) {
+                btn.textContent = '❌ Error!';
+                btn.style.borderColor = '#ef4444';
+                btn.style.color = '#ef4444';
+            }
+        }
+    } finally {
+        _liveInFlight = false;
+
+        if (isManual && btn) {
+            setTimeout(() => {
+                btn.textContent = '↻ Refresh';
+                btn.style.borderColor = '#3d4262';
+                btn.style.color = '#e2e8f0';
+                btn.disabled = false;
+            }, 1000);
+        }
+    }
 }
-
 // ══════════════════════════════════════════════════════
 //  VOICE ALERTS & DISTANCE TRACKER (10 Point Logic)
 // ══════════════════════════════════════════════════════
@@ -599,7 +646,7 @@ let _liveTimer = null;
 
 function startLivePolling() {
     if (_liveTimer) clearInterval(_liveTimer);
-    _liveTimer = setInterval(refresh, 5000);
+    _liveTimer = setInterval(refresh, 2000);
 }
 function stopLivePolling() {
     if (_liveTimer)  { clearInterval(_liveTimer); _liveTimer = null; }
