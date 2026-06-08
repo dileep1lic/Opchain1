@@ -1,0 +1,588 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Voice Command Player</title>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;800&family=Noto+Sans+Devanagari:wght@400;600&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:#0a0a12; --card:#13131f; --accent:#f7c948; --accent2:#e05f5f;
+      --accent3:#4fd1c5; --accent4:#b57aff; --text:#f0eeff; --muted:#888;
+      --active-glow:0 0 24px #f7c94880,0 0 48px #f7c94830;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:'Baloo 2','Noto Sans Devanagari',cursive;
+      min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:30px 16px 80px;}
+
+    header{text-align:center;margin-bottom:28px;}
+    header h1{font-size:clamp(1.5rem,5vw,2.4rem);font-weight:800;
+      background:linear-gradient(90deg,var(--accent),#ff9f6b,var(--accent2));
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+    header p{margin-top:6px;color:var(--muted);font-size:.9rem;}
+
+    /* ── REPEAT PANEL ── */
+    #repeat-panel{
+      width:100%;max-width:560px;background:#16162a;
+      border:1.5px solid var(--accent4);border-radius:16px;
+      padding:16px 20px;margin-bottom:20px;
+    }
+    #repeat-panel h3{font-size:.9rem;font-weight:700;color:var(--accent4);margin-bottom:12px;letter-spacing:.3px;}
+    .rp-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    .rp-label{font-size:.85rem;color:var(--muted);white-space:nowrap;}
+    .rp-input{
+      width:72px;background:#0d0d1a;border:1.5px solid #ffffff20;border-radius:8px;
+      color:var(--text);font-family:'Baloo 2',cursive;font-size:.95rem;font-weight:700;
+      padding:6px 10px;outline:none;text-align:center;transition:border-color .2s;
+    }
+    .rp-input:focus{border-color:var(--accent4);}
+    .rp-badge{
+      padding:4px 12px;border-radius:20px;font-size:.78rem;font-weight:700;
+      background:#1e1e30;border:1.5px solid #ffffff15;color:var(--muted);
+    }
+    #repeat-status{font-size:.82rem;color:var(--accent4);font-weight:600;margin-top:8px;min-height:18px;}
+
+    /* countdown ring */
+    #sleep-countdown{
+      display:none;align-items:center;gap:10px;margin-top:10px;
+      padding:8px 14px;background:#0d0d1a;border-radius:10px;border:1px solid #ffffff10;
+    }
+    #sleep-countdown.show{display:flex;}
+    #sleep-bar-wrap{flex:1;height:5px;background:#1e1e30;border-radius:10px;overflow:hidden;}
+    #sleep-bar{height:100%;width:100%;background:linear-gradient(90deg,var(--accent4),#4fd1c5);
+      border-radius:10px;transition:width .1s linear;}
+    #sleep-text{font-size:.82rem;color:var(--accent4);white-space:nowrap;font-weight:700;}
+
+    /* ── NOW PLAYING ── */
+    #now-playing-box{
+      background:linear-gradient(135deg,#1a1a2e 60%,#16213e);
+      border:1.5px solid #f7c94840;border-radius:18px;
+      padding:20px 24px;width:100%;max-width:560px;margin-bottom:20px;
+      display:flex;align-items:center;gap:16px;min-height:72px;position:relative;overflow:hidden;
+    }
+    #now-playing-box::before{content:'';position:absolute;inset:0;
+      background:radial-gradient(circle at 20% 50%,#f7c94815,transparent 60%);pointer-events:none;}
+    .wave-icon{flex-shrink:0;display:flex;align-items:center;gap:3px;height:32px;}
+    .wave-icon span{display:block;width:4px;border-radius:4px;background:var(--accent);height:8px;transition:height .2s;}
+    .wave-icon.playing span{animation:wavebar .7s ease-in-out infinite alternate;}
+    .wave-icon span:nth-child(1){animation-delay:0s}.wave-icon span:nth-child(2){animation-delay:.1s}
+    .wave-icon span:nth-child(3){animation-delay:.2s}.wave-icon span:nth-child(4){animation-delay:.15s}
+    .wave-icon span:nth-child(5){animation-delay:.05s}
+    @keyframes wavebar{from{height:6px}to{height:30px}}
+    #now-playing-text{font-size:1rem;font-weight:600;color:var(--accent);line-height:1.4;flex:1;}
+    #now-playing-num{font-size:.78rem;color:var(--muted);display:block;font-weight:400;}
+
+    /* ── LIST ── */
+    #commands-list{width:100%;max-width:560px;display:flex;flex-direction:column;gap:10px;margin-bottom:20px;}
+    .cmd-item{
+      display:flex;align-items:center;gap:12px;background:var(--card);
+      border-radius:14px;padding:13px 14px;border:1.5px solid #ffffff10;
+      cursor:pointer;transition:border-color .2s,background .2s,box-shadow .3s,transform .15s;
+    }
+    .cmd-item:hover{border-color:#f7c94860;transform:translateX(4px);}
+    .cmd-item.active{border-color:var(--accent);background:#1e1c10;box-shadow:var(--active-glow);}
+    .cmd-item.repeating{border-color:var(--accent4);background:#1a1028;
+      box-shadow:0 0 20px #b57aff50,0 0 40px #b57aff20;}
+    .cmd-num{width:30px;height:30px;border-radius:50%;background:#1e1e30;
+      display:flex;align-items:center;justify-content:center;
+      font-size:.82rem;font-weight:700;color:var(--muted);flex-shrink:0;
+      border:1.5px solid #ffffff15;transition:background .2s,color .2s;}
+    .cmd-item.active .cmd-num{background:var(--accent);color:#111;border-color:var(--accent);}
+    .cmd-item.repeating .cmd-num{background:var(--accent4);color:#fff;border-color:var(--accent4);}
+    .cmd-text{flex:1;font-size:.95rem;line-height:1.4;color:var(--text);}
+    .cmd-play-btn{
+      width:30px;height:30px;border-radius:50%;background:transparent;
+      border:1.5px solid #ffffff20;color:var(--muted);
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;font-size:.78rem;transition:all .2s;flex-shrink:0;
+    }
+    .cmd-play-btn:hover{background:#f7c94820;color:var(--accent);border-color:var(--accent);}
+    .cmd-repeat-btn{background:transparent;border:1.5px solid #b57aff40;color:#b57aff;}
+    .cmd-repeat-btn:hover{background:#b57aff20;border-color:var(--accent4);}
+    .cmd-repeat-btn.active-repeat{background:#b57aff30;border-color:var(--accent4);color:#fff;}
+
+    /* ── CONTROLS ── */
+    #controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+      justify-content:center;width:100%;max-width:560px;margin-bottom:16px;}
+    .ctrl-btn{display:flex;align-items:center;gap:6px;padding:10px 18px;
+      border-radius:40px;border:none;font-family:'Baloo 2',cursive;
+      font-size:.88rem;font-weight:700;cursor:pointer;transition:transform .15s,box-shadow .2s,opacity .2s;}
+    .ctrl-btn:active{transform:scale(.96);}
+    .ctrl-btn.primary{background:linear-gradient(135deg,var(--accent),#ffad5e);color:#111;box-shadow:0 4px 20px #f7c94840;}
+    .ctrl-btn.secondary{background:#1e1e30;color:var(--text);border:1.5px solid #ffffff15;}
+    .ctrl-btn.secondary:hover{border-color:var(--accent3);color:var(--accent3);}
+    .ctrl-btn.danger{background:#2a1a1a;color:var(--accent2);border:1.5px solid #e05f5f40;}
+    .ctrl-btn.success{background:#1a2a1a;color:#4fd17a;border:1.5px solid #4fd17a40;}
+    .ctrl-btn:disabled{opacity:.35;cursor:not-allowed;}
+
+    /* PROGRESS */
+    #progress-wrap{width:100%;max-width:560px;background:#1a1a2a;border-radius:40px;height:5px;overflow:hidden;margin-bottom:6px;}
+    #progress-bar{height:100%;background:linear-gradient(90deg,var(--accent),#ff9f6b);border-radius:40px;transition:width .5s ease;width:0%;}
+    #progress-label{font-size:.76rem;color:var(--muted);text-align:right;max-width:560px;width:100%;margin-bottom:18px;}
+
+    /* TOAST */
+    #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+      background:#23233a;color:var(--accent);border:1.5px solid var(--accent);
+      border-radius:40px;padding:9px 22px;font-size:.88rem;font-weight:600;
+      box-shadow:0 8px 30px #00000060;transition:transform .3s ease,opacity .3s;
+      opacity:0;z-index:200;white-space:nowrap;}
+    #toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
+
+    /* MODALS */
+    .modal-wrap{display:none;position:fixed;inset:0;background:#000000a0;
+      z-index:100;align-items:center;justify-content:center;padding:20px;}
+    .modal-wrap.open{display:flex;}
+    .modal-box{background:#16162a;border-radius:20px;padding:26px 22px;
+      width:100%;max-width:460px;box-shadow:0 24px 60px #00000080;}
+    .modal-box h3{font-size:1.05rem;font-weight:700;margin-bottom:12px;}
+    .modal-textarea{width:100%;min-height:80px;background:#0d0d1a;
+      border:1.5px solid #ffffff20;border-radius:10px;color:var(--text);
+      font-family:'Noto Sans Devanagari','Baloo 2',sans-serif;font-size:1rem;
+      padding:11px;resize:vertical;outline:none;transition:border-color .2s;}
+    .modal-actions{display:flex;gap:10px;margin-top:14px;justify-content:flex-end;}
+    .modal-btn{padding:8px 18px;border-radius:30px;border:none;
+      font-family:'Baloo 2',cursive;font-weight:700;font-size:.88rem;cursor:pointer;}
+    .modal-btn.save{background:var(--accent);color:#111;}
+    .modal-btn.cancel{background:#2a2a3a;color:var(--text);}
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎙️ Voice Command Player</h1>
+  <p>Database से लोड — Repeat & Sleep Time सेट करें</p>
+</header>
+
+<!-- ── REPEAT + SLEEP PANEL ── -->
+<div id="repeat-panel">
+  <h3>🔁 Repeat & ⏱ Sleep Settings</h3>
+  <div class="rp-row">
+    <span class="rp-label">दोहराने की संख्या:</span>
+    <input class="rp-input" type="number" id="inp-repeat" value="1" min="1" max="999"/>
+    <span class="rp-label" style="margin-left:8px;">Sleep (सेकंड):</span>
+    <input class="rp-input" type="number" id="inp-sleep" value="2" min="0" max="3600"/>
+    <span class="rp-badge" id="badge-mode">एक बार</span>
+  </div>
+  <div id="repeat-status"></div>
+  <div id="sleep-countdown">
+    <span id="sleep-text">⏳ 0s</span>
+    <div id="sleep-bar-wrap"><div id="sleep-bar"></div></div>
+  </div>
+</div>
+
+<!-- ── NOW PLAYING ── -->
+<div id="now-playing-box">
+  <div class="wave-icon" id="wave-icon">
+    <span></span><span></span><span></span><span></span><span></span>
+  </div>
+  <div style="flex:1;">
+    <span id="now-playing-num">▶ यहाँ प्ले करें</span>
+    <div id="now-playing-text">कोई कमांड नहीं चल रही</div>
+  </div>
+</div>
+
+<div id="commands-list"></div>
+
+<div id="progress-wrap"><div id="progress-bar"></div></div>
+<div id="progress-label">0 / 0 पूरी</div>
+
+<div id="controls">
+  <button class="ctrl-btn primary"   id="btn-play-all">▶ सभी चलाएं</button>
+  <button class="ctrl-btn secondary" id="btn-pause"    disabled>⏸ रोकें</button>
+  <button class="ctrl-btn secondary" id="btn-next"     disabled>⏭ अगली</button>
+  <button class="ctrl-btn danger"    id="btn-stop">⏹ बंद करें</button>
+  <button class="ctrl-btn success"   id="btn-add">➕ नई कमांड</button>
+</div>
+
+<div id="toast"></div>
+
+<!-- EDIT MODAL -->
+<div class="modal-wrap" id="edit-modal">
+  <div class="modal-box" style="border:1.5px solid #f7c94850;">
+    <h3 style="color:var(--accent);">✏️ कमांड बदलें</h3>
+    <textarea class="modal-textarea" id="edit-textarea" rows="3"></textarea>
+    <div class="modal-actions">
+      <button class="modal-btn cancel" id="edit-cancel">रद्द करें</button>
+      <button class="modal-btn save"   id="edit-save">DB में सेव करें 💾</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD MODAL -->
+<div class="modal-wrap" id="add-modal">
+  <div class="modal-box" style="border:1.5px solid #4fd1c550;">
+    <h3 style="color:var(--accent3);">➕ नई कमांड जोड़ें</h3>
+    <textarea class="modal-textarea" id="add-textarea" rows="3" placeholder="यहाँ नई कमांड लिखें..."></textarea>
+    <div class="modal-actions">
+      <button class="modal-btn cancel" id="add-cancel">रद्द करें</button>
+      <button class="modal-btn save" style="background:#4fd1c5;" id="add-save">Add करें 💾</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── CSRF ──────────────────────────────────────────────
+  function getCookie(name) {
+    let v = null;
+    document.cookie.split(';').forEach(c => {
+      c = c.trim();
+      if (c.startsWith(name + '=')) v = decodeURIComponent(c.slice(name.length+1));
+    });
+    return v;
+  }
+  const CSRF = getCookie('csrftoken');
+
+  const API = {
+    list:   "{% url 'voice_commands_api' %}",
+    add:    "{% url 'voice_command_add' %}",
+    update: id => `/api/voice-commands/update/${id}/`,
+    delete: id => `/api/voice-commands/delete/${id}/`,
+  };
+
+  // ── STATE ─────────────────────────────────────────────
+  let commands      = [];
+  let currentIdx    = -1;
+  let autoPlayAll   = false;
+  let doneSet       = new Set();
+  let editingId     = null;
+  let isPaused      = false;
+  let stopFlag      = false;       // stop सभी loops
+  let repeatingIdx  = -1;          // कौन सी command repeat हो रही है
+  let sleepTimer    = null;        // countdown timeout
+
+  // ── DOM ──────────────────────────────────────────────
+  const listEl        = document.getElementById('commands-list');
+  const nowText       = document.getElementById('now-playing-text');
+  const nowNum        = document.getElementById('now-playing-num');
+  const waveIcon      = document.getElementById('wave-icon');
+  const progressBar   = document.getElementById('progress-bar');
+  const progressLbl   = document.getElementById('progress-label');
+  const btnPlayAll    = document.getElementById('btn-play-all');
+  const btnPause      = document.getElementById('btn-pause');
+  const btnNext       = document.getElementById('btn-next');
+  const btnStop       = document.getElementById('btn-stop');
+  const inpRepeat     = document.getElementById('inp-repeat');
+  const inpSleep      = document.getElementById('inp-sleep');
+  const badgeMode     = document.getElementById('badge-mode');
+  const repeatStatus  = document.getElementById('repeat-status');
+  const sleepCountdown= document.getElementById('sleep-countdown');
+  const sleepBar      = document.getElementById('sleep-bar');
+  const sleepText     = document.getElementById('sleep-text');
+  const editModal     = document.getElementById('edit-modal');
+  const addModal      = document.getElementById('add-modal');
+
+  // ── BADGE UPDATE ──────────────────────────────────────
+  function updateBadge() {
+    const r = parseInt(inpRepeat.value) || 1;
+    const s = parseFloat(inpSleep.value) || 0;
+    badgeMode.textContent = r === 1 ? 'एक बार' : `${r}x | ${s}s gap`;
+  }
+  inpRepeat.addEventListener('input', updateBadge);
+  inpSleep.addEventListener('input', updateBadge);
+
+  // ── TOAST ─────────────────────────────────────────────
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
+  // ── LOAD ─────────────────────────────────────────────
+  async function loadCommands() {
+    try {
+      const res  = await fetch(API.list);
+      const data = await res.json();
+      commands = data.commands;
+      render();
+    } catch { showToast('❌ Commands लोड नहीं हुईं'); }
+  }
+
+  // ── RENDER ───────────────────────────────────────────
+  function render() {
+    listEl.innerHTML = '';
+    commands.forEach((cmd, i) => {
+      const isActive    = i === currentIdx;
+      const isRepeating = i === repeatingIdx;
+      const div = document.createElement('div');
+      div.className = 'cmd-item' + (isActive ? ' active' : '') + (isRepeating ? ' repeating' : '');
+      div.innerHTML = `
+        <div class="cmd-num">${i+1}</div>
+        <div class="cmd-text">${cmd.text}</div>
+        <button class="cmd-play-btn" title="एक बार चलाएं"      data-play="${i}">▶</button>
+        <button class="cmd-play-btn cmd-repeat-btn ${isRepeating?'active-repeat':''}" title="Repeat करें" data-rep="${i}">🔁</button>
+        <button class="cmd-play-btn" title="Edit" data-edit="${i}">✏️</button>
+        <button class="cmd-play-btn" title="Delete" data-del="${cmd.id}" style="color:#e05f5f">🗑</button>
+      `;
+      div.querySelector(`[data-play="${i}"]`).addEventListener('click', e => { e.stopPropagation(); playSingle(i); });
+      div.querySelector(`[data-rep="${i}"]`).addEventListener('click',  e => { e.stopPropagation(); startRepeat(i); });
+      div.querySelector(`[data-edit="${i}"]`).addEventListener('click', e => { e.stopPropagation(); openEdit(i); });
+      div.querySelector(`[data-del="${cmd.id}"]`).addEventListener('click', e => { e.stopPropagation(); deleteCmd(cmd.id); });
+      div.addEventListener('click', () => playSingle(i));
+      listEl.appendChild(div);
+    });
+    const done = doneSet.size, total = commands.length;
+    progressBar.style.width = total ? (done/total*100)+'%' : '0%';
+    progressLbl.textContent = done+' / '+total+' पूरी हुईं';
+  }
+
+  // ── SPEECH ───────────────────────────────────────────
+  function setWave(on) { waveIcon.className = 'wave-icon'+(on?' playing':''); }
+
+  function speak(text, onEnd) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'hi-IN'; u.rate = 0.92; u.pitch = 1.05;
+    const voices = window.speechSynthesis.getVoices();
+    const hiV = voices.find(v => v.lang && v.lang.startsWith('hi'));
+    if (hiV) u.voice = hiV;
+    u.onstart = () => { setWave(true); isPaused = false; };
+    u.onend   = () => { setWave(false); if (onEnd) onEnd(); };
+    u.onerror = () => { setWave(false); if (onEnd) onEnd(); };
+    window.speechSynthesis.speak(u);
+  }
+
+  // ── SLEEP COUNTDOWN UI ───────────────────────────────
+  function showSleep(seconds, onDone) {
+    if (seconds <= 0) { onDone(); return; }
+    sleepCountdown.classList.add('show');
+    const start = Date.now();
+    const end   = start + seconds * 1000;
+
+    function tick() {
+      if (stopFlag) { hideSleep(); return; }
+      const remaining = Math.max(0, (end - Date.now()) / 1000);
+      const pct = (remaining / seconds) * 100;
+      sleepBar.style.width  = pct + '%';
+      sleepText.textContent = '⏳ ' + remaining.toFixed(1) + 's';
+      if (remaining > 0) {
+        sleepTimer = setTimeout(tick, 80);
+      } else {
+        hideSleep();
+        onDone();
+      }
+    }
+    tick();
+  }
+  function hideSleep() {
+    sleepCountdown.classList.remove('show');
+    clearTimeout(sleepTimer);
+    sleepBar.style.width = '100%';
+  }
+
+  // ── PLAY SINGLE (no repeat) ───────────────────────────
+  function playSingle(i) {
+    stopFlag = false; autoPlayAll = false; repeatingIdx = -1;
+    currentIdx = i;
+    nowNum.textContent  = `▶ कमांड ${i+1} चल रही है`;
+    nowText.textContent = commands[i].text;
+    repeatStatus.textContent = '';
+    render();
+    btnPause.disabled = false; btnNext.disabled = true; btnPlayAll.disabled = true;
+    speak(commands[i].text, () => {
+      doneSet.add(commands[i].id);
+      currentIdx = -1; render();
+      btnPause.disabled = true; btnNext.disabled = true; btnPlayAll.disabled = false;
+      nowNum.textContent = '✓ पूरी हुई';
+    });
+  }
+
+  // ── REPEAT SINGLE COMMAND ────────────────────────────
+  function startRepeat(i) {
+    const total = parseInt(inpRepeat.value) || 1;
+    const sleep = parseFloat(inpSleep.value) || 0;
+
+    if (repeatingIdx === i) {
+      // दूसरी बार दबाने पर — रोकें
+      stopFlag = true;
+      window.speechSynthesis.cancel();
+      hideSleep();
+      repeatingIdx = -1; currentIdx = -1;
+      repeatStatus.textContent = '🛑 Repeat रोक दिया।';
+      btnPause.disabled = true; btnNext.disabled = true; btnPlayAll.disabled = false;
+      render(); return;
+    }
+
+    stopFlag = false; autoPlayAll = false;
+    repeatingIdx = i; currentIdx = i;
+    btnPause.disabled = false; btnNext.disabled = false; btnPlayAll.disabled = true;
+    render();
+
+    let count = 0;
+
+    function playOnce() {
+      if (stopFlag || count >= total) {
+        repeatingIdx = -1; currentIdx = -1;
+        repeatStatus.textContent = stopFlag
+          ? '🛑 Repeat रोक दिया।'
+          : `✅ ${count} बार पूरा हो गया!`;
+        hideSleep();
+        btnPause.disabled = true; btnNext.disabled = true; btnPlayAll.disabled = false;
+        render(); return;
+      }
+      count++;
+      currentIdx = i; repeatingIdx = i;
+      nowNum.textContent  = `🔁 ${count} / ${total} — कमांड ${i+1}`;
+      nowText.textContent = commands[i].text;
+      repeatStatus.textContent = `🔁 ${count} / ${total} बार चल रही है...`;
+      render();
+
+      speak(commands[i].text, () => {
+        if (stopFlag) { repeatingIdx=-1; currentIdx=-1; render(); hideSleep(); return; }
+        if (count < total) {
+          repeatStatus.textContent = `⏳ ${sleep}s रुककर अगली बार चलेगी... (${count}/${total})`;
+          showSleep(sleep, () => {
+            if (!stopFlag) playOnce();
+          });
+        } else {
+          playOnce(); // trigger finish
+        }
+      });
+    }
+
+    playOnce();
+  }
+
+  // ── PLAY ALL ─────────────────────────────────────────
+  function playAll(idx = 0) {
+    const sleep = parseFloat(inpSleep.value) || 0;
+    autoPlayAll = true; stopFlag = false;
+    if (idx >= commands.length) {
+      autoPlayAll = false; currentIdx = -1; repeatingIdx = -1;
+      nowNum.textContent  = '🎉 सभी पूरी हुईं!';
+      nowText.textContent = 'बहुत बढ़िया — सभी commands चल गईं।';
+      repeatStatus.textContent = '';
+      setWave(false); hideSleep();
+      btnPause.disabled = true; btnNext.disabled = true; btnPlayAll.disabled = false;
+      return;
+    }
+    currentIdx = idx;
+    nowNum.textContent  = `▶ कमांड ${idx+1} / ${commands.length}`;
+    nowText.textContent = commands[idx].text;
+    render();
+    btnPause.disabled = false; btnNext.disabled = false; btnPlayAll.disabled = true;
+
+    speak(commands[idx].text, () => {
+      doneSet.add(commands[idx].id); render();
+      if (!autoPlayAll || stopFlag) {
+        currentIdx=-1; btnPause.disabled=true; btnNext.disabled=true; btnPlayAll.disabled=false; render(); return;
+      }
+      if (idx + 1 < commands.length && sleep > 0) {
+        repeatStatus.textContent = `⏳ ${sleep}s बाद अगली कमांड...`;
+        showSleep(sleep, () => {
+          repeatStatus.textContent = '';
+          if (autoPlayAll && !stopFlag) playAll(idx + 1);
+        });
+      } else {
+        setTimeout(() => playAll(idx + 1), 300);
+      }
+    });
+  }
+
+  // ── CONTROLS ─────────────────────────────────────────
+  btnPlayAll.addEventListener('click', () => { doneSet.clear(); stopFlag = false; repeatStatus.textContent=''; playAll(0); });
+
+  btnPause.addEventListener('click', () => {
+    if (isPaused) {
+      window.speechSynthesis.resume(); isPaused = false;
+      btnPause.textContent = '⏸ रोकें'; setWave(true);
+    } else {
+      window.speechSynthesis.pause(); isPaused = true;
+      btnPause.textContent = '▶ जारी रखें'; setWave(false);
+    }
+  });
+
+  btnNext.addEventListener('click', () => {
+    autoPlayAll = true; stopFlag = false;
+    hideSleep(); clearTimeout(sleepTimer);
+    window.speechSynthesis.cancel();
+  });
+
+  btnStop.addEventListener('click', () => {
+    stopFlag = true; autoPlayAll = false;
+    window.speechSynthesis.cancel();
+    hideSleep(); clearTimeout(sleepTimer);
+    isPaused = false; currentIdx = -1; repeatingIdx = -1;
+    setWave(false);
+    nowNum.textContent  = '⏹ रोक दिया';
+    nowText.textContent = 'Player बंद कर दिया।';
+    repeatStatus.textContent = '';
+    btnPause.disabled = true; btnNext.disabled = true; btnPlayAll.disabled = false;
+    render();
+  });
+
+  // ── EDIT ─────────────────────────────────────────────
+  function openEdit(i) {
+    editingId = commands[i].id;
+    document.getElementById('edit-textarea').value = commands[i].text;
+    editModal.classList.add('open');
+    setTimeout(() => document.getElementById('edit-textarea').focus(), 100);
+  }
+  document.getElementById('edit-save').addEventListener('click', async () => {
+    const text = document.getElementById('edit-textarea').value.trim();
+    if (!text) return showToast('❌ टेक्स्ट खाली नहीं हो सकता');
+    try {
+      const res  = await fetch(API.update(editingId), {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken':CSRF},
+        body: JSON.stringify({text})
+      });
+      const data = await res.json();
+      if (data.success) {
+        const idx = commands.findIndex(c => c.id === editingId);
+        if (idx >= 0) commands[idx].text = data.text;
+        editModal.classList.remove('open'); render(); showToast('✅ DB में सेव हो गई!');
+      } else showToast('❌ Error: '+data.error);
+    } catch { showToast('❌ Server से connect नहीं हो पाया'); }
+  });
+  document.getElementById('edit-cancel').addEventListener('click', () => editModal.classList.remove('open'));
+  editModal.addEventListener('click', e => { if (e.target===editModal) editModal.classList.remove('open'); });
+
+  // ── ADD ──────────────────────────────────────────────
+  document.getElementById('btn-add').addEventListener('click', () => {
+    document.getElementById('add-textarea').value = '';
+    addModal.classList.add('open');
+    setTimeout(() => document.getElementById('add-textarea').focus(), 100);
+  });
+  document.getElementById('add-save').addEventListener('click', async () => {
+    const text = document.getElementById('add-textarea').value.trim();
+    if (!text) return showToast('❌ टेक्स्ट खाली नहीं हो सकता');
+    try {
+      const res  = await fetch(API.add, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken':CSRF},
+        body: JSON.stringify({text})
+      });
+      const data = await res.json();
+      if (data.success) {
+        commands.push({id:data.id, order:data.order, text:data.text});
+        addModal.classList.remove('open'); render(); showToast('✅ नई कमांड DB में add हो गई!');
+      } else showToast('❌ Error: '+data.error);
+    } catch { showToast('❌ Server से connect नहीं हो पाया'); }
+  });
+  document.getElementById('add-cancel').addEventListener('click', () => addModal.classList.remove('open'));
+  addModal.addEventListener('click', e => { if (e.target===addModal) addModal.classList.remove('open'); });
+
+  // ── DELETE ───────────────────────────────────────────
+  async function deleteCmd(id) {
+    if (!confirm('यह कमांड delete करनी है?')) return;
+    try {
+      const res  = await fetch(API.delete(id), {method:'POST', headers:{'X-CSRFToken':CSRF}});
+      const data = await res.json();
+      if (data.success) {
+        commands = commands.filter(c => c.id !== id);
+        doneSet.delete(id); render(); showToast('🗑️ कमांड delete हो गई!');
+      }
+    } catch { showToast('❌ Delete नहीं हो पाया'); }
+  }
+
+  // ── INIT ─────────────────────────────────────────────
+  window.speechSynthesis.onvoiceschanged = () => {};
+  updateBadge();
+  loadCommands();
+</script>
+</body>
+</html>

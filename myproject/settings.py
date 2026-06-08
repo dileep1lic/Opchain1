@@ -18,6 +18,10 @@ import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / '.env')
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -26,7 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 import os, dj_database_url
 
 # ── Secret Key — Render पर Environment Variable से आएगा ──────────────────
-SECRET_KEY = os.environ.get('SECRET_KEY', 'fallback-only-for-local-dev')
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # ── Debug — Render पर False, local पर True ───────────────────────────────
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
@@ -44,7 +48,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE   = True
     CSRF_COOKIE_SECURE      = True
 
-# DEBUG = True
+DEBUG = True
 
 # Application definition
 
@@ -325,6 +329,7 @@ LOGGING = {
         },
     },
 }
+
 
 
 # अपनी कॉपी की हुई Groq Key यहाँ पेस्ट करें

@@ -5,11 +5,11 @@ stock_sync/
 *~
 __pycache__/
 
-# Local Database (लोकल डेटाबेस को कभी अपलोड न करें)
+# Local Database
 db.sqlite3
 db.sqlite3-journal
 
-# Environments (वर्चुअल एनवायरनमेंट)
+# Environments
 .env
 .myvenv
 myvenv/
@@ -24,6 +24,7 @@ staticfiles/
 
 # Security / Secrets (आपके प्रोजेक्ट के सीक्रेट्स)
 .env
+**/.env
 local_settings.py
 secrets.json
 credentials1.py
