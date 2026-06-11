@@ -43,3 +43,4 @@ daphne
 channels
 channels-redis
 groq
+python-dotenv
