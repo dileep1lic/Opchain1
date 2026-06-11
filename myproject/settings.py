@@ -19,9 +19,18 @@ import dj_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment variables from .env file
-from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent / '.env')
+# from dotenv import load_dotenv
+# load_dotenv(Path(__file__).resolve().parent / '.env')
 
+
+# Load environment variables from .env file (Render के लिए सुरक्षित)
+try:
+    from dotenv import load_dotenv
+    # यह आपके प्रोजेक्ट के मुख्य फोल्डर से .env को लोड करेगा
+    load_dotenv(BASE_DIR / '.env') 
+except ImportError:
+    # Render पर यह पैकेज नहीं होगा, तो यह चुपचाप आगे बढ़ जाएगा
+    pass
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -48,7 +57,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE   = True
     CSRF_COOKIE_SECURE      = True
 
-DEBUG = True
+# DEBUG = True
 
 # Application definition
 
@@ -116,6 +125,7 @@ if _db_url:
             default=_db_url,
             conn_max_age=600,
             conn_health_checks=True,
+            ssl_require=True,
         )
     }
 else:
