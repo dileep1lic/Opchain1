@@ -295,6 +295,7 @@ class Command(BaseCommand):
                     
                 
                     # 🟢 Incremental History Update — FIXED
+                    master_levels = None
                     try:
                         # ✅ FIX Bug 4: master_levels एक बार निकालो
                         master_levels = await sync_to_async(get_master_levels)(fixes_sym)
@@ -351,11 +352,14 @@ class Command(BaseCommand):
                     bot_ctrl, _ = await get_control_async(name="bot_loop") # नाम बदल दिया ताकि कन्फ्यूजन न हो
                     if bot_ctrl.is_active:
                         if self.is_trad_hours():  # Bot trading hours check
-                            await sync_to_async(run_live_paper_trading)(
-                                df=df,
-                                symbol=fixes_sym,
-                                master_levels=master_levels, 
-                            )
+                            if master_levels is not None:
+                                await sync_to_async(run_live_paper_trading)(
+                                    df=df,
+                                    symbol=fixes_sym,
+                                    master_levels=master_levels, 
+                                )
+                            else:
+                                print("⚠️ Master levels नहीं मिला, Bot Trading स्किप की गई।")
                         else:
                             print("⏸️ Bot Loop Outside Side Trading Hours., Stop trades.")
                     else:

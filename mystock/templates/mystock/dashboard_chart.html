@@ -383,11 +383,6 @@ function checkReversalAlerts(currentPrice, reversals) {
           checkReversalAlerts(last.close, reversals);
       }
 
-      if (cdData.length > 0) {
-          updateLegend(cdData[cdData.length - 1]);
-          checkReversalAlerts(cdData[cdData.length - 1].close, reversals);
-      }
-
       // 5. Reversal Lines (Straight Lines) अपडेट करें
       if (window._reversalSeries) {
           window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
