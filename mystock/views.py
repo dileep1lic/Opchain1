@@ -61,7 +61,21 @@ from functools import wraps
 from django.utils.module_loading import import_string
 from django.conf import settings
 
+import math
 
+def sanitize_json_data(data):
+    """
+    यह फंक्शन पूरे डेटा को स्कैन करेगा और जहाँ भी Python का 'Infinity' या 'NaN' मिलेगा,
+    उसे 'None' (JSON में null) में बदल देगा ताकि फ्रंटएंड क्रैश न हो।
+    """
+    if isinstance(data, dict):
+        return {k: sanitize_json_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_json_data(v) for v in data]
+    elif isinstance(data, float):
+        if math.isinf(data) or math.isnan(data):
+            return None  # Infinity को null में बदलें
+    return data
 
 def safe_get(url, headers=None, params=None, retries=3, timeout=10):
     """
@@ -1490,6 +1504,9 @@ def candle_api(request):
         "reversal_lines": reversal_lines,
     }
 
+    # 🟢 BACKEND FIX: JSON में भेजने से पहले Infinity को साफ़ करें
+    response_data = sanitize_json_data(response_data)
+
     candles_only = {k: v for k, v in response_data.items() if k != "reversal_lines"}
 
     # ✅ FIX: Empty candles को cache मत करो
@@ -2638,9 +2655,8 @@ def _dashboard_data_api_sync(request):
         'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
         'bot_active': bot_active,
         'total_pnl': round(total_pnl, 2),
-        'total_pnl_rupees': round(total_pnl_rupees, 2), # 👈 Total PnL (₹)
+        'total_pnl_rupees': round(total_pnl_rupees, 2),
         'triggers': {
-            # ... (आपका पुराना triggers का डेटा) ...
             'spot': current_spot,
             'r_trigger': master_levels["R"]["entry"],
             'r_strike': master_levels["R"]["strike"],
@@ -2648,16 +2664,17 @@ def _dashboard_data_api_sync(request):
             's_trigger': master_levels["S"]["entry"],
             's_strike': master_levels["S"]["strike"],
             's_status': master_levels["S"]["status"] or '—',
-            # 🟢 अगर latest_oc नहीं है (डेटा कैश से आया है), तो करेंट टाइम भेजें
             'data_time': latest_oc.Time.isoformat() if latest_oc else localtime(timezone.now()).isoformat(),
-        
         },
         'trades': trades_list,
     }
+
+    # 🟢 BACKEND FIX: JSON में भेजने से पहले Infinity को साफ़ करें
+    response_data = sanitize_json_data(response_data)
+
     # 🚀 8. डायनामिक कैश टाइमिंग (Smart Caching)
-    # अगर कोई भी ट्रेड OPEN है, तो रिफ्रेश रेट बढ़ा दें (2 sec)
     has_open_trade = any(t['result'] == 'OPEN' for t in trades_list)
-    cache_timeout = 2 if has_open_trade else 10 
+    cache_timeout = 2 if has_open_trade else 5 
     
     cache.set(cache_key, response_data, cache_timeout)
     
