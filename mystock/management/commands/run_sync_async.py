@@ -89,9 +89,9 @@ class Command(BaseCommand):
     # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
-    is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(15, 30)
+    is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(20, 30)
     # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
-    is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(15, 30)
+    is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(20, 30)
 
     def handle(self, *args, **options):
         logger.info('🚀 Starting High-Speed Async Engine...') 
@@ -248,7 +248,7 @@ class Command(BaseCommand):
 
                     if self.is_trading_hours():
                         # 👈 2. यहाँ चेक करें कि क्या पिछले DB सेव से 5 सेकंड बीत चुके हैं?
-                        if current_time - last_db_save_time >= 5:
+                        if current_time - last_db_save_time >= 500:
                             entries = [OptionChain(
                                 Time=row.get('Time'),
                                 Symbol=row.get('Symbol'),
@@ -284,12 +284,23 @@ class Command(BaseCommand):
                                 PE_RANGE=row.get('PE_RANGE'),
                                 PE_Delta=row.get('PE_Delta'),
                             ) for _, row in filtered_df.iterrows()]
+
+                            # 🚀 सुरक्षा कवच (Try-Except Block)
+                            try:
+                                await bulk_create_async(entries)
+                                # await save_live_sr_async(df, fixes_sym)
+                            except Exception as db_error:
+                                # अगर DB फुल हो गया या कोई एरर आया, तो बस लॉग में लिखो और आगे बढ़ जाओ
+                                logger.error(f"⚠️ DB Save Error (Ignored): {db_error}")
+                                print(f"⚠️ DB Save Error (Ignored): {db_error}")
+                                pass
                             
-                            await bulk_create_async(entries)
-                            # print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
-                            # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
-                            await save_live_sr_async(df, fixes_sym)
+                            # await bulk_create_async(entries)
+                            # # print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
+                            # # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
+                            
                             last_db_save_time = current_time
+                            await save_live_sr_async(df, fixes_sym)
                     else:
                         print("⏸️  NIFTY Loop Outside Trading Hours.")
                     
