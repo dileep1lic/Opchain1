@@ -1,6 +1,7 @@
 from django.test import TestCase
 
 import re
+import math
 from django.utils import timezone
 from django.core.cache import caches
 from django.db.models import Q
@@ -106,7 +107,7 @@ def get_master_levels(symbol, selected_date=None):
         total_val, valid_count = 0.0, 0
         for row in rows:
             val = float(row.Reversl_Ce) if side == 'CE' else float(row.Reversl_Pe)
-            if val and val > 0:
+            if val and val > 0 and not math.isinf(val) and not math.isnan(val):
                 total_val  += val
                 valid_count += 1
 
@@ -275,7 +276,7 @@ def get_master_levels(symbol, selected_date=None):
     elif sup_type == "WTT"          and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
     #--------sup strong-------------
     elif sup_type == "STRONG"       and res_type == "WTB"           : eff_sup = sup_base - step # Test ok
-    elif sup_type == "STRONG"       and res_type == "WTT"           : eff_sup = sup_base 
+    elif sup_type == "STRONG"       and res_type == "WTT"           : eff_sup = sup_base - step # test ok
     elif sup_type == "STRONG"       and res_type == "STRONG"        : eff_sup = sup_base - step
     elif sup_type == "STRONG"       and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
     elif sup_type == "STRONG"       and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step

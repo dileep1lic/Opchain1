@@ -1254,9 +1254,18 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
                             # Redis में ce_hist/pe_hist का last value ही latest है
                             ce_hist = v.get('ce_hist', [])
                             pe_hist = v.get('pe_hist', [])
+
+                            # 🛡️ FIX: Redis से आए float को Infinity/NaN से बचाएं
+                            def _safe(val):
+                                try:
+                                    f = float(val)
+                                    return f if math.isfinite(f) else None
+                                except (TypeError, ValueError):
+                                    return None
+
                             strike_history[s] = {
-                                'latest_ce': float(ce_hist[-1]['value']) if ce_hist else v.get('latest_ce'),
-                                'latest_pe': float(pe_hist[-1]['value']) if pe_hist else v.get('latest_pe'),
+                                'latest_ce': _safe(ce_hist[-1]['value']) if ce_hist else _safe(v.get('latest_ce')),
+                                'latest_pe': _safe(pe_hist[-1]['value']) if pe_hist else _safe(v.get('latest_pe')),
                             }
                     except (ValueError, TypeError, KeyError):
                         continue
@@ -1353,6 +1362,9 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
                     })
 
         lines.sort(key=lambda x: x["price"], reverse=True)
+
+        # 🛡️ FIX: Cache में store करने और return करने से पहले Infinity/NaN साफ़ करें
+        lines = sanitize_json_data(lines)
 
         timeout = 45 if from_date == today_str else 86400
         cache.set(cache_key, lines, timeout=timeout)
@@ -2292,7 +2304,7 @@ def dashboard_data_api1(request):
     # 🚀 2. चेक करें कि क्या डेटा पहले से कैश में है?
     cached_data = cache.get(cache_key)
     if cached_data:
-        return JsonResponse(cached_data) # अगर है, तो तुरंत 0.01 सेकंड में भेज दें!
+        return JsonResponse(sanitize_json_data(cached_data)) # ✅ Infinity fix: cache hit पर भी sanitize
     
     if date_str:
         selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -2517,7 +2529,7 @@ def _dashboard_data_api_sync(request):
     # 🚀 2. चेक करें कि क्या डेटा पहले से कैश में है?
     cached_data = cache.get(cache_key)
     if cached_data:
-        return JsonResponse(cached_data) # अगर है, तो तुरंत 0.01 सेकंड में भेज दें!
+        return JsonResponse(sanitize_json_data(cached_data)) # ✅ Infinity fix: cache hit पर भी sanitize
     
     if date_str:
         selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -2909,7 +2921,8 @@ def db_cleanup_api(request):
                 db_engine = connection.vendor  # 'sqlite' या 'postgresql'
                 if db_engine == "sqlite":
                     cursor.execute("PRAGMA optimize;")
-                    cursor.execute("VACUUM;")
+                    # cursor.execute("VACUUM;")
+                    cursor.execute("VACUUM FULL;")
                     optimize_msg = "SQLite VACUUM + optimize चला।"
                 elif db_engine == "postgresql":
                     cursor.execute("VACUUM ANALYZE;")
