@@ -89,7 +89,7 @@ class Command(BaseCommand):
     # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
-    is_trading_hours = lambda self: dt_time(9, 15) <= datetime.now().time() <= dt_time(20, 30)
+    is_trading_hours = lambda self: dt_time(9, 15, 5) <= datetime.now().time() <= dt_time(15, 30)
     # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
     is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(20, 30)
 
@@ -248,7 +248,7 @@ class Command(BaseCommand):
 
                     if self.is_trading_hours():
                         # 👈 2. यहाँ चेक करें कि क्या पिछले DB सेव से 5 सेकंड बीत चुके हैं?
-                        if current_time - last_db_save_time >= 500:
+                        if current_time - last_db_save_time >= 10:
                             entries = [OptionChain(
                                 Time=row.get('Time'),
                                 Symbol=row.get('Symbol'),
@@ -300,11 +300,12 @@ class Command(BaseCommand):
                             # # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
                             
                             last_db_save_time = current_time
-                            await save_live_sr_async(df, fixes_sym)
+                            
                     else:
                         print("⏸️  NIFTY Loop Outside Trading Hours.")
                     
-                
+                    await save_live_sr_async(df, fixes_sym)
+
                     # 🟢 Incremental History Update — FIXED
                     master_levels = None
                     try:
