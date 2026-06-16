@@ -10,7 +10,8 @@ from django.utils import timezone
 # अपने views.py से लाइव डेटा वाले फ़ंक्शन्स इम्पोर्ट करें
 import re
 from .views import get_master_levels, cache 
-from .my_deta import system_instruction
+# from .my_deta import system_instruction
+from .monika_call import system_instruction
 
 # ── Helper: Live Market Context (अपडेटेड फ़ंक्शन) ────────
 def get_live_market_context():
