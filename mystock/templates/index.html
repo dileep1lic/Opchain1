@@ -76,6 +76,33 @@
       font-family:'Baloo 2',cursive;margin-top:12px;transition:all .2s; width:100%;}
     #vc-clr:hover{border-color:var(--a2);color:var(--a2); background:#1e0e0e;}
 
+    /* ── AI DISCLAIMER TICKER (Bottom) ── */
+    .ai-disclaimer-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background: transparent;
+      padding: 5px 0;
+      z-index: 9999;
+      overflow: hidden;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .disclaimer-ticker {
+      display: inline-block;
+      animation: ticker-scroll 28s linear infinite;
+      font-size: .78rem;
+      color: #f7c94888;
+      letter-spacing: .3px;
+      font-family: inherit;
+    }
+    .disclaimer-ticker strong { color: #f7c948bb; font-weight: 600; }
+    @keyframes ticker-scroll {
+      0%   { transform: translateX(100vw); }
+      100% { transform: translateX(-100%); }
+    }
+
   </style>
 </head>
 <body>
@@ -84,6 +111,14 @@
   <h1>🎙️ AI Voice Assistant</h1>
   <p>मोनिका  से बात करें — आपका पर्सनल स्मार्ट असिस्टेंट</p>
 </header>
+
+<!-- ⚠️ AI Disclaimer Ticker -->
+<div class="ai-disclaimer-bar">
+  <span class="disclaimer-ticker">
+    ⚠️ <strong>ध्यान दें:</strong> यह एक AI-आधारित सिस्टम है — डेटा या सुझावों में गलती हो सकती है। किसी भी ट्रेड या निवेश निर्णय से पहले खुद जाँच अवश्य करें।
+    &nbsp;&nbsp;&nbsp;&nbsp;⚠️ <strong>ध्यान दें:</strong> यह एक AI-आधारित सिस्टम है — डेटा या सुझावों में गलती हो सकती है। किसी भी ट्रेड या निवेश निर्णय से पहले खुद जाँच अवश्य करें।
+  </span>
+</div>
 
 <div id="ai-container">
   
@@ -173,46 +208,131 @@ function addBubble(text,type){
   return div;
 }
 
-// 3. AI (Django/Ollama) को मैसेज भेजना
+// 3. AI को मैसेज भेजना — 🚀 STREAMING VERSION
 async function sendToAI(userText){
   micTr.textContent='';
-  micSt.textContent='⏳ मोनिका  सोच रही है...';
+  micSt.textContent='⏳ मोनिका सोच रही है...';
   micSt.style.color='var(--accent)';
   addBubble(userText,'u');
-  const th=addBubble('⌛ जवाब तैयार हो रहा है...','thinking');
-  
-  try{
-    const r=await fetch(API.chat,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
-      body:JSON.stringify({message:userText,history:chatHistory})
+
+  // Monica का bubble — real-time में भरेगा
+  const aDiv = document.createElement('div');
+  aDiv.className = 'bubble a';
+  aDiv.innerHTML = '<span class="stream-text"></span> <button class="spk-btn" title="सुनें">🔊</button>';
+  chatBox.appendChild(aDiv);
+  chatBox.scrollTop = chatBox.scrollHeight;
+
+  const streamSpan = aDiv.querySelector('.stream-text');
+  let fullReply = '';
+
+  try {
+    // ── SSE Streaming Fetch ──────────────────────────
+    const response = await fetch("{% url 'voice_chat_stream' %}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': CSRF
+      },
+      body: JSON.stringify({ message: userText, history: chatHistory })
     });
-    const d=await r.json();
-    th.remove();
-    
-    if(d.success){
-      // ✅ FIX: history हमेशा backend से update हो
-      if (d.history && d.history.length > 0) {
-        chatHistory = d.history;
-      } else {
-        // fallback: manually add if backend ne nahi bheja
-        chatHistory.push({"role": "user", "content": userText});
-        chatHistory.push({"role": "assistant", "content": d.reply});
+
+    if (!response.ok) throw new Error('Server error: ' + response.status);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    // 🚀 Real-time token reading loop
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE lines को parse करें (हर line "data: {...}" format में)
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // अधूरी line अगले chunk के लिए रखें
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const event = JSON.parse(jsonStr);
+
+          if (event.error) {
+            // ❌ Error आई
+            streamSpan.textContent = '❌ ' + event.error;
+            micSt.textContent = '❌ ' + event.error;
+            micSt.style.color = 'var(--a2)';
+            return;
+          }
+
+          if (event.token) {
+            // ✅ नया token — real-time में जोड़ें
+            fullReply += event.token;
+            streamSpan.textContent = fullReply;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            // Status update — पहला token आते ही
+            if (fullReply.length <= event.token.length) {
+              micSt.textContent = '💬 मोनिका बोल रही है...';
+              micSt.style.color = 'var(--a3)';
+            }
+          }
+
+          if (event.done) {
+            // 🏁 Stream पूरा — history update करें
+            chatHistory = event.history || chatHistory;
+            fullReply = event.reply || fullReply;
+            streamSpan.textContent = fullReply;
+
+            // Speaker button connect करें
+            aDiv.querySelector('.spk-btn').onclick = () => speakTTS(fullReply);
+
+            micSt.textContent = '✅ जवाब मिला — बोल रही हूँ...';
+            micSt.style.color = 'var(--a3)';
+            speakTTS(fullReply, true);
+            chatBox.scrollTop = chatBox.scrollHeight;
+          }
+
+        } catch (parseErr) {
+          console.warn('SSE parse error:', parseErr, jsonStr);
+        }
       }
-      addBubble(d.reply,'a');
-      micSt.textContent='✅ जवाब मिला — बोल रही हूँ...';
-      micSt.style.color='var(--a3)';
-      speakTTS(d.reply, true); 
-    } else {
-      addBubble('❌ '+d.error,'thinking');
-      micSt.textContent='❌ '+d.error;
+    }
+
+  } catch(e) {
+    // ── Fallback: Non-Streaming API ──────────────────
+    console.warn('Streaming failed, falling back:', e);
+    aDiv.remove();
+    const th = addBubble('⌛ जवाब तैयार हो रहा है...','thinking');
+    try {
+      const r = await fetch("{% url 'voice_chat_api' %}", {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken':CSRF},
+        body: JSON.stringify({message: userText, history: chatHistory})
+      });
+      const d = await r.json();
+      th.remove();
+      if(d.success){
+        chatHistory = d.history || chatHistory;
+        addBubble(d.reply,'a');
+        micSt.textContent='✅ जवाब मिला — बोल रही हूँ...';
+        micSt.style.color='var(--a3)';
+        speakTTS(d.reply, true);
+      } else {
+        addBubble('❌ '+d.error,'thinking');
+        micSt.textContent='❌ '+d.error;
+        micSt.style.color='var(--a2)';
+      }
+    } catch(fe) {
+      th.remove();
+      addBubble('❌ Server से connect नहीं हो पाया।','thinking');
+      micSt.textContent='❌ Server error';
       micSt.style.color='var(--a2)';
     }
-  }catch(e){
-    th.remove();
-    addBubble('❌ Server से connect नहीं हो पाया।','thinking');
-    micSt.textContent='❌ Server error';
-    micSt.style.color='var(--a2)';
   }
 }
 

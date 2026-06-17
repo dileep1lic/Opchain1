@@ -288,7 +288,6 @@ class Command(BaseCommand):
                             # 🚀 सुरक्षा कवच (Try-Except Block)
                             try:
                                 await bulk_create_async(entries)
-                                # await save_live_sr_async(df, fixes_sym)
                             except Exception as db_error:
                                 # अगर DB फुल हो गया या कोई एरर आया, तो बस लॉग में लिखो और आगे बढ़ जाओ
                                 logger.error(f"⚠️ DB Save Error (Ignored): {db_error}")
@@ -303,8 +302,12 @@ class Command(BaseCommand):
                             
                     else:
                         print("⏸️  NIFTY Loop Outside Trading Hours.")
-                    
-                    await save_live_sr_async(df, fixes_sym)
+
+                    # 🚀 ✅ FIX: इसे 10 सेकंड की पाबंदी से बाहर निकालें (हर टिक पर चलेगा)
+                    try:
+                        await save_live_sr_async(df, fixes_sym)
+                    except Exception as sr_error:
+                        print(f"⚠️ LiveSRData Save Error: {sr_error}")
 
                     # 🟢 Incremental History Update — FIXED
                     master_levels = None
@@ -348,11 +351,11 @@ class Command(BaseCommand):
 
                         if res_val is not None:
                             history_data["master_res"].append({"time": t_str, "value": res_val})
-                            history_data["master_res"] = history_data["master_res"][-500:]
+                            history_data["master_res"] = history_data["master_res"][-50:]
 
                         if sup_val is not None:
                             history_data["master_sup"].append({"time": t_str, "value": sup_val})
-                            history_data["master_sup"] = history_data["master_sup"][-500:]
+                            history_data["master_sup"] = history_data["master_sup"][-50:]
 
                         await set_cache_async(history_key, history_data, 43200)
 
@@ -387,7 +390,7 @@ class Command(BaseCommand):
                 logger.error(f"NIFTY Loop Error: {e}")
                 
             # 🟢 लूप हमेशा 5 सेकंड आराम करेगा
-            await asyncio.sleep(2)
+            await asyncio.sleep(10)
             
     async def others_sr_loop(self, session, symbols, expiry):
         """Modified Loop: Process 10 symbols, wait 2s, repeat."""

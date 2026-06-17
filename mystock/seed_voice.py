@@ -1,7 +1,7 @@
 import json
 from groq import Groq
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods 
@@ -60,7 +60,19 @@ def get_live_market_context():
     return "[सिस्टम जानकारी: लाइव मार्केट का डेटा अभी उपलब्ध नहीं है।]"
 
 
-# ── Helper: Groq से Monica का जवाब ────────────────────
+# ── Helper: Groq messages list बनाना ────────────────────
+def build_messages(user_message, history=None):
+    """Monica के लिए messages list तैयार करना (streaming और non-streaming दोनों में काम आता है)"""
+    messages = [{"role": "system", "content": system_instruction}]
+    market_context = get_live_market_context()
+    messages.append({"role": "system", "content": market_context})
+    if history:
+        messages += history[-10:]
+    messages.append({"role": "user", "content": user_message})
+    return messages
+
+
+# ── Helper: Groq से Monica का जवाब (Non-Streaming) ────────────────────
 def get_ai_reply(user_message, history=None):
     # API Key चेक करें
     api_key = getattr(settings, 'GROQ_API_KEY', None)
@@ -68,20 +80,7 @@ def get_ai_reply(user_message, history=None):
         return "क्षमा करें, API Key सेट नहीं है।"
 
     client = Groq(api_key=api_key)
-    
-    # 1. मोनिका का मुख्य व्यक्तित्व
-    messages = [{"role": "system", "content": system_instruction}]
-    
-    # 2. 🚀 नया बदलाव: मोनिका को बैकएंड से लाइव लेवल्स बताना 🚀
-    market_context = get_live_market_context()
-    messages.append({"role": "system", "content": market_context})
-    
-    # 3. पुरानी बातें (History) - सिर्फ पिछली 10 बातें याद रखने के लिए
-    if history:
-        messages += history[-10:]
-        
-    # 4. नया मैसेज
-    messages.append({"role": "user", "content": user_message})
+    messages = build_messages(user_message, history)
     
     try:
         response = client.chat.completions.create(
@@ -100,7 +99,7 @@ def index(request):
     return render(request, 'index.html')
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# WEB CHAT API (VB-Cable और Phone Link के लिए)
+# WEB CHAT API (Non-Streaming — Fallback)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -130,4 +129,82 @@ def voice_chat_api(request):
         
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🚀 STREAMING CHAT API (SSE — Real-time Tokens)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@csrf_exempt
+@require_http_methods(["POST"])
+def voice_chat_stream(request):
+    """
+    Server-Sent Events (SSE) endpoint.
+    हर token real-time में frontend को भेजा जाता है।
     
+    SSE Format:
+        data: {"token": "..."}\n\n         ← हर word/token
+        data: {"done": true, "history": [...]}\n\n  ← अंत में
+        data: {"error": "..."}\n\n         ← error की स्थिति में
+    """
+    try:
+        data    = json.loads(request.body)
+        message = data.get('message', '').strip()
+        history = data.get('history', [])
+
+        if not message:
+            def error_gen():
+                yield 'data: ' + json.dumps({'error': 'Message खाली है'}) + '\n\n'
+            return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
+
+        api_key = getattr(settings, 'GROQ_API_KEY', None)
+        if not api_key:
+            def error_gen():
+                yield 'data: ' + json.dumps({'error': 'API Key सेट नहीं है।'}) + '\n\n'
+            return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
+
+    except Exception as e:
+        def error_gen():
+            yield 'data: ' + json.dumps({'error': str(e)}) + '\n\n'
+        return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
+
+    def sse_generator():
+        """Groq Streaming से tokens yield करना"""
+        client = Groq(api_key=api_key)
+        messages = build_messages(message, history)
+        full_reply = ""
+
+        try:
+            stream = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=150,
+                stream=True,  # 🚀 Streaming ON
+            )
+
+            for chunk in stream:
+                token = chunk.choices[0].delta.content
+                if token:
+                    full_reply += token
+                    # हर token SSE format में भेजें
+                    yield 'data: ' + json.dumps({'token': token}, ensure_ascii=False) + '\n\n'
+
+            # Stream पूरा होने पर updated history भेजें
+            updated_history = history + [
+                {"role": "user",      "content": message},
+                {"role": "assistant", "content": full_reply.strip()},
+            ]
+            yield 'data: ' + json.dumps({
+                'done': True,
+                'reply': full_reply.strip(),
+                'history': updated_history
+            }, ensure_ascii=False) + '\n\n'
+
+        except Exception as e:
+            print(f"Groq Streaming Error: {e}")
+            yield 'data: ' + json.dumps({'error': f'नेटवर्क में समस्या: {str(e)}'}, ensure_ascii=False) + '\n\n'
+
+    response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'   # Nginx buffering बंद करें
+    return response

@@ -124,9 +124,45 @@
             text-decoration: underline;
             color: #ffffff !important;
         }
+    
+    /* ── AI DISCLAIMER TICKER (Bottom) ── */
+    .ai-disclaimer-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background: transparent;
+      padding: 5px 0;
+      z-index: 9999;
+      overflow: hidden;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .disclaimer-ticker {
+      display: inline-block;
+      animation: ticker-scroll 28s linear infinite;
+      font-size: .78rem;
+      color: #f7c94888;
+      letter-spacing: .3px;
+      font-family: inherit;
+    }
+    .disclaimer-ticker strong { color: #f7c948bb; font-weight: 600; }
+    @keyframes ticker-scroll {
+      0%   { transform: translateX(100vw); }
+      100% { transform: translateX(-100%); }
+    }
+
     </style>
 </head>
 <body>
+<!-- ⚠️ AI Disclaimer Ticker -->
+<div class="ai-disclaimer-bar">
+  <span class="disclaimer-ticker">
+    ⚠️ <strong>ध्यान दें:</strong> यह एक AI-आधारित सिस्टम है — डेटा या सुझावों में गलती हो सकती है। किसी भी ट्रेड या निवेश निर्णय से पहले खुद जाँच अवश्य करें।
+    &nbsp;&nbsp;&nbsp;&nbsp;⚠️ <strong>ध्यान दें:</strong> यह एक AI-आधारित सिस्टम है — डेटा या सुझावों में गलती हो सकती है। किसी भी ट्रेड या निवेश निर्णय से पहले खुद जाँच अवश्य करें।
+  </span>
+</div>
+
 
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="m-0 fw-bold"><span style="color: var(--accent-yellow);">Stocks </span> DASHBOARD</h2>
