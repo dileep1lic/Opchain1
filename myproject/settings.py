@@ -265,6 +265,10 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
 
 # # लॉगिन के लिए डिफ़ॉल्ट URL
 # LOGIN_URL = '/accounts/login/'

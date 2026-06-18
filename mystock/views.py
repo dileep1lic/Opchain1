@@ -1163,12 +1163,12 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         # 🚀 THE FIX: यहाँ float() लगाना बहुत ज़रूरी है ताकि आगे TypeError न आए
         eff_res_strike = float(master_levels["R"]["strike"] or 0)
         eff_sup_strike = float(master_levels["S"]["strike"] or 0)
-        print(f"🔹 {symbol} | Master Levels: R={eff_res_strike}, S={eff_sup_strike}")
+        # print(f"🔹 {symbol} | Master Levels: R={eff_res_strike}, S={eff_sup_strike}")
 
         # ✅ इसे भी float में कर लें ताकि एकदम सुरक्षित रहे
         current_res_val = float(master_levels["R"]["entry"] or 0)
         current_sup_val = float(master_levels["S"]["entry"] or 0)
-        print(f"🔹 {symbol} | Master Levels: R_val={current_res_val}, S_val={current_sup_val}")
+        # print(f"🔹 {symbol} | Master Levels: R_val={current_res_val}, S_val={current_sup_val}")
 
         # DB query range: effective strikes के आसपास की सभी strikes
         global_low  = min(eff_sup_strike, eff_res_strike) - step
