@@ -1,21 +1,17 @@
-#!/bin/bash
+start_sh_content = """#!/usr/bin/env bash
 
-# अगर कोई कमांड फेल हो तो तुरंत रुक जाए
+# किसी भी एरर पर स्क्रिप्ट को रोकने के लिए (फोरग्राउंड कमांड्स के लिए)
 set -o errexit
 
-# 1. डेटाबेस माइग्रेशन (Database Update)
-# हर डिप्लॉयमेंट पर डेटाबेस को अपडेट रखना अच्छी आदत है
-echo "Applying database migrations..."
-python manage.py migrate
-
-# 2. बैकग्राउंड वर्कर शुरू करें (Background Worker)
-# '&' का मतलब है इसे पीछे (Background) में चलाओ और तुरंत अगली लाइन पर बढ़ जाओ।
-# हम यहाँ 'run_sync_async' का उपयोग कर रहे हैं जैसा आपने बताया।
-echo "Starting Background Worker (run_sync_async)..."
+echo "🔄 बैकग्राउंड में लाइव डेटा सिंक इंजन (run_sync_async) शुरू कर रहे हैं..."
 python manage.py run_sync_async &
 
-# 3. मुख्य वेब सर्वर शुरू करें (Main Web Server)
-# यह सबसे अंत में होना चाहिए और इसके पीछे '&' नहीं लगाना है।
-# यह Foreground में चलेगा ताकि Render को पता चले कि वेबसाइट लाइव है।   python manage.py run_sync_async & gunicorn myproject.wsgi:application --bind 0.0.0.0:$PORT --timeout 120 --log-file -
-echo "Starting Gunicorn Server..."
-gunicorn myproject.wsgi
+echo "🚀 Daphne ASGI सर्वर को पोर्ट $PORT पर चालू कर रहे हैं..."
+# exec का उपयोग करने से Daphne मुख्य प्रोसेस बन जाता है, जिससे सर्वर स्टेबल रहता है
+exec daphne myproject.asgi:application --port $PORT --bind 0.0.0.0
+"""
+
+with open("start.sh", "w", encoding="utf-8") as f:
+    f.write(start_sh_content)
+
+print("File start.sh successfully created.")
