@@ -181,22 +181,6 @@ class SmartCache:
 cache = SmartCache()
 # ========================================================
 # ── 1. Admin Panel Page ─────────────────────────────────────
-def admin_only1(view_func):
-    """यह डेकोरेटर चेक करता है कि यूज़र सुपरयूज़र है या नहीं। अगर नहीं, तो 403 पेज दिखाता है।"""
-    @wraps(view_func)
-    def _wrapped_view(request, *args, **kwargs):
-        # अगर यूज़र लॉगिन नहीं है, तो लॉगिन पेज पर भेजें
-        if not request.user.is_authenticated:
-            return redirect('login')
-        
-        # अगर यूज़र लॉगिन है लेकिन एडमिन (superuser) नहीं है, तो 403 पेज दिखाएँ
-        if not request.user.is_superuser:
-            return render(request, 'registration/403.html', status=403)
-            
-        # अगर एडमिन है, तो पेज खुलने दें
-        return view_func(request, *args, **kwargs)
-    return _wrapped_view
-
 import asyncio
 from functools import wraps
 
@@ -277,53 +261,6 @@ def login_view(request):
     return render(request, 'registration/login.html')
 
 # ── 2. Admin Status API ─────────────────────────────────────
-@admin_only
-def admin_status_api1(request):
-    """सभी loops का status + trade stats + Bot Settings — optimized & defensive"""
-
-    # ── Loop Status: एक query में सारे loops ──
-    loop_names = ['nifty_loop', 'others_loop', 'bot_loop']
-    try:
-        existing = {c.name: c.is_active for c in SyncControl.objects.filter(name__in=loop_names)}
-        for name in loop_names:
-            if name not in existing:
-                ctrl, _ = SyncControl.objects.get_or_create(
-                    name=name, defaults={'is_active': True}
-                )
-                existing[name] = ctrl.is_active
-    except Exception:
-        existing = {name: False for name in loop_names}
-    loops = existing
-
-    today = timezone.now().date()
-    stats_qs = PaperTrade.objects.filter(trade_date=today).exclude(result='SKIPPED').aggregate(
-        total=Count('id'),
-        wins=Count('id', filter=Q(result='TARGET') | Q(result='MANUAL_EXIT', pnl__gt=0)),
-        losses=Count('id', filter=Q(result='SL') | Q(result='MANUAL_EXIT', pnl__lt=0)),
-        pnl=Sum('pnl')
-    )
-    # FIX: only() से सिर्फ ज़रूरी field fetch
-    latest_oc = OptionChain.objects.filter(Symbol='NIFTY', Time__date=today)        .only('Spot_Price').order_by('-Time').first()
-
-    settings, _ = BotSettings.objects.get_or_create(id=1)
-
-    return JsonResponse({
-        'loops': loops,
-        'stats': {
-            'total': stats_qs['total'] or 0,
-            'wins': stats_qs['wins'] or 0,
-            'losses': stats_qs['losses'] or 0,
-            'pnl': round(stats_qs['pnl'] or 0, 2),
-            'spot': latest_oc.Spot_Price if latest_oc else None,
-        },
-        'settings': {
-            'target': settings.default_target,
-            'sl': settings.default_sl,
-            'buffer': settings.reversal_buffer,
-            'user_name': getattr(settings, 'user_name', 'बॉस')
-        }
-    })
-
 @admin_only                          # ← Security fix: पहले यह था ही नहीं!
 def admin_status_api(request):
     """सभी loops का status + trade stats + Bot Settings"""
@@ -1223,13 +1160,15 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
 
         # ✅ FIX 1: eff_res_strike और eff_sup_strike सिर्फ master_levels से लो
         # (trade_logic.py का full 25+ condition वाला logic यहाँ पहले से run हो चुका है)
-        eff_res_strike = master_levels["R"]["strike"]
-        eff_sup_strike = master_levels["S"]["strike"]
+        # 🚀 THE FIX: यहाँ float() लगाना बहुत ज़रूरी है ताकि आगे TypeError न आए
+        eff_res_strike = float(master_levels["R"]["strike"] or 0)
+        eff_sup_strike = float(master_levels["S"]["strike"] or 0)
+        print(f"🔹 {symbol} | Master Levels: R={eff_res_strike}, S={eff_sup_strike}")
 
-        # ✅ FIX 2: Reversal entry value भी master_levels से लो
-        # (get_rev_val() → Redis last-10 average → सबसे accurate value)
-        current_res_val = master_levels["R"]["entry"] or 0
-        current_sup_val = master_levels["S"]["entry"] or 0
+        # ✅ इसे भी float में कर लें ताकि एकदम सुरक्षित रहे
+        current_res_val = float(master_levels["R"]["entry"] or 0)
+        current_sup_val = float(master_levels["S"]["entry"] or 0)
+        print(f"🔹 {symbol} | Master Levels: R_val={current_res_val}, S_val={current_sup_val}")
 
         # DB query range: effective strikes के आसपास की सभी strikes
         global_low  = min(eff_sup_strike, eff_res_strike) - step
@@ -2176,74 +2115,6 @@ def support_resistance_view(request):
 
 
 @login_required
-def live_trades_view1(request):
-    symbol = request.GET.get('symbol', 'NIFTY').upper()
-    selected_date_str = request.GET.get('date')
-
-    if selected_date_str:
-        selected_date = timezone.datetime.strptime(selected_date_str, '%Y-%m-%d').date()
-    else:
-        selected_date = timezone.now().date()
-
-    # ✅ Fix 1: date range — index-friendly (timezone.make_aware use karo)
-    day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
-    day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
-
-    # ✅ Trades query — symbol exact match (already .upper() hai)
-    trades = PaperTrade.objects.filter(
-        symbol=symbol, trade_date=selected_date
-    ).order_by('-entry_time')
-
-    total_trades = trades.count()
-    wins   = trades.filter(result='TARGET').count()
-    losses = trades.filter(result='SL').count()
-
-    # ✅ Fix 2: DB aggregate, Python loop nahi
-    net_pnl = trades.exclude(result='SKIPPED').aggregate(total=Sum('pnl'))['total'] or 0.0
-
-    current_spot = None
-    today = timezone.now().date()
-
-    # 1. अगर आज की तारीख है, तो पहले Cache से चेक करो (0 DB Query)
-    if selected_date == today:
-        # 'cache' आपका SmartCache ऑब्जेक्ट है जो views.py में सबसे ऊपर डिफाइन है
-        current_spot = cache.get(f'live_nifty_spot_{symbol}')
-        # print(f"Cache से Spot Price लिया: {current_spot}" if current_spot else "Cache में Spot Price नहीं मिला")
-
-    # 2. अगर कैश खाली है (Redis down) या तारीख पुरानी है, तब ही Database पर जाओ
-    if not current_spot:
-        print("DB से Spot Price निकाल रहे हैं क्योंकि Cache खाली है या तारीख पुरानी है...")
-        latest_oc = OptionChain.objects.filter(
-            Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-        ).only('Spot_Price', 'Time').order_by('-Time').first()
-        current_spot = latest_oc.Spot_Price if latest_oc else None
-
-    settings, _ = BotSettings.objects.get_or_create(id=1)
-    db_user_name = getattr(settings, 'user_name', 'बॉस')
-
-    context = {
-        'trades': trades,
-        'symbol': symbol,
-        'selected_date': selected_date.strftime('%Y-%m-%d'),
-        'total_trades': total_trades,
-        'wins': wins,
-        'losses': losses,
-        'net_pnl': round(net_pnl, 2),
-        'spot': current_spot,
-        # r/s levels JS polling (dashboard_data_api) se aate hain
-        'r_level': None,
-        's_level': None,
-        'abs_dist_r': None,
-        'abs_dist_s': None,
-        'dir_r': '',
-        'dir_s': '',
-        'is_r_closer': False,
-        'user_name': db_user_name,
-    }
-
-    return render(request, 'mystock/live_trades.html', context)
-
-@login_required
 def live_trades_view(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
     
@@ -2293,231 +2164,18 @@ def live_trades_view(request):
 
     return render(request, 'mystock/live_trades.html', context)
 
-@login_required
-def dashboard_data_api1(request):
-    symbol = request.GET.get('symbol', 'NIFTY').upper()
-    date_str = request.GET.get('date')
-
-    # 🚀 1. कैश की (Cache Key) बनाएँ
-    cache_key = f"dashboard_api_{symbol}_{date_str}"
-    
-    # 🚀 2. चेक करें कि क्या डेटा पहले से कैश में है?
-    cached_data = cache.get(cache_key)
-    if cached_data:
-        return JsonResponse(sanitize_json_data(cached_data)) # ✅ Infinity fix: cache hit पर भी sanitize
-    
-    if date_str:
-        selected_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').date()
-    else:
-        selected_date = timezone.now().date()
-
-    day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
-    day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
-
-    # 🚀 3. Latest Spot Price (Super Fast Approach)
-    current_spot = cache.get(f'live_nifty_spot_{symbol}')
-    latest_oc = None  # UnboundLocalError से बचने के लिए इसे None सेट किया गया है
-    
-    if not current_spot:
-        print(f"Cache में Spot Price नहीं मिला, DB से ले रहे हैं... ({symbol} {selected_date})")
-        latest_oc = OptionChain.objects.filter(
-            Symbol=symbol, Time__gte=day_start, Time__lte=day_end
-        ).only('Spot_Price', 'Time').order_by('-Time').first()
-        current_spot = latest_oc.Spot_Price if latest_oc else None
-
-    # 4. MASTER LEVELS
-    master_levels = get_master_levels(symbol, selected_date)
-    step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
-
-    # 5. Trades Query
-    trades_qs = PaperTrade.objects.filter(
-        symbol=symbol, trade_date=selected_date
-    ).order_by('-entry_time')
-
-    # total_pnl = 0.0
-    # trades_list = []
-
-    # for tr in trades_qs:
-    #     current_pnl = float(tr.pnl) if tr.pnl else 0.0
-
-    #     if tr.result == 'OPEN' and current_spot:
-    #         if tr.trade_type == 'PUT':
-    #             current_pnl = float(tr.entry_spot) - float(current_spot)
-    #         elif tr.trade_type == 'CALL':
-    #             current_pnl = float(current_spot) - float(tr.entry_spot)
-
-    #     total_pnl += current_pnl
-
-    #     trade_side = "R" if tr.trade_type == "PUT" else "S"
-    #     entry_strike = float(tr.entry_strike) if tr.entry_strike else None
-
-    total_pnl = 0.0
-    total_pnl_rupees = 0.0 
-    trades_list = []
-
-    # 🟢 1. InstrumentStore से डायनामिक लॉट साइज़ निकालें
-    try:
-        inst = InstrumentStore.objects.get(symbol=symbol)
-        dynamic_lot_size = inst.lot_size
-    except InstrumentStore.DoesNotExist:
-        dynamic_lot_size = 65  # अगर किसी वजह से DB में न मिले, तो डिफ़ॉल्ट 65 रखें
-
-    for tr in trades_qs:
-        current_pnl = float(tr.pnl) if tr.pnl else 0.0
-        
-        # 🟢 2. अगर ट्रेड में लॉट साइज़ सेव है तो वो लें, वरना InstrumentStore वाला असली लॉट साइज़ लें
-        trade_lot_size = tr.lot_size if getattr(tr, 'lot_size', None) else dynamic_lot_size
-
-        if tr.result == 'OPEN' and current_spot:
-            if tr.trade_type == 'PUT':
-                current_pnl = float(tr.entry_spot) - float(current_spot)
-            elif tr.trade_type == 'CALL':
-                current_pnl = float(current_spot) - float(tr.entry_spot)
-                
-        # 🟢 रुपयों में कैलकुलेशन
-        if tr.result == 'OPEN':
-            current_pnl_rupees = current_pnl * trade_lot_size
-        else:
-            current_pnl_rupees = float(tr.pnl_rupees) if getattr(tr, 'pnl_rupees', None) else (current_pnl * trade_lot_size)
-
-        total_pnl += current_pnl
-        total_pnl_rupees += current_pnl_rupees # 👈 टोटल रुपयों में जोड़ें
-
-        trade_side = "R" if tr.trade_type == "PUT" else "S"
-        entry_strike = float(tr.entry_strike) if tr.entry_strike else None
-
-        # ✅ SUPER OPTIMIZATION: क्लोज़्ड ट्रेड के लिए बार-बार लाइव डेटा नहीं निकालना है
-        trade_target = None
-        trade_sl = None
-
-        if tr.result == 'OPEN':
-            # 🟢 सिर्फ OPEN ट्रेड के लिए लाइव Cache/DB से डेटा निकालें
-            if entry_strike:
-                Buffer = 10
-                if tr.trade_type == 'PUT':
-                    trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'CE')
-                    trade_target = trade_target + Buffer if trade_target else None
-                    trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'CE')
-                    trade_sl = trade_sl - Buffer if trade_sl else None
-                else:
-                    trade_target = get_rev_val_for_dashboard(symbol, selected_date, entry_strike + step, 'PE')
-                    trade_target = trade_target - Buffer if trade_target else None
-                    trade_sl     = get_rev_val_for_dashboard(symbol, selected_date, entry_strike - step, 'PE')
-                    trade_sl = trade_sl + Buffer if trade_sl else None
-                
-                # Fallback: अगर लाइव वैल्यू न मिले
-                if trade_target is None:
-                    trade_target = master_levels[trade_side]["target"]
-                if trade_sl is None:
-                    trade_sl = master_levels[trade_side]["sl"]
-        else:
-            # 🔴 CLOSED ट्रेड के लिए: सीधे ट्रेड की एंट्री प्राइस से फिक्स (स्टैटिक) टारगेट/SL निकाल लें 
-            if tr.trade_type == 'PUT':
-                trade_target = float(tr.entry_spot) - step
-                trade_sl     = float(tr.entry_spot) + step
-            else:
-                trade_target = float(tr.entry_spot) + step
-                trade_sl     = float(tr.entry_spot) - step
-
-        # अगर फिर भी None हो तो safe default
-        # if trade_target is None:
-        #     trade_target = (float(tr.entry_spot) - step) if tr.trade_type == 'PUT' else (float(tr.entry_spot) + step)
-        # if trade_sl is None:
-        #     trade_sl = (float(tr.entry_spot) + step) if tr.trade_type == 'PUT' else (float(tr.entry_spot) - step)
-
-        # trades_list.append({
-        #     'type': tr.trade_type,
-        #     'entry_time': localtime(tr.entry_time).strftime('%H:%M:%S') if tr.entry_time else '—',
-        #     'trigger_level': tr.trigger_level,
-        #     'trigger_price': round(float(tr.trigger_price), 2) if tr.trigger_price else 0,
-        #     'entry_spot': round(float(tr.entry_spot), 2) if tr.entry_spot else 0,
-        #     'exit_time': localtime(tr.exit_time).strftime('%H:%M:%S') if tr.exit_time else '—',
-        #     'exit_spot': round(float(tr.exit_spot), 2) if tr.exit_spot else None,
-        #     'result': tr.result,
-        #     'pnl': round(current_pnl, 2),
-        #     'target': round(trade_target, 2),
-        #     'sl': round(trade_sl, 2),
-        #     'entry_strike': tr.entry_strike,
-        # })
-        if trade_target is None:
-            trade_target = (float(tr.entry_spot) - step) if tr.trade_type == 'PUT' else (float(tr.entry_spot) + step)
-        if trade_sl is None:
-            trade_sl = (float(tr.entry_spot) + step) if tr.trade_type == 'PUT' else (float(tr.entry_spot) - step)
-
-        trades_list.append({
-            'type': tr.trade_type,
-            'entry_time': localtime(tr.entry_time).strftime('%H:%M:%S') if tr.entry_time else '—',
-            'trigger_level': tr.trigger_level,
-            'trigger_price': round(float(tr.trigger_price), 2) if tr.trigger_price else 0,
-            'entry_spot': round(float(tr.entry_spot), 2) if tr.entry_spot else 0,
-            'exit_time': localtime(tr.exit_time).strftime('%H:%M:%S') if tr.exit_time else '—',
-            'exit_spot': round(float(tr.exit_spot), 2) if tr.exit_spot else None,
-            'result': tr.result,
-            'pnl': round(current_pnl, 2),
-            'pnl_rupees': round(current_pnl_rupees, 2), # 👈 JSON में रुपये भेजें
-            'target': round(trade_target, 2),
-            'sl': round(trade_sl, 2),
-            'entry_strike': tr.entry_strike,
-        })
-
-    # 6. Bot Status
-    try:
-        ctrl, _ = SyncControl.objects.get_or_create(name="bot_loop")
-        bot_active = ctrl.is_active
-    except Exception:
-        bot_active = False
-
-    # 🚀 7. रिस्पॉन्स डेटा को एक डिक्शनरी में सेव करें
-    # response_data = {
-    #     'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
-    #     'bot_active': bot_active,
-    #     'total_pnl': round(total_pnl, 2),
-    #     'triggers': {
-    #         'spot': current_spot,
-    #         'r_trigger': master_levels["R"]["entry"],
-    #         'r_strike': master_levels["R"]["strike"],
-    #         'r_status': master_levels["R"]["status"] or '—',
-    #         's_trigger': master_levels["S"]["entry"],
-    #         's_strike': master_levels["S"]["strike"],
-    #         's_status': master_levels["S"]["status"] or '—',
-    #         'data_time': latest_oc.Time.isoformat() if latest_oc else None,
-    #     },
-    #     'trades': trades_list,
-    # }
-    # 🚀 7. रिस्पॉन्स डेटा
-    response_data = {
-        'server_time': localtime(timezone.now()).strftime('%H:%M:%S'),
-        'bot_active': bot_active,
-        'total_pnl': round(total_pnl, 2),
-        'total_pnl_rupees': round(total_pnl_rupees, 2), # 👈 Total PnL (₹)
-        'triggers': {
-            # ... (आपका पुराना triggers का डेटा) ...
-            'spot': current_spot,
-            'r_trigger': master_levels["R"]["entry"],
-            'r_strike': master_levels["R"]["strike"],
-            'r_status': master_levels["R"]["status"] or '—',
-            's_trigger': master_levels["S"]["entry"],
-            's_strike': master_levels["S"]["strike"],
-            's_status': master_levels["S"]["status"] or '—',
-            'data_time': latest_oc.Time.isoformat() if latest_oc else None,
-        },
-        'trades': trades_list,
-    }
-    # 🚀 8. डेटा को 4 सेकंड के लिए कैश में सेव कर दें
-    cache.set(cache_key, response_data, 4) 
-    
-    return JsonResponse(response_data)
 
 from asgiref.sync import sync_to_async
 from django.http import JsonResponse
 
-# @login_required
-# async def dashboard_data_api(request):
-#     return await sync_to_async(_dashboard_data_api_sync)(request)
-
 @login_required
-def dashboard_data_api(request):
-    return _dashboard_data_api_sync(request)
+async def dashboard_data_api(request):
+    """
+    Async wrapper — ASGI (Daphne) server में sync DB calls को
+    thread pool में चलाता है ताकि event loop block न हो।
+    """
+    return await sync_to_async(_dashboard_data_api_sync, thread_sensitive=True)(request)
+
 
 def _dashboard_data_api_sync(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
@@ -2692,67 +2350,6 @@ def _dashboard_data_api_sync(request):
     
     return JsonResponse(response_data)
 
-
-def get_rev_val_for_dashboard1(symbol, selected_date, strike, side):
-    """
-    Dashboard के लिए किसी specific strike की reversal value निकालना।
-    (Optimized Version - No Extra Imports Needed)
-    """
-    symbol_upper = symbol.upper() 
-    cache_key = f"rev_val_{symbol_upper}_{selected_date}_{strike}_{side}"
-    
-    # यह आपका SmartCache इस्तेमाल कर रहा है
-    cached_val = cache.get(cache_key)
-    if cached_val is not None:
-        return cached_val
-
-    result = None
-    try:
-        today = timezone.now().date()
-
-        if selected_date == today:
-            history_key = f"moving_history_all_{symbol_upper}"
-            
-            # 🚀 बदलाव: django_cache की जगह सीधे caches['default'] का इस्तेमाल करें
-            history_data = caches['default'].get(history_key)
-            
-            if history_data:
-                strike_float = float(strike)
-                if strike_float in history_data:
-                    hist_key = 'ce_hist' if side == 'CE' else 'pe_hist'
-                    full_hist = history_data[strike_float].get(hist_key, [])
-                    
-                    for tick in reversed(full_hist):
-                        val = float(tick.get('value', 0))
-                        if val > 0:
-                            result = round(val, 2)
-                            break
-
-        if result is None:
-            print(f"🔴 DB HIT for {symbol_upper} {strike} {side}")
-
-            col_name = 'Reversl_Ce' if side == 'CE' else 'Reversl_Pe'
-            
-            val = (
-                OptionChain.objects
-                .filter(Symbol=symbol_upper, Time__date=selected_date, Strike_Price=strike)
-                .order_by('-Time')
-                .values_list(col_name, flat=True)
-                .first() 
-            )
-           
-
-            if val and float(val) > 0:
-                result = round(float(val), 2)
-
-    except Exception:
-        pass
-
-    if result is not None:
-        # यह आपका SmartCache इस्तेमाल कर रहा है
-        cache.set(cache_key, result, 60) 
-        
-    return result
 
 def get_rev_val_for_dashboard(symbol, selected_date, strike, side):
     """

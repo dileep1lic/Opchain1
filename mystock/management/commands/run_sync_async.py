@@ -174,6 +174,8 @@ class Command(BaseCommand):
         """NIFTY Loop - Optimized Cleanup before Trading Hours"""
         # 
         last_db_save_time = 0
+        # 🟢 नया: पिछले प्रोसेस किए गए स्पॉट प्राइस को याद रखने के लिए वेरिएबल
+        last_processed_spot_price = None
 
         while True:
             await sync_to_async(close_old_connections)()
@@ -199,6 +201,8 @@ class Command(BaseCommand):
                 # print (df.head(1))  # पहला रिकॉर्ड दिखाएं ताकि पता चले कि डेटा सही से आ रहा है
 
                 if df is not None and not df.empty:
+                    
+                    
                     # 🟢 पूरे डेटा का Totals कैलकुलेट करें
                     nifty_totals = {
                         'total_ce_oi': float(df['CE_OI'].sum() or 0),
@@ -229,6 +233,21 @@ class Command(BaseCommand):
                     live_data_dict = filtered_df.to_dict('records')
                     await set_cache_async(f'live_nifty_data_{fixes_sym}', live_data_dict, 43200)
                     await set_cache_async(f'live_nifty_spot_{fixes_sym}', spot_price, 43200)
+
+                    # 🚀 === NEW: SPOT PRICE से डुप्लीकेट रोकने का लॉजिक === 🚀
+                    # API से आए नए डेटा का स्पॉट प्राइस निकालें (float में)
+                    current_spot_price = float(df['Spot_Price'].iloc[0])
+                    
+                    # अगर यह स्पॉट प्राइस हमारे पिछले सेव किए गए प्राइस से बिल्कुल मैच करता है, तो इग्नोर करें
+                    if last_processed_spot_price and current_spot_price == last_processed_spot_price:
+                        print(f"⏭️ [{fixes_sym}] स्पॉट प्राइस ({current_spot_price}) नहीं बदला है। डेटा इग्नोर कर रहे हैं।")
+                        await asyncio.sleep(5) # 5 सेकंड रुककर फिर से API को कॉल करेंगे
+                        continue # नीचे का कोई भी सेविंग कोड नहीं चलेगा, लूप वापस ऊपर चला जाएगा
+                    
+                    # अगर प्राइस बदल गया है (नया टिक है), तो इस नए प्राइस को याद रखने के लिए सेव कर लें
+                    last_processed_spot_price = current_spot_price
+                    # 🚀 ======================================================== 🚀
+                    
 
                     # 🚀 === NEW: WebSockets के ज़रिए फ्रंटएंड को तुरंत सिग्नल भेजें === 🚀
                     channel_layer = get_channel_layer()
@@ -314,8 +333,8 @@ class Command(BaseCommand):
                     try:
                         # ✅ FIX Bug 4: master_levels एक बार निकालो
                         master_levels = await sync_to_async(get_master_levels)(fixes_sym)
-                        eff_res = master_levels["R"]["strike"]
-                        eff_sup = master_levels["S"]["strike"]
+                        eff_res = float(master_levels["R"]["strike"] or 0)
+                        eff_sup = float(master_levels["S"]["strike"] or 0)
                         t_str   = datetime.now().isoformat()
 
                         history_key  = f"moving_history_all_{fixes_sym.upper()}"

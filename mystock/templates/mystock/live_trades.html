@@ -635,7 +635,7 @@ function checkApproachingTrades(spot, r_trigger, s_trigger) {
     let diffR = r_trigger - spot; 
     
     // अगर अंतर 10 पॉइंट या उससे कम है और 0 से ऊपर है
-    if (diffR > 0 && diffR <= 10) {
+    if (diffR > 0 && diffR <= 15) {
       let pts = Math.round(diffR); 
       if (lastAnnouncedR !== pts) { 
         // 🗣️ नाम के साथ अलर्ट
@@ -647,7 +647,7 @@ function checkApproachingTrades(spot, r_trigger, s_trigger) {
       speakAlert(`${myName}, पुट ट्रेड का लेवल आ गया है! तैयार रहिए।`);
       lastAnnouncedR = 0;
       announced = true;
-    } else if (diffR > 10) {
+    } else if (diffR > 15) {
       lastAnnouncedR = null; 
     }
   }
@@ -656,7 +656,7 @@ function checkApproachingTrades(spot, r_trigger, s_trigger) {
   if (!announced && s_trigger && isFinite(s_trigger)) {
     let diffS = spot - s_trigger; 
     
-    if (diffS > 0 && diffS <= 10) {
+    if (diffS > 0 && diffS <= 15) {
       let pts = Math.round(diffS);
       if (lastAnnouncedS !== pts) {
         // 🗣️ नाम के साथ अलर्ट
@@ -668,7 +668,7 @@ function checkApproachingTrades(spot, r_trigger, s_trigger) {
       speakAlert(`${myName}, कॉल ट्रेड का लेवल आ गया है! तैयार रहिए।`);
       lastAnnouncedS = 0;
       announced = true;
-    } else if (diffS > 10) {
+    } else if (diffS > 15) {
       lastAnnouncedS = null;
     }
   }
@@ -678,28 +678,90 @@ function checkApproachingTrades(spot, r_trigger, s_trigger) {
   }
 }
 
-// ── Smart Polling: AbortController + Visibility API ─────────────────
+
+// ── WebSocket & Smart Polling (Push Architecture) ─────────────────
 let _liveAbort = null;
 let _liveTimer = null;
+let socket = null;
+let isSocketConnected = false;
+let _lastRefreshTime = 0; // ⏳ Throttling के लिए टाइमर
 
+// बैकअप पोलिंग
 function startLivePolling() {
-    if (_liveTimer) clearInterval(_liveTimer);
-    _liveTimer = setInterval(refresh, 2000);
+    if (!isSocketConnected) {
+        stopLivePolling();
+        _liveTimer = setInterval(() => refresh(false), 5000);
+    }
 }
+
 function stopLivePolling() {
     if (_liveTimer)  { clearInterval(_liveTimer); _liveTimer = null; }
     if (_liveAbort)  { _liveAbort.abort(); _liveAbort = null; }
     _liveInFlight = false;
 }
 
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { stopLivePolling(); }
-    else { refresh(); startLivePolling(); }
-});
-window.addEventListener('beforeunload', stopLivePolling);
+// WebSocket सेटअप
+function connectWebSocketForLiveTrades() {
+    const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const wsUrl = protocol + window.location.host + '/ws/options/';
+    socket = new WebSocket(wsUrl);
 
-refresh();
-startLivePolling();
+    socket.onopen = function(e) {
+        console.log('✅ WebSocket Connected for Live Trades!');
+        isSocketConnected = true;
+        stopLivePolling(); 
+    };
+
+    socket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.message === "UPDATE_NOW" && data.symbol === sym) {
+            let now = Date.now();
+            // ⏳ चेक करें कि क्या पिछले कॉल को 2 सेकंड (2000ms) बीत चुके हैं?
+            if (now - _lastRefreshTime > 2000) {
+                _lastRefreshTime = now;
+                refresh(false);
+            } else {
+                console.log("⚡ Extra socket message skipped (Throttled).");
+            }
+        }
+    };
+
+    socket.onclose = function(e) {
+        console.warn('⚠️ WebSocket Disconnected. Reconnecting in 5s...');
+        isSocketConnected = false;
+        startLivePolling();
+        setTimeout(connectWebSocketForLiveTrades, 5000);
+    };
+
+    socket.onerror = function(err) {
+        console.error('❌ WebSocket Error:', err);
+        socket.close();
+    };
+}
+
+// टैब छुपने पर
+//document.addEventListener('visibilitychange', () => {
+    //if (document.hidden) { 
+        //stopLivePolling(); 
+    //} else { 
+        //let now = Date.now();
+        //if (now - _lastRefreshTime > 2000) {
+            //_lastRefreshTime = now;
+            //refresh(false); 
+        //}
+        //if (!isSocketConnected) startLivePolling(); 
+   // }
+//});
+
+window.addEventListener('beforeunload', () => {
+    stopLivePolling();
+    if (socket) socket.close();
+});
+
+// पेज लोड होते ही शुरू करें
+connectWebSocketForLiveTrades();
+refresh(false);
+
 </script>
 </body>
 </html>

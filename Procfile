@@ -1,2 +1,2 @@
-web: gunicorn myproject.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120 --preload --log-file -
+web: daphne -b 0.0.0.0 -p $PORT --access-log - --proxy-headers myproject.asgi:application
 worker: python manage.py run_sync_async
