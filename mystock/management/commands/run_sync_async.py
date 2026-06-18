@@ -240,7 +240,7 @@ class Command(BaseCommand):
                     
                     # अगर यह स्पॉट प्राइस हमारे पिछले सेव किए गए प्राइस से बिल्कुल मैच करता है, तो इग्नोर करें
                     if last_processed_spot_price and current_spot_price == last_processed_spot_price:
-                        print(f"⏭️ [{fixes_sym}] स्पॉट प्राइस ({current_spot_price}) नहीं बदला है। डेटा इग्नोर कर रहे हैं।")
+                        # print(f"⏭️ [{fixes_sym}] स्पॉट प्राइस ({current_spot_price}) नहीं बदला है। डेटा इग्नोर कर रहे हैं।")
                         await asyncio.sleep(5) # 5 सेकंड रुककर फिर से API को कॉल करेंगे
                         continue # नीचे का कोई भी सेविंग कोड नहीं चलेगा, लूप वापस ऊपर चला जाएगा
                     
