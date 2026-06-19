@@ -89,7 +89,7 @@ class Command(BaseCommand):
     # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
     FIXED_SYMOL = "NIFTY" 
     # Trading hours: 9:15 AM to 3:30 PM
-    is_trading_hours = lambda self: dt_time(9, 15, 5) <= datetime.now().time() <= dt_time(15, 30)
+    is_trading_hours = lambda self: dt_time(9, 15, 5) <= datetime.now().time() <= dt_time(15, 30, 5)
     # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
     is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(20, 30)
 
@@ -348,12 +348,12 @@ class Command(BaseCommand):
                             ce_val = row.get('Reversl_Ce')
                             if ce_val is not None and float(ce_val) > 0:
                                 history_data[s]['ce_hist'].append({"time": t_str, "value": float(ce_val)})
-                                history_data[s]['ce_hist'] = history_data[s]['ce_hist'][-500:]
+                                history_data[s]['ce_hist'] = history_data[s]['ce_hist'][-5:]
 
                             pe_val = row.get('Reversl_Pe')
                             if pe_val is not None and float(pe_val) > 0:
                                 history_data[s]['pe_hist'].append({"time": t_str, "value": float(pe_val)})
-                                history_data[s]['pe_hist'] = history_data[s]['pe_hist'][-500:]
+                                history_data[s]['pe_hist'] = history_data[s]['pe_hist'][-5:]
 
                         # ✅ FIX Bug 3: Strike price नहीं — Reversal VALUE save करो
                         if "master_res" not in history_data: history_data["master_res"] = []

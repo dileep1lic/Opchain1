@@ -89,7 +89,7 @@ urlpatterns = [
 
 
     # ── Voice Command Player ──────────────────────────────
-    path('calling', seed_voice.index, name='calling'),
+    path('monika', seed_voice.index, name='calling'),
     path('api/voice-chat/', seed_voice.voice_chat_api, name='voice_chat_api'),
     path('api/voice-chat/stream/', seed_voice.voice_chat_stream, name='voice_chat_stream'),  # 🚀 SSE Streaming
 

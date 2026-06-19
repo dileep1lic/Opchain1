@@ -19,7 +19,7 @@
 <table>
     <thead>
         <tr>
-            <th id="ce-header" colspan="{% if is_search_dashboard %}7{% else %}8{% endif %}" style="background:#003d14;">
+            <th id="ce-header" colspan="{% if is_search_dashboard %}7{% else %}7{% endif %}" style="background:#003d14;">
                 <span class="label sr-label-res">Resistance (CE) ↗</span><br>
             <span id="header-res" class="value" style="color: var(--accent-green); font-size: 14px;">
                 {{ sr_data.resistance_strike|floatformat:0|default:"-" }} 
@@ -27,7 +27,7 @@
             </span>
             </th>
             <th class="col-strike" style="background:#000033;">STRIKE</th>
-            <th id="pe-header" colspan="{% if is_search_dashboard %}7{% else %}8{% endif %}" style="background:#5c0101;">
+            <th id="pe-header" colspan="{% if is_search_dashboard %}7{% else %}7{% endif %}" style="background:#5c0101;">
                 <span class="label sr-label-sup">Support (PE) ↗</span><br>
             <span id="header-sup" class="value" style="color: var(--accent-red); font-size: 14px;">
                 {{ sr_data.supprt_strike|floatformat:0|default:"-" }} 
@@ -40,7 +40,6 @@
             <th class="col-range">Range</th>
             <th class="col-chg-oi">CHG OI</th>
             <th class="col-oi">OI</th>
-            {% if not is_search_dashboard %}<th class="col-vol-chg">VOL CHG</th>{% endif %}
             <th class="col-vol">VOL</th>
             <th class="col-ltp">LTP</th>
             <th class="col-reversl">REVERSL</th>
@@ -50,7 +49,6 @@
             <th class="col-reversl">REVERSL</th>
             <th class="col-ltp">LTP</th>
             <th class="col-vol">VOL</th>
-            {% if not is_search_dashboard %}<th class="col-vol-chg">VOL CHG</th>{% endif %}
             <th class="col-oi">OI</th>
             <th class="col-chg-oi">CHG OI</th>
             <th class="col-range">Range</th>
@@ -81,12 +79,7 @@
                 <span class="pct-text">({{ row.CE_OI_percent|floatformat:1 }} %)</span>
             </td>
 
-            {% if not is_search_dashboard %}
-            <td class="col-vol-chg {{ row.ce_vol_1h_chg_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
-                {{ row.ce_vol_1h_chg|default:0|floatformat:0 }}
-                <span class="pct-text">({{ row.ce_vol_1h_chg_pct|default:0|floatformat:1 }} %)</span>
-            </td>
-            {% endif %}
+
 
             <td class="col-vol {{ row.CE_Volume_class }} {% if row.Strike_Price < spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 {{ row.CE_Volume|floatformat:0 }}
@@ -137,12 +130,7 @@
                 <span class="pct-text">({{ row.PE_Volume_percent|floatformat:1 }} %)</span>
             </td>
 
-            {% if not is_search_dashboard %}
-            <td class="col-vol-chg {{ row.pe_vol_1h_chg_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
-                {{ row.pe_vol_1h_chg|default:0|floatformat:0 }}
-                <span class="pct-text">({{ row.pe_vol_1h_chg_pct|default:0|floatformat:1 }} %)</span>
-            </td>
-            {% endif %}
+
         
             <td class="col-oi {{ row.PE_OI_class }} {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">
                 <a href="javascript:void(0)" onclick="openChart('{{ row.Symbol }}', '{{ row.Strike_Price }}', 'oi')" style="color: inherit; text-decoration: underline; text-decoration-style: dotted;">
@@ -178,7 +166,6 @@
             </td>
             <td class="col-oi footer-cell">{{ total_ce_oi|default:0|floatformat:0 }}</td>
             
-            {% if not is_search_dashboard %}<td class="col-vol-chg footer-cell"></td>{% endif %}
             <td class="col-vol footer-cell"></td>
             <td class="col-ltp footer-cell"></td>
             <td class="col-reversl footer-cell"></td>
@@ -188,7 +175,6 @@
             <td class="col-reversl footer-cell"></td>
             <td class="col-ltp footer-cell"></td>
             <td class="col-vol footer-cell"></td>
-            {% if not is_search_dashboard %}<td class="col-vol-chg footer-cell"></td>{% endif %}
             
             <td class="col-oi footer-cell">{{ total_pe_oi|default:0|floatformat:0 }}</td>
             <td class="col-chg-oi footer-cell {% if total_pe_coi < 0 %}total-neg{% else %}total-pos{% endif %}">

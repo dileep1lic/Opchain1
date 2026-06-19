@@ -12,6 +12,7 @@ import re
 from .views import get_master_levels, cache 
 # from .my_deta import system_instruction
 from .monika_call import system_instruction
+from .models import PaperTrade
 
 # ── Helper: Live Market Context (अपडेटेड फ़ंक्शन) ────────
 def get_live_market_context():
@@ -60,16 +61,111 @@ def get_live_market_context():
     return "[सिस्टम जानकारी: लाइव मार्केट का डेटा अभी उपलब्ध नहीं है।]"
 
 
-# ── Helper: Groq messages list बनाना ────────────────────
+# ── Helper: आज की Trades का Context ────────────────────────
+def get_today_trades_context():
+    """आज की सभी trades का सारांश — Monica को बताने के लिए"""
+    try:
+        today = timezone.now().date()
+        trades = PaperTrade.objects.filter(trade_date=today).order_by('entry_time')
+
+        if not trades.exists():
+            return "[ट्रेड जानकारी: आज अभी तक कोई पेपर ट्रेड नहीं हुई है।]"
+
+        def safe_num(v, decimals=0):
+            try:
+                return str(round(float(v), decimals)) if v is not None else "—"
+            except:
+                return "—"
+
+        total_pnl_pts  = 0.0
+        total_pnl_rs   = 0.0
+        trade_lines    = []
+        profit_trades  = []
+        loss_trades    = []
+        open_trades    = []
+        skipped_trades = []
+
+        for i, tr in enumerate(trades, 1):
+            pnl_pts = float(tr.pnl) if tr.pnl is not None else 0.0
+            pnl_rs  = float(tr.pnl_rupees) if tr.pnl_rupees is not None else 0.0
+            result  = tr.result or 'OPEN'
+
+            # emoji + label
+            if result == 'TARGET':
+                emoji, label = '✅', 'प्रॉफिट'
+                profit_trades.append(i)
+            elif result == 'SL':
+                emoji, label = '❌', 'लॉस'
+                loss_trades.append(i)
+            elif result == 'OPEN':
+                emoji, label = '🔄', 'OPEN'
+                open_trades.append(i)
+                pnl_pts = 0.0; pnl_rs = 0.0
+            elif result == 'SKIPPED':
+                emoji, label = '⏭', 'SKIP'
+                skipped_trades.append(i)
+                pnl_pts = 0.0; pnl_rs = 0.0
+            else:
+                emoji, label = '📌', result
+
+            entry_t = tr.entry_time.strftime('%H:%M') if tr.entry_time else '—'
+            pnl_sign = '+' if pnl_pts >= 0 else ''
+
+            line = (
+                f"ट्रेड {i}: {tr.symbol} | {tr.trade_type} | {tr.trigger_level}-लेवल | "
+                f"एंट्री {safe_num(tr.entry_spot)} @ {entry_t} | "
+                f"रिज़ल्ट: {emoji}{label} | "
+                f"PnL: {pnl_sign}{safe_num(pnl_pts)} pts ({pnl_sign}₹{safe_num(abs(pnl_rs))})"
+            )
+            trade_lines.append(line)
+
+            if result not in ('OPEN', 'SKIPPED'):
+                total_pnl_pts += pnl_pts
+                total_pnl_rs  += pnl_rs
+
+        # Summary
+        total_sign = '+' if total_pnl_pts >= 0 else ''
+        summary_parts = []
+        if profit_trades:
+            summary_parts.append(f"प्रॉफिट ट्रेड्स: {profit_trades}")
+        if loss_trades:
+            summary_parts.append(f"लॉस ट्रेड्स: {loss_trades}")
+        if open_trades:
+            summary_parts.append(f"OPEN ट्रेड्स: {open_trades}")
+        if skipped_trades:
+            summary_parts.append(f"SKIP ट्रेड्स: {skipped_trades}")
+
+        trades_text = '\n'.join(trade_lines)
+        summary = ', '.join(summary_parts)
+
+        return (
+            f"[आज की ट्रेड रिपोर्ट ({today}):\n"
+            f"{trades_text}\n"
+            f"कुल PnL: {total_sign}{round(total_pnl_pts,1)} pts ({total_sign}₹{round(abs(total_pnl_rs),0)})\n"
+            f"{summary}\n"
+            f"नोट: यह डेटा केवल पेपर ट्रेड का है। इसे अपनी ट्रेड रिपोर्ट के लिए use करो।]"
+        )
+    except Exception as e:
+        print(f"Trade Context Error: {e}")
+        return "[ट्रेड जानकारी: आज की ट्रेड डेटा अभी उपलब्ध नहीं है।]"
+
 def build_messages(user_message, history=None):
     """Monica के लिए messages list तैयार करना (streaming और non-streaming दोनों में काम आता है)"""
     messages = [{"role": "system", "content": system_instruction}]
+
+    # 1. लाइव मार्केट लेवल्स
     market_context = get_live_market_context()
     messages.append({"role": "system", "content": market_context})
+
+    # 2. आज की ट्रेड रिपोर्ट — Monica को हमेशा पता रहे
+    trade_context = get_today_trades_context()
+    messages.append({"role": "system", "content": trade_context})
+
     if history:
         messages += history[-10:]
     messages.append({"role": "user", "content": user_message})
     return messages
+
 
 
 # ── Helper: Groq से Monica का जवाब (Non-Streaming) ────────────────────
