@@ -15,7 +15,12 @@ urlpatterns = [
     path('api/db-cleanup/',       views.db_cleanup_api,            name='db_cleanup_api'),
     path('api/db-cleanup-preview/', views.db_cleanup_preview_api,  name='db_cleanup_preview_api'),
     
+    # ── Git Release ──────────────────────────────────────────────
+    path('api/git-release/', views.git_release_api, name='git_release_api'),
+    path('api/git-current-version/', views.git_current_version_api, name='git_current_version_api'),
+    
     path('admin-panel/users/', views.user_approval_list, name='user_approval_list'),
+
     path('admin-panel/users/toggle/<int:user_id>/', views.toggle_user_status, name='toggle_user_status'),
 
     # यह लाइन जोड़ें ताकि Django हमारे कस्टम लॉगिन व्यू को कॉल करे
