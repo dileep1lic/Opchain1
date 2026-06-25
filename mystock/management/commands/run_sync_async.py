@@ -91,7 +91,7 @@ class Command(BaseCommand):
     # Trading hours: 9:15 AM to 3:30 PM
     is_trading_hours = lambda self: dt_time(9, 15, 5) <= datetime.now().time() <= dt_time(15, 30, 5)
     # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
-    is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(20, 30)
+    is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(15, 30)
 
     def handle(self, *args, **options):
         logger.info('🚀 Starting High-Speed Async Engine...') 
@@ -174,8 +174,9 @@ class Command(BaseCommand):
         """NIFTY Loop - Optimized Cleanup before Trading Hours"""
         # 
         last_db_save_time = 0
-        # 🟢 नया: पिछले प्रोसेस किए गए स्पॉट प्राइस को याद रखने के लिए वेरिएबल
-        last_processed_spot_price = None
+        # 🟢 NEW: मार्केट की हलचल ट्रैक करने के लिए वेरिएबल्स
+        last_seen_spot_price = None
+        has_new_data_to_save = True
 
         while True:
             await sync_to_async(close_old_connections)()
@@ -198,11 +199,9 @@ class Command(BaseCommand):
 
             try:
                 df = await calculate_data_async_optimized(session, fixes_sym, expiry)
-                # print (df.head(1))  # पहला रिकॉर्ड दिखाएं ताकि पता चले कि डेटा सही से आ रहा है
 
                 if df is not None and not df.empty:
-                    
-                    
+
                     # 🟢 पूरे डेटा का Totals कैलकुलेट करें
                     nifty_totals = {
                         'total_ce_oi': float(df['CE_OI'].sum() or 0),
@@ -217,7 +216,7 @@ class Command(BaseCommand):
                     df = df.sort_values(by='Strike_Price').reset_index(drop=True)
 
                     # 2. Spot Price लें
-                    spot_price = df['Spot_Price'].iloc[0]
+                    spot_price = float(df['Spot_Price'].iloc[0])
 
                     # 3. ATM Strike का Index पता करें
                     atm_index = (df['Strike_Price'] - spot_price).abs().idxmin()
@@ -232,21 +231,7 @@ class Command(BaseCommand):
                     # 🟢 DataFrame को Dictionary में बदलकर Cache में डालें
                     live_data_dict = filtered_df.to_dict('records')
                     await set_cache_async(f'live_nifty_data_{fixes_sym}', live_data_dict, 43200)
-                    await set_cache_async(f'live_nifty_spot_{fixes_sym}', spot_price, 43200)
-
-                    # 🚀 === NEW: SPOT PRICE से डुप्लीकेट रोकने का लॉजिक === 🚀
-                    # API से आए नए डेटा का स्पॉट प्राइस निकालें (float में)
-                    current_spot_price = float(df['Spot_Price'].iloc[0])
-                    
-                    # अगर यह स्पॉट प्राइस हमारे पिछले सेव किए गए प्राइस से बिल्कुल मैच करता है, तो इग्नोर करें
-                    if last_processed_spot_price and current_spot_price == last_processed_spot_price:
-                        # print(f"⏭️ [{fixes_sym}] स्पॉट प्राइस ({current_spot_price}) नहीं बदला है। डेटा इग्नोर कर रहे हैं।")
-                        await asyncio.sleep(5) # 5 सेकंड रुककर फिर से API को कॉल करेंगे
-                        continue # नीचे का कोई भी सेविंग कोड नहीं चलेगा, लूप वापस ऊपर चला जाएगा
-                    
-                    # अगर प्राइस बदल गया है (नया टिक है), तो इस नए प्राइस को याद रखने के लिए सेव कर लें
-                    last_processed_spot_price = current_spot_price
-                    # 🚀 ======================================================== 🚀
+                    await set_cache_async(f'live_nifty_spot_{fixes_sym}', spot_price, 43200)                  
                     
 
                     # 🚀 === NEW: WebSockets के ज़रिए फ्रंटएंड को तुरंत सिग्नल भेजें === 🚀
@@ -256,7 +241,7 @@ class Command(BaseCommand):
                         {
                             "type": "send_data_update",
                             "symbol": fixes_sym,
-                            "spot_price": float(spot_price),               
+                            "spot_price": spot_price,               
                             "data_time": datetime.now().isoformat(),
                             "message": "UPDATE_NOW"
                         }
@@ -266,58 +251,73 @@ class Command(BaseCommand):
                     current_time = t_time.time()
 
                     if self.is_trading_hours():
-                        # 👈 2. यहाँ चेक करें कि क्या पिछले DB सेव से 5 सेकंड बीत चुके हैं?
+                        current_spot_price = spot_price
+                        current_time = t_time.time()
+
+                        # 🚀 1. हर टिक पर चेक करें कि क्या प्राइस पिछले सेकंड से बदला है?
+                        if last_seen_spot_price != current_spot_price:
+                            has_new_data_to_save = True  # हलचल हुई है, इसे सेव करना ज़रूरी है!
+                            last_seen_spot_price = current_spot_price
+
+                        # 👈 2. 10 सेकंड का टाइमर चेक करें
                         if current_time - last_db_save_time >= 10:
-                            entries = [OptionChain(
-                                Time=row.get('Time'),
-                                Symbol=row.get('Symbol'),
-                                Lot_size=row.get('Lot_size'),
-                                Expiry_Date=row.get('expiry'),
-                                Strike_Price=row.get('Strike_Price'),
-                                Spot_Price=row.get('Spot_Price'),
-                                # CE Data
-                                CE_Delta=row.get('CE_Delta'),
-                                CE_RANGE=row.get('CE_RANGE'),
-                                CE_IV=row.get('CE_IV'),
-                                CE_COI_percent=row.get('CE_COI_percent'),
-                                CE_COI=row.get('CE_COI'),
-                                CE_OI_percent=row.get('CE_OI_percent'),
-                                CE_OI=row.get('CE_OI'),
-                                CE_Volume_percent=row.get('CE_Volume_percent'),
-                                CE_Volume=row.get('CE_Volume'),
-                                CE_CLTP=row.get('CE_CLTP'),
-                                CE_LTP=row.get('CE_LTP'),
-                                Reversl_Ce=row.get('Reversl_Ce'),
-
-                                # PE Data
-                                Reversl_Pe=row.get('Reversl_Pe'),
-                                PE_LTP=row.get('PE_LTP'),
-                                PE_CLTP=row.get('PE_CLTP'),
-                                PE_Volume=row.get('PE_Volume'),
-                                PE_Volume_percent=row.get('PE_Volume_percent'),
-                                PE_OI=row.get('PE_OI'),
-                                PE_OI_percent=row.get('PE_OI_percent'),
-                                PE_COI=row.get('PE_COI'),
-                                PE_COI_percent=row.get('PE_COI_percent'),
-                                PE_IV=row.get('PE_IV'),
-                                PE_RANGE=row.get('PE_RANGE'),
-                                PE_Delta=row.get('PE_Delta'),
-                            ) for _, row in filtered_df.iterrows()]
-
-                            # 🚀 सुरक्षा कवच (Try-Except Block)
-                            try:
-                                await bulk_create_async(entries)
-                            except Exception as db_error:
-                                # अगर DB फुल हो गया या कोई एरर आया, तो बस लॉग में लिखो और आगे बढ़ जाओ
-                                logger.error(f"⚠️ DB Save Error (Ignored): {db_error}")
-                                print(f"⚠️ DB Save Error (Ignored): {db_error}")
+                            
+                            # 🚀 3. अगर इन 10 सेकंड में प्राइस बिल्कुल नहीं बदला है, तो इग्नोर करें
+                            if not has_new_data_to_save:
+                                # print(f"⏭️ [{fixes_sym}] पिछले 10s से मार्केट ({current_spot_price}) पर अटका है। डेटा इग्नोर कर रहे हैं।")
                                 pass
+                            else:
+                           
+                                entries = [OptionChain(
+                                    Time=row.get('Time'),
+                                    Symbol=row.get('Symbol'),
+                                    Lot_size=row.get('Lot_size'),
+                                    Expiry_Date=row.get('expiry'),
+                                    Strike_Price=row.get('Strike_Price'),
+                                    Spot_Price=row.get('Spot_Price'),
+                                    # CE Data
+                                    CE_Delta=row.get('CE_Delta'),
+                                    CE_RANGE=row.get('CE_RANGE'),
+                                    CE_IV=row.get('CE_IV'),
+                                    CE_COI_percent=row.get('CE_COI_percent'),
+                                    CE_COI=row.get('CE_COI'),
+                                    CE_OI_percent=row.get('CE_OI_percent'),
+                                    CE_OI=row.get('CE_OI'),
+                                    CE_Volume_percent=row.get('CE_Volume_percent'),
+                                    CE_Volume=row.get('CE_Volume'),
+                                    CE_CLTP=row.get('CE_CLTP'),
+                                    CE_LTP=row.get('CE_LTP'),
+                                    Reversl_Ce=row.get('Reversl_Ce'),
+
+                                    # PE Data
+                                    Reversl_Pe=row.get('Reversl_Pe'),
+                                    PE_LTP=row.get('PE_LTP'),
+                                    PE_CLTP=row.get('PE_CLTP'),
+                                    PE_Volume=row.get('PE_Volume'),
+                                    PE_Volume_percent=row.get('PE_Volume_percent'),
+                                    PE_OI=row.get('PE_OI'),
+                                    PE_OI_percent=row.get('PE_OI_percent'),
+                                    PE_COI=row.get('PE_COI'),
+                                    PE_COI_percent=row.get('PE_COI_percent'),
+                                    PE_IV=row.get('PE_IV'),
+                                    PE_RANGE=row.get('PE_RANGE'),
+                                    PE_Delta=row.get('PE_Delta'),
+                                ) for _, row in filtered_df.iterrows()]
+
+                                # 🚀 सुरक्षा कवच (Try-Except Block)
+                                try:
+                                    await bulk_create_async(entries)
+                                    
+                                    # ✅ FIX: सेव सक्सेसफुल होने पर फ्लैग को वापस False करना ज़रूरी है!
+                                    has_new_data_to_save = False 
+                                    
+                                except Exception as db_error:
+                                    # अगर DB फुल हो गया या कोई एरर आया, तो बस लॉग में लिखो और आगे बढ़ जाओ
+                                    logger.error(f"⚠️ DB Save Error (Ignored): {db_error}")
+                                    print(f"⚠️ DB Save Error (Ignored): {db_error}")
+                                    pass
                             
-                            # await bulk_create_async(entries)
-                            # # print(f"⚡ [NIFTY] Processed expiry {expiry} - {len(entries)} entries.")
-                            # # 🆕 NEW: सिर्फ NIFTY के लिए हमारी नई टेबल में डेटा सेव करें
-                            
-                            last_db_save_time = current_time
+                                last_db_save_time = current_time
                             
                     else:
                         print("⏸️  NIFTY Loop Outside Trading Hours.")
@@ -370,11 +370,11 @@ class Command(BaseCommand):
 
                         if res_val is not None:
                             history_data["master_res"].append({"time": t_str, "value": res_val})
-                            history_data["master_res"] = history_data["master_res"][-50:]
+                            history_data["master_res"] = history_data["master_res"][-5:]
 
                         if sup_val is not None:
                             history_data["master_sup"].append({"time": t_str, "value": sup_val})
-                            history_data["master_sup"] = history_data["master_sup"][-50:]
+                            history_data["master_sup"] = history_data["master_sup"][-5:]
 
                         await set_cache_async(history_key, history_data, 43200)
 
@@ -408,8 +408,11 @@ class Command(BaseCommand):
             except Exception as e:
                 logger.error(f"NIFTY Loop Error: {e}")
                 
-            # 🟢 लूप हमेशा 5 सेकंड आराम करेगा
-            await asyncio.sleep(10)
+            # 🟢 ट्रेडिंग आवर्स में 5 सेकंड आराम करेगा, और अन्य टाइम में 15 सेकंड
+            if self.is_trading_hours():
+                await asyncio.sleep(5)
+            else:
+                await asyncio.sleep(15)
             
     async def others_sr_loop(self, session, symbols, expiry):
         """Modified Loop: Process 10 symbols, wait 2s, repeat."""

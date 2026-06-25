@@ -1,5 +1,6 @@
 import json
-from groq import Groq
+from google import genai
+from google.genai import types
 from django.conf import settings
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
@@ -12,7 +13,9 @@ import re
 from .views import get_master_levels, cache 
 # from .my_deta import system_instruction
 from .monika_call import system_instruction
-from .models import PaperTrade
+from .models import PaperTrade, BotSettings
+from django.db.models import Sum, Count, Avg, Q
+from datetime import timedelta
 
 # ── Helper: Live Market Context (अपडेटेड फ़ंक्शन) ────────
 def get_live_market_context():
@@ -47,12 +50,23 @@ def get_live_market_context():
 
             spot_text = safe_int(spot) if spot else "अभी अपडेट नहीं हुआ"
 
+            pts_to_put = "पता नहीं"
+            pts_to_call = "पता नहीं"
+            try:
+                if spot and master_levels.get("R", {}).get("entry"):
+                    pts_to_put = str(round(float(master_levels["R"]["entry"]) - float(spot), 1))
+                if spot and master_levels.get("S", {}).get("entry"):
+                    pts_to_call = str(round(float(spot) - float(master_levels["S"]["entry"]), 1))
+            except: pass
+
             # 🚀 यहाँ हमने साफ़ लिख दिया है कि यह डेटा केवल निफ़्टी का है
             return (
                 f"[सिस्टम निर्देश: यह डेटा केवल और केवल निफ्टी (NIFTY) का है। "
                 f"निफ्टी का रेजिस्टेंस लेवल {r_strike} है, स्टेटस '{r_status_clean}' है, और पुट ट्रेड की एंट्री {r_entry} है। "
                 f"निफ्टी का सपोर्ट लेवल {s_strike} है, स्टेटस '{s_status_clean}' है, and कॉल ट्रेड की एंट्री {s_entry} है। "
                 f"निफ्टी का स्पॉट प्राइस {spot_text} है। "
+                f"पुट (PUT) ट्रेड की एंट्री आने में {pts_to_put} पॉइंट्स बचे हैं। "
+                f"कॉल (CALL) ट्रेड की एंट्री आने में {pts_to_call} पॉइंट्स बचे हैं। "
                 f"अगर कोई बैंकनिफ्टी या अन्य स्टॉक का लेवल पूछे, तो इस डेटा का इस्तेमाल न करें और नियम 5 के अनुसार मना कर दें।]"
             )
     except Exception as e:
@@ -69,7 +83,7 @@ def get_today_trades_context():
         trades = PaperTrade.objects.filter(trade_date=today).order_by('entry_time')
 
         if not trades.exists():
-            return "[ट्रेड जानकारी: आज अभी तक कोई पेपर ट्रेड नहीं हुई है।]"
+            return "[आज (Today) की ट्रेड जानकारी: आज अभी तक कोई पेपर ट्रेड नहीं हुई है। (लेकिन पिछले दिनों की ट्रेड्स का डेटा तुम्हारे पास मौजूद है)]"
 
         def safe_num(v, decimals=0):
             try:
@@ -97,10 +111,24 @@ def get_today_trades_context():
             elif result == 'SL':
                 emoji, label = '❌', 'लॉस'
                 loss_trades.append(i)
-            elif result == 'OPEN':
+            bot = BotSettings.objects.first()
+            target_pts = bot.default_target if bot else 50.0
+            sl_pts = bot.default_sl if bot else 50.0
+            extra_open = ""
+
+            if result == 'OPEN':
                 emoji, label = '🔄', 'OPEN'
                 open_trades.append(i)
                 pnl_pts = 0.0; pnl_rs = 0.0
+                try:
+                    if tr.trade_type == 'CALL':
+                        tgt = float(tr.entry_spot) + target_pts
+                        sl = float(tr.entry_spot) - sl_pts
+                    else:
+                        tgt = float(tr.entry_spot) - target_pts
+                        sl = float(tr.entry_spot) + sl_pts
+                    extra_open = f" | Target: {round(tgt,1)}, SL: {round(sl,1)}"
+                except: pass
             elif result == 'SKIPPED':
                 emoji, label = '⏭', 'SKIP'
                 skipped_trades.append(i)
@@ -115,7 +143,7 @@ def get_today_trades_context():
                 f"ट्रेड {i}: {tr.symbol} | {tr.trade_type} | {tr.trigger_level}-लेवल | "
                 f"एंट्री {safe_num(tr.entry_spot)} @ {entry_t} | "
                 f"रिज़ल्ट: {emoji}{label} | "
-                f"PnL: {pnl_sign}{safe_num(pnl_pts)} pts ({pnl_sign}₹{safe_num(abs(pnl_rs))})"
+                f"PnL: {pnl_sign}{safe_num(pnl_pts)} pts ({pnl_sign}₹{safe_num(abs(pnl_rs))}){extra_open}"
             )
             trade_lines.append(line)
 
@@ -149,46 +177,147 @@ def get_today_trades_context():
         print(f"Trade Context Error: {e}")
         return "[ट्रेड जानकारी: आज की ट्रेड डेटा अभी उपलब्ध नहीं है।]"
 
-def build_messages(user_message, history=None):
-    """Monica के लिए messages list तैयार करना (streaming और non-streaming दोनों में काम आता है)"""
+
+def get_all_stats_context():
+    try:
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        week_ago = today - timedelta(days=7)
+        month_ago = today - timedelta(days=30)
+        
+        # All time
+        all_stats = PaperTrade.objects.exclude(result__in=['OPEN','SKIPPED']).aggregate(
+            t=Count('id'), w=Count('id', filter=Q(result='TARGET')), 
+            pnl=Sum('pnl'), rs=Sum('pnl_rupees')
+        )
+        
+        # Week
+        week_stats = PaperTrade.objects.filter(trade_date__gte=week_ago).exclude(result__in=['OPEN','SKIPPED']).aggregate(
+            t=Count('id'), w=Count('id', filter=Q(result='TARGET')), 
+            pnl=Sum('pnl'), rs=Sum('pnl_rupees')
+        )
+        
+        # Month
+        month_stats = PaperTrade.objects.filter(trade_date__gte=month_ago).exclude(result__in=['OPEN','SKIPPED']).aggregate(
+            t=Count('id'), w=Count('id', filter=Q(result='TARGET')), 
+            pnl=Sum('pnl'), rs=Sum('pnl_rupees')
+        )
+        
+        # Yesterday's exact trades
+        yt_trades = PaperTrade.objects.filter(trade_date=yesterday).exclude(result__in=['OPEN','SKIPPED'])
+        yt_str = ""
+        if yt_trades.exists():
+            yt_lines = []
+            for tr in yt_trades:
+                res = "प्रॉफिट" if tr.result == "TARGET" else ("लॉस" if tr.result == "SL" else tr.result)
+                yt_lines.append(f"{tr.trade_type} में {res} ({tr.pnl} pts)")
+            yt_str = "कल की ट्रेड्स: " + ", ".join(yt_lines)
+        else:
+            yt_str = "कल कोई ट्रेड नहीं हुई थी।"
+
+        best = PaperTrade.objects.filter(result='TARGET').order_by('-pnl').first()
+        worst = PaperTrade.objects.filter(result='SL').order_by('pnl').first()
+        
+        best_str = f"{best.symbol} {best.trade_type} (+{best.pnl} pts)" if best else "कोई नहीं"
+        worst_str = f"{worst.symbol} {worst.trade_type} ({worst.pnl} pts)" if worst else "कोई नहीं"
+        
+        bot = BotSettings.objects.first()
+        bot_status = "ON" if bot and bot.trading_enabled else "OFF"
+        
+        return (
+            f"[ऑल-टाइम परफॉरमेंस: कुल {all_stats['t'] or 0} ट्रेड्स, {all_stats['w'] or 0} प्रॉफिट। कुल PnL: {round(all_stats['pnl'] or 0,1)} pts (₹{round(all_stats['rs'] or 0, 0)})\n"
+            f"इस हफ्ते की परफॉरमेंस: कुल {week_stats['t'] or 0} ट्रेड्स, {week_stats['w'] or 0} प्रॉफिट। PnL: {round(week_stats['pnl'] or 0,1)} pts (₹{round(week_stats['rs'] or 0, 0)})\n"
+            f"इस महीने की परफॉरमेंस: कुल {month_stats['t'] or 0} ट्रेड्स, {month_stats['w'] or 0} प्रॉफिट। PnL: {round(month_stats['pnl'] or 0,1)} pts (₹{round(month_stats['rs'] or 0, 0)})\n"
+            f"{yt_str}\n"
+            f"अब तक की सबसे अच्छी ट्रेड: {best_str}\n"
+            f"अब तक की सबसे खराब ट्रेड: {worst_str}\n"
+            f"ऑटो-बॉट स्टेटस: {bot_status}]"
+        )
+    except Exception as e:
+        print(f"Stats Context Error: {e}")
+        return ""
+
+def get_current_date_context():
+    """आज की तारीख और समय Monica को बताने के लिए"""
+    try:
+        now = timezone.now()
+        local_time = timezone.localtime(now)
+        date_str = local_time.strftime("%d %B %Y")
+        time_str = local_time.strftime("%I:%M %p")
+        return f"[सिस्टम जानकारी: आज की तारीख {date_str} है, और अभी का समय {time_str} है।]"
+    except Exception as e:
+        print(f"Date Context Error: {e}")
+        return ""
+
+def get_gemini_contents(user_message, history=None):
+    """Gemini के लिए contents list तैयार करना"""
+    sys_inst = f"{system_instruction}\n\n{get_current_date_context()}\n\n{get_live_market_context()}\n\n{get_all_stats_context()}\n\n{get_today_trades_context()}"
+    
+    formatted_contents = []
+    if history:
+        for h in history[-10:]:
+            role = 'user' if h['role'] == 'user' else 'model'
+            formatted_contents.append(types.Content(role=role, parts=[types.Part.from_text(text=h['content'])]))
+    
+    formatted_contents.append(types.Content(role='user', parts=[types.Part.from_text(text=user_message)]))
+    
+    return sys_inst, formatted_contents
+
+
+
+def get_groq_messages(user_message, history=None):
+    """Groq के लिए messages list तैयार करना"""
     messages = [{"role": "system", "content": system_instruction}]
-
-    # 1. लाइव मार्केट लेवल्स
-    market_context = get_live_market_context()
-    messages.append({"role": "system", "content": market_context})
-
-    # 2. आज की ट्रेड रिपोर्ट — Monica को हमेशा पता रहे
-    trade_context = get_today_trades_context()
-    messages.append({"role": "system", "content": trade_context})
-
+    messages.append({"role": "system", "content": get_current_date_context()})
+    messages.append({"role": "system", "content": get_live_market_context()})
+    messages.append({"role": "system", "content": get_all_stats_context()})
+    messages.append({"role": "system", "content": get_today_trades_context()})
     if history:
         messages += history[-10:]
     messages.append({"role": "user", "content": user_message})
     return messages
 
-
-
-# ── Helper: Groq से Monica का जवाब (Non-Streaming) ────────────────────
+# ── Helper: Gemini से Monica का जवाब (Non-Streaming) ────────────────────
 def get_ai_reply(user_message, history=None):
-    # API Key चेक करें
-    api_key = getattr(settings, 'GROQ_API_KEY', None)
+    api_key = getattr(settings, 'GEMINI_API_KEY', None)
     if not api_key:
         return "क्षमा करें, API Key सेट नहीं है।"
 
-    client = Groq(api_key=api_key)
-    messages = build_messages(user_message, history)
+    sys_inst, formatted_contents = get_gemini_contents(user_message, history)
     
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=150, # फोन पर बात करने के लिए छोटे जवाब
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=formatted_contents,
+            config=types.GenerateContentConfig(
+                system_instruction=sys_inst,
+                temperature=0.7,
+                max_output_tokens=800,
+            )
         )
-        return response.choices[0].message.content.strip()
+        return response.text.strip()
     except Exception as e:
-        print(f"Groq Error: {e}")
-        return "क्षमा करें, अभी नेटवर्क में थोड़ी समस्या है। क्या आप अपनी बात दोहरा सकते हैं?"
+        print(f"Gemini Error (Falling back to Groq): {e}")
+        try:
+            from groq import Groq
+            groq_key = getattr(settings, 'GROQ_API_KEY', None)
+            if not groq_key:
+                return "Gemini की लिमिट पूरी हो गई है और Groq API Key सेट नहीं है।"
+            
+            groq_client = Groq(api_key=groq_key)
+            groq_messages = get_groq_messages(user_message, history)
+            
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=groq_messages,
+                temperature=0.7,
+                max_tokens=800,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as groq_e:
+            print(f"Groq Fallback Error: {groq_e}")
+            return "क्षमा करें, अभी नेटवर्क या लिमिट में समस्या है। कृपया थोड़ी देर बाद प्रयास करें।"
 
 # ── Page ──────────────────────────────────────────────
 def index(request):
@@ -252,7 +381,7 @@ def voice_chat_stream(request):
                 yield 'data: ' + json.dumps({'error': 'Message खाली है'}) + '\n\n'
             return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
 
-        api_key = getattr(settings, 'GROQ_API_KEY', None)
+        api_key = getattr(settings, 'GEMINI_API_KEY', None)
         if not api_key:
             def error_gen():
                 yield 'data: ' + json.dumps({'error': 'API Key सेट नहीं है।'}) + '\n\n'
@@ -264,22 +393,25 @@ def voice_chat_stream(request):
         return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
 
     def sse_generator():
-        """Groq Streaming से tokens yield करना"""
-        client = Groq(api_key=api_key)
-        messages = build_messages(message, history)
+        """Gemini Streaming से tokens yield करना (with Groq Fallback)"""
+        sys_inst, formatted_contents = get_gemini_contents(message, history)
         full_reply = ""
+        fallback_to_groq = False
 
         try:
-            stream = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                temperature=0.7,
-                max_tokens=150,
-                stream=True,  # 🚀 Streaming ON
+            client = genai.Client(api_key=api_key)
+            stream = client.models.generate_content_stream(
+                model="gemini-2.5-flash",
+                contents=formatted_contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=sys_inst,
+                    temperature=0.7,
+                    max_output_tokens=800,
+                )
             )
 
             for chunk in stream:
-                token = chunk.choices[0].delta.content
+                token = chunk.text
                 if token:
                     full_reply += token
                     # हर token SSE format में भेजें
@@ -297,8 +429,51 @@ def voice_chat_stream(request):
             }, ensure_ascii=False) + '\n\n'
 
         except Exception as e:
-            print(f"Groq Streaming Error: {e}")
-            yield 'data: ' + json.dumps({'error': f'नेटवर्क में समस्या: {str(e)}'}, ensure_ascii=False) + '\n\n'
+            print(f"Gemini Streaming Error: {e}")
+            if not full_reply: # सिर्फ तभी fallback करें जब कोई response शुरू ना हुआ हो
+                fallback_to_groq = True
+            else:
+                yield 'data: ' + json.dumps({'error': f'नेटवर्क में समस्या: {str(e)}'}, ensure_ascii=False) + '\n\n'
+
+        if fallback_to_groq:
+            print("Falling back to Groq Streaming...")
+            try:
+                from groq import Groq
+                groq_key = getattr(settings, 'GROQ_API_KEY', None)
+                if not groq_key:
+                    yield 'data: ' + json.dumps({'error': 'Gemini लिमिट पूरी हो गई है और Groq Key सेट नहीं है।'}, ensure_ascii=False) + '\n\n'
+                    return
+                
+                groq_client = Groq(api_key=groq_key)
+                groq_messages = get_groq_messages(message, history)
+                
+                stream = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=groq_messages,
+                    temperature=0.7,
+                    max_tokens=800,
+                    stream=True,
+                )
+                
+                for chunk in stream:
+                    token = chunk.choices[0].delta.content
+                    if token:
+                        full_reply += token
+                        yield 'data: ' + json.dumps({'token': token}, ensure_ascii=False) + '\n\n'
+                        
+                updated_history = history + [
+                    {"role": "user",      "content": message},
+                    {"role": "assistant", "content": full_reply.strip()},
+                ]
+                yield 'data: ' + json.dumps({
+                    'done': True,
+                    'reply': full_reply.strip(),
+                    'history': updated_history
+                }, ensure_ascii=False) + '\n\n'
+                
+            except Exception as groq_e:
+                print(f"Groq Streaming Error: {groq_e}")
+                yield 'data: ' + json.dumps({'error': f'नेटवर्क या लिमिट में समस्या (Groq Fallback Failed): {str(groq_e)}'}, ensure_ascii=False) + '\n\n'
 
     response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
