@@ -57,7 +57,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE   = True
     CSRF_COOKIE_SECURE      = True
 
-# DEBUG = True
+DEBUG = True
 
 # Application definition
 
@@ -151,38 +151,6 @@ else:
 
 
 
-# ── Cache — LocMem (Redis हटाया, Render पर ज़रूरी नहीं) ────────────────────
-# CACHES = {
-#     "default": {
-#         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-#         "LOCATION": "opchain-cache",
-#     }
-# }
-# CACHES = {
-#     'default': {
-#         'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
-#         'LOCATION': 'mystock_cache_table', # यह डेटाबेस में बनने वाली नई टेबल का नाम है
-#     }
-# }
-
-import os
-
-# Render के Environment Variables से Redis URL लेना
-# REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
-
-# CACHES = {
-#     "default": {
-#         "BACKEND": "django_redis.cache.RedisCache",
-#         "LOCATION": REDIS_URL,
-#         "OPTIONS": {
-#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-#             # यह सेटिंग सुनिश्चित करती है कि अगर Redis क्रैश हो जाए, तो वेबसाइट क्रैश न हो
-#             "IGNORE_EXCEPTIONS": True, 
-#         }
-#     }
-# }
-
-import os
 
 IS_ON_RENDER = 'RENDER' in os.environ
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
@@ -346,5 +314,6 @@ LOGGING = {
 
 
 
-# अपनी कॉपी की हुई Groq Key यहाँ पेस्ट करें
+# अपनी कॉपी की हुई Gemini Key और Groq Key यहाँ पेस्ट करें
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
