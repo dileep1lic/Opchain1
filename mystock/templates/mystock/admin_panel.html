@@ -559,6 +559,44 @@
     onkeydown="if(event.key==='Enter') triggerGitRelease()">
   </div>
 
+  <!-- ── Staged Files Live Preview ── -->
+  <div style="margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px;text-transform:uppercase;">
+        📋 Staged Files <span id="staged-count-badge" style="
+            background:rgba(124,111,255,0.15);
+            border:1px solid rgba(124,111,255,0.3);
+            color:#a89fff;border-radius:10px;
+            padding:1px 8px;font-size:10px;margin-left:6px;
+        ">0</span>
+      </label>
+      <button onclick="refreshStagedFiles()" style="
+          background:transparent;border:1px solid var(--border);
+          color:var(--muted);padding:3px 9px;border-radius:6px;
+          font-size:10px;cursor:pointer;transition:.2s;
+      " onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">🔄 Refresh</button>
+    </div>
+
+    <div id="staged-files-box" style="
+        background:var(--bg);
+        border:1px solid var(--border);
+        border-radius:8px;
+        padding:10px 14px;
+        min-height:52px;
+        max-height:160px;
+        overflow-y:auto;
+        font-family:'Courier New',monospace;
+        font-size:12px;
+        line-height:2;
+    ">
+      <span style="color:var(--muted);">⏳ लोड हो रहा है...</span>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-top:5px;">
+      🟢 Added &nbsp; 🟡 Modified &nbsp; 🔴 Deleted &nbsp; 🔵 Renamed
+      &nbsp;|&nbsp; <em>ये फाइलें <code>git add</code> से stage हुई हैं</em>
+    </div>
+  </div>
+
   <!-- Release Button -->
   <button id="git-release-btn" onclick="triggerGitRelease()" style="
       padding:11px 28px;
@@ -1051,57 +1089,59 @@ function _onFetchFail(label) {
   _retryTimer = setTimeout(() => { refreshStatus(); fetchTriggers(); }, delay);
 }
 
+
 async function refreshStatus() {
   try {
     const resp = await fetch('/api/admin-status/');
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    _showOnline();  // server वापस आया
 
-    if (!data.loops) return;
-    LOOPS.forEach(name => {
-      const status = data.loops[name];
-      if (status !== undefined && status !== null) setLoopUI(name, status);
-      else setLoopUI(name, false);
-    });
+    LOOPS.forEach(name => setLoopUI(name, data.loops[name] ?? false));
 
-    document.getElementById('st-total').textContent  = data.stats.total  ?? '—';
-    document.getElementById('st-wins').textContent   = data.stats.wins   ?? '—';
-    document.getElementById('st-losses').textContent = data.stats.losses ?? '—';
-    const pnl = data.stats.pnl;
+    const s = data.stats || {};
+    document.getElementById('st-total').textContent   = s.total  ?? '—';
+    document.getElementById('st-wins').textContent    = s.wins   ?? '—';
+    document.getElementById('st-losses').textContent  = s.losses ?? '—';
+    const pnl = s.pnl ?? null;
     const pnlEl = document.getElementById('st-pnl');
-    pnlEl.textContent = pnl != null ? (pnl >= 0 ? '+' : '') + pnl : '—';
-    pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
-    document.getElementById('st-spot').textContent = data.stats.spot ?? '—';
+    pnlEl.textContent = pnl !== null ? pnl.toFixed(2) : '—';
+    pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : '';
+    document.getElementById('st-spot').textContent = s.spot ? s.spot.toFixed(2) : '—';
 
-    if (!settingsLoaded && data.settings) {
-      document.getElementById('cfg-target').value = data.settings.target;
-      document.getElementById('cfg-sl').value     = data.settings.sl;
-      document.getElementById('cfg-buffer').value = data.settings.buffer;
-      document.getElementById('cfg-name').value   = data.settings.user_name || 'बॉस';
+    const cfg = data.settings || {};
+    if (!settingsLoaded) {
+      if (cfg.target   !== undefined) document.getElementById('cfg-target').value = cfg.target;
+      if (cfg.sl       !== undefined) document.getElementById('cfg-sl').value     = cfg.sl;
+      if (cfg.buffer   !== undefined) document.getElementById('cfg-buffer').value = cfg.buffer;
+      if (cfg.user_name !== undefined) document.getElementById('cfg-name').value  = cfg.user_name;
       settingsLoaded = true;
     }
+
+    _failCount = 0;
+    _hideOffline();
   } catch(e) {
-    _onFetchFail('Status');  // हर fail पर addLog की जगह backoff manager
+    _failCount++;
+    _onFail();
+    addLog('Status fetch failed: ' + e.message, 'err');
   }
 }
 
 async function fetchTriggers() {
-  if (_offlineMode) return;  // offline हो तो trigger fetch skip
-  const sym = document.getElementById('skip-sym').value;
   try {
-    const resp = await fetch(`/api/dashboard-data/?symbol=${sym}`);
+    const sym = document.getElementById('skip-sym').value;
+    const resp = await fetch(`/api/admin-status/`);
     if (!resp.ok) return;
     const data = await resp.json();
-    const t = data.triggers || {};
-    rTrigger = t.r_trigger;
-    sTrigger = t.s_trigger;
-    const fmt = v => (v && isFinite(v)) ? '(' + parseFloat(v).toFixed(0) + ')' : '(—)';
-    document.getElementById('skipRPrice').textContent = fmt(rTrigger);
-    document.getElementById('skipSPrice').textContent = fmt(sTrigger);
-  } catch(e) {
-    // trigger fail को silently ignore — status API पहले से handle कर रहा है
-  }
+    const spot = data.stats?.spot;
+    if (spot) {
+      rTrigger = spot;
+      sTrigger = spot;
+      const rBtn = document.getElementById('skipRBtn');
+      const sBtn = document.getElementById('skipSBtn');
+      if (rBtn) document.getElementById('skipRPrice').textContent = '';
+      if (sBtn) document.getElementById('skipSPrice').textContent = '';
+    }
+  } catch(e) {}
 }
 
 // ── Init: normal intervals ─────────────────────────────
@@ -1141,6 +1181,7 @@ document.querySelectorAll('input[name="bump_type"]').forEach(radio => {
 // वर्तमान वर्ज़न API से लाओ
 async function fetchCurrentVersion() {
   const badge = document.getElementById('git-current-ver');
+  if (!badge) return;
   badge.textContent = '⏳ लोड हो रहा है...';
   try {
     const resp = await fetch('/api/git-current-version/');
@@ -1152,7 +1193,38 @@ async function fetchCurrentVersion() {
 }
 fetchCurrentVersion();
 
-// Git Release Trigger
+// ── Staged Files Live Preview ────────────────────────────────
+async function refreshStagedFiles() {
+  const box   = document.getElementById('staged-files-box');
+  const badge = document.getElementById('staged-count-badge');
+  if (!box || !badge) return;
+  try {
+    const resp = await fetch('/api/git-staged-files/');
+    const data = await resp.json();
+    badge.textContent = data.staged_count || 0;
+
+    if (!data.staged || data.staged.length === 0) {
+      box.innerHTML = `<span style="color:var(--muted);">⚠️ कोई staged file नहीं है — पहले टर्मिनल में <code style="color:#a89fff;">git add &lt;file&gt;</code> करें।</span>`;
+      badge.style.background  = 'rgba(255,94,114,0.15)';
+      badge.style.borderColor = 'rgba(255,94,114,0.3)';
+      badge.style.color       = '#ff9090';
+    } else {
+      badge.style.background  = 'rgba(124,111,255,0.15)';
+      badge.style.borderColor = 'rgba(124,111,255,0.3)';
+      badge.style.color       = '#a89fff';
+      box.innerHTML = data.staged.map(f =>
+        `<div style="color:var(--text);">${f.icon} <span style="color:var(--muted);font-size:10px;">[${f.status}]</span> ${f.file}</div>`
+      ).join('');
+    }
+  } catch(e) {
+    box.innerHTML = `<span style="color:var(--red);">API Error: ${e.message}</span>`;
+  }
+}
+// पेज लोड होने पर और हर 5 सेकंड में refresh करें
+refreshStagedFiles();
+setInterval(refreshStagedFiles, 5000);
+
+// ── Git Release Trigger ────────────────────────────────────────
 async function triggerGitRelease() {
   const bump_type = document.querySelector('input[name="bump_type"]:checked')?.value;
   const message   = document.getElementById('git-msg').value.trim();
@@ -1166,37 +1238,47 @@ async function triggerGitRelease() {
     document.getElementById('git-msg').focus();
     return;
   }
-  if (!confirm(`🚀 क्या आप "${bump_type}" release बनाना चाहते हैं?\n\nमैसेज: "${message}"\n\nयह git commit + tag + push करेगा।`)) return;
+  if (!confirm(`🚀 क्या आप "${bump_type}" release बनाना चाहते हैं?\n\nमैसेज: "${message}"\n\nकेवल staged (git add की) फाइलें commit होंगी।`)) return;
 
-  // Loading state
-  btn.disabled  = true;
+  btn.disabled     = true;
   btnTxt.innerHTML = '<span class="spin"></span> Release हो रहा है...';
   outBox.style.display = 'none';
 
   try {
     const resp = await fetch('/api/git-release/', {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-      body: JSON.stringify({ bump_type, message })
+      body:    JSON.stringify({ bump_type, message })
     });
     const data = await resp.json();
+
+    if (data.status === 'no_staged') {
+      showToast('⚠️ ' + data.msg, 'err');
+      addLog('⚠️ Git Release रुका: कोई staged file नहीं', 'warn');
+      outBox.style.display = 'block';
+      outPre.style.color   = '#f5a623';
+      outPre.textContent   = `⚠️ ${data.msg}\n\n📋 Git Status:\n${data.unstaged_info || '(कोई changes नहीं)'}`;
+      refreshStagedFiles();
+      return;
+    }
 
     outBox.style.display = 'block';
     outPre.textContent   = data.output || '(कोई output नहीं)';
 
     if (data.status === 'success') {
       showToast(data.msg || '🎉 Release हो गई!', 'ok');
-      addLog(`🚀 Git Release → ${data.new_version || bump_type} | ${message}`, 'ok');
+      const fileList = data.staged_files ? data.staged_files.join(', ') : '';
+      addLog(`🚀 Git Release → ${data.new_version || bump_type} | ${message} [${fileList}]`, 'ok');
       document.getElementById('git-msg').value = '';
-      // वर्ज़न बैज अपडेट करो
       if (data.new_version) {
         document.getElementById('git-current-ver').textContent = data.new_version;
       }
-      outPre.style.color = '#a0e8a0';  // green for success
+      outPre.style.color = '#a0e8a0';
+      refreshStagedFiles();
     } else {
       showToast('❌ ' + (data.msg || 'Error occurred'), 'err');
       addLog('❌ Git Release Failed: ' + (data.msg || ''), 'err');
-      outPre.style.color = '#ff9090';  // red for error
+      outPre.style.color = '#ff9090';
     }
   } catch(e) {
     showToast('API Connection Failed', 'err');

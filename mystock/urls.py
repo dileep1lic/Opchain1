@@ -16,8 +16,9 @@ urlpatterns = [
     path('api/db-cleanup-preview/', views.db_cleanup_preview_api,  name='db_cleanup_preview_api'),
     
     # ── Git Release ──────────────────────────────────────────────
-    path('api/git-release/', views.git_release_api, name='git_release_api'),
-    path('api/git-current-version/', views.git_current_version_api, name='git_current_version_api'),
+    path('api/git-release/',          views.git_release_api,          name='git_release_api'),
+    path('api/git-current-version/',  views.git_current_version_api,  name='git_current_version_api'),
+    path('api/git-staged-files/',     views.git_staged_files_api,     name='git_staged_files_api'),
     
     path('admin-panel/users/', views.user_approval_list, name='user_approval_list'),
 
@@ -95,6 +96,7 @@ urlpatterns = [
 
     # ── Voice Command Player ──────────────────────────────
     path('monika', seed_voice.index, name='calling'),
+    path('api/get-user-name/', seed_voice.get_user_name_api, name='get_user_name'),
     path('api/voice-chat/', seed_voice.voice_chat_api, name='voice_chat_api'),
     path('api/voice-chat/stream/', seed_voice.voice_chat_stream, name='voice_chat_stream'),  # 🚀 SSE Streaming
 

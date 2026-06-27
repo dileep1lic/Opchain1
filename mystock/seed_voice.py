@@ -68,6 +68,7 @@ def get_live_market_context():
                 f"पुट (PUT) ट्रेड की एंट्री आने में {pts_to_put} पॉइंट्स बचे हैं। "
                 f"कॉल (CALL) ट्रेड की एंट्री आने में {pts_to_call} पॉइंट्स बचे हैं। "
                 f"अगर कोई बैंकनिफ्टी या अन्य स्टॉक का लेवल पूछे, तो इस डेटा का इस्तेमाल न करें और नियम 5 के अनुसार मना कर दें।]"
+                # f"प्राइस बताने के तुरंत बाद यह चेतावनी जरूर दें: ध्यान दें यह एक सिस्टम जनरेटेड डेटा है। डेटा या सुझावों में गलती हो सकती है। किसी भी ट्रेड या निवेश निर्णय से पहले खुद जाँच अवश्य करें। "
             )
     except Exception as e:
         print(f"Market Context Error: {e}")
@@ -77,7 +78,7 @@ def get_live_market_context():
 
 # ── Helper: आज की Trades का Context ────────────────────────
 def get_today_trades_context():
-    """आज की सभी trades का सारांश — Monica को बताने के लिए"""
+    """आज की सभी trades का सारांश — Monika को बताने के लिए"""
     try:
         today = timezone.now().date()
         trades = PaperTrade.objects.filter(trade_date=today).order_by('entry_time')
@@ -238,7 +239,7 @@ def get_all_stats_context():
         return ""
 
 def get_current_date_context():
-    """आज की तारीख और समय Monica को बताने के लिए"""
+    """आज की तारीख और समय Monika को बताने के लिए"""
     try:
         now = timezone.now()
         local_time = timezone.localtime(now)
@@ -249,9 +250,10 @@ def get_current_date_context():
         print(f"Date Context Error: {e}")
         return ""
 
-def get_gemini_contents(user_message, history=None):
+def get_gemini_contents(user_message, history=None, user_name=None):
     """Gemini के लिए contents list तैयार करना"""
-    sys_inst = f"{system_instruction}\n\n{get_current_date_context()}\n\n{get_live_market_context()}\n\n{get_all_stats_context()}\n\n{get_today_trades_context()}"
+    user_ctx = f"[उपयोगकर्ता जानकारी: इस चैट विंडो में बात करने वाले व्यक्ति का नाम '{user_name}' है। इन्हें नाम लेकर संबोधित करो।]" if user_name else ""
+    sys_inst = f"{system_instruction}\n\n{user_ctx}\n\n{get_current_date_context()}\n\n{get_live_market_context()}\n\n{get_all_stats_context()}\n\n{get_today_trades_context()}"
     
     formatted_contents = []
     if history:
@@ -265,9 +267,11 @@ def get_gemini_contents(user_message, history=None):
 
 
 
-def get_groq_messages(user_message, history=None):
+def get_groq_messages(user_message, history=None, user_name=None):
     """Groq के लिए messages list तैयार करना"""
     messages = [{"role": "system", "content": system_instruction}]
+    if user_name:
+        messages.append({"role": "system", "content": f"[उपयोगकर्ता जानकारी: इस चैट विंडो में बात करने वाले व्यक्ति का नाम '{user_name}' है। इन्हें नाम लेकर संबोधित करो।]"})
     messages.append({"role": "system", "content": get_current_date_context()})
     messages.append({"role": "system", "content": get_live_market_context()})
     messages.append({"role": "system", "content": get_all_stats_context()})
@@ -277,13 +281,13 @@ def get_groq_messages(user_message, history=None):
     messages.append({"role": "user", "content": user_message})
     return messages
 
-# ── Helper: Gemini से Monica का जवाब (Non-Streaming) ────────────────────
-def get_ai_reply(user_message, history=None):
+# ── Helper: Gemini से Monika का जवाब (Non-Streaming) ────────────────────
+def get_ai_reply(user_message, history=None, user_name=None):
     api_key = getattr(settings, 'GEMINI_API_KEY', None)
     if not api_key:
         return "क्षमा करें, API Key सेट नहीं है।"
 
-    sys_inst, formatted_contents = get_gemini_contents(user_message, history)
+    sys_inst, formatted_contents = get_gemini_contents(user_message, history, user_name)
     
     try:
         client = genai.Client(api_key=api_key)
@@ -322,6 +326,38 @@ def get_ai_reply(user_message, history=None):
 # ── Page ──────────────────────────────────────────────
 def index(request):
     return render(request, 'index.html')
+
+
+# ─────────────────────────────────────────────────────
+# Helper: logged-in user का नाम DB से लेना
+# Priority: first_name > username > BotSettings.user_name > 'जी'
+# ─────────────────────────────────────────────────────
+def get_logged_in_user_name(request):
+    try:
+        user = request.user
+        if user and user.is_authenticated:
+            if user.first_name and user.first_name.strip():
+                return user.first_name.strip()
+            if user.username and user.username.strip():
+                return user.username.strip()
+    except Exception:
+        pass
+    try:
+        bot = BotSettings.objects.first()
+        if bot and bot.user_name and bot.user_name.strip():
+            return bot.user_name.strip()
+    except Exception:
+        pass
+    return None
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET USER NAME API — Frontend को DB से नाम देना
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@require_http_methods(["GET"])
+def get_user_name_api(request):
+    """लॉगिन यूजर का नाम DB से लेकर JSON में देना"""
+    name = get_logged_in_user_name(request)
+    return JsonResponse({'user_name': name or ''})
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # WEB CHAT API (Non-Streaming — Fallback)
@@ -372,9 +408,11 @@ def voice_chat_stream(request):
         data: {"error": "..."}\n\n         ← error की स्थिति में
     """
     try:
-        data    = json.loads(request.body)
-        message = data.get('message', '').strip()
-        history = data.get('history', [])
+        data      = json.loads(request.body)
+        message   = data.get('message', '').strip()
+        history   = data.get('history', [])
+        # DB से नाम लें (लॉगिन यूजर से) — frontend से आए नाम को override करें
+        user_name = get_logged_in_user_name(request)
 
         if not message:
             def error_gen():
@@ -394,7 +432,7 @@ def voice_chat_stream(request):
 
     def sse_generator():
         """Gemini Streaming से tokens yield करना (with Groq Fallback)"""
-        sys_inst, formatted_contents = get_gemini_contents(message, history)
+        sys_inst, formatted_contents = get_gemini_contents(message, history, user_name)
         full_reply = ""
         fallback_to_groq = False
 
@@ -445,7 +483,7 @@ def voice_chat_stream(request):
                     return
                 
                 groq_client = Groq(api_key=groq_key)
-                groq_messages = get_groq_messages(message, history)
+                groq_messages = get_groq_messages(message, history, user_name)
                 
                 stream = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
