@@ -155,15 +155,15 @@ def get_master_levels(symbol, selected_date=None):
     # ==========================================
     # --------res wtb-------------
     if res_type == "WTB"            and sup_type == "WTB"           : eff_res = res_target + step # test ok
-    elif res_type == "WTB"          and sup_type == "WTT"           : eff_res = res_base 
+    elif res_type == "WTB"          and sup_type == "WTT"           : eff_res = res_base + step # test ok
     elif res_type == "WTB"          and sup_type == "STRONG"        : eff_res = res_base - step # test ok
     elif res_type == "WTB"          and sup_type == "SHIFTED WTB"   : eff_res = res_base + step # test ok
-    elif res_type == "WTB"          and sup_type == "SHIFTED WTT"   : eff_res = res_base # test ok
+    elif res_type == "WTB"          and sup_type == "SHIFTED WTT"   : eff_res = res_base        # test ok
     #--------res wtt-------------
     elif res_type == "WTT"          and sup_type == "WTB"           : 
         eff_res = res_target if (res_target - res_base) <= step else (res_target - step) 
     elif res_type == "WTT"          and sup_type == "WTT"           : eff_res = res_target + step
-    elif res_type == "WTT"          and sup_type == "STRONG"        : #eff_res = res_target - step
+    elif res_type == "WTT"          and sup_type == "STRONG"        :
         eff_res = res_target if (res_target - res_base) <= step else (res_target - step) 
     elif res_type == "WTT"          and sup_type == "SHIFTED WTB"   : eff_res = res_target + step
     elif res_type == "WTT"          and sup_type == "SHIFTED WTT"   : eff_res = res_base 
@@ -269,7 +269,7 @@ def get_master_levels(symbol, selected_date=None):
     elif sup_type == "WTB"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base
     elif sup_type == "WTB"          and res_type == "SHIFTED WTT"   : eff_sup = sup_target 
     #--------sup wtt-------------
-    elif sup_type == "WTT"          and res_type == "WTB"           : eff_sup = sup_base
+    elif sup_type == "WTT"          and res_type == "WTB"           : eff_sup = sup_base - step # test ok
     elif sup_type == "WTT"          and res_type == "WTT"           : eff_sup = sup_base 
     elif sup_type == "WTT"          and res_type == "STRONG"        : eff_sup = sup_base 
     elif sup_type == "WTT"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base + step

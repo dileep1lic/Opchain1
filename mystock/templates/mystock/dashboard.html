@@ -1381,6 +1381,21 @@ startPolling();
     window.speechSynthesis.speak(u);
   }
 
+  // ── CSRF Token Helper ──────────────────────────────
+  function getCsrf() {
+    let v = null;
+    document.cookie.split(';').forEach(c => {
+      c = c.trim();
+      if (c.startsWith('csrftoken=')) v = decodeURIComponent(c.slice('csrftoken='.length));
+    });
+    // cookie नहीं मिली तो DOM से लें
+    if (!v) {
+      const el = document.querySelector('[name=csrfmiddlewaretoken]');
+      if (el) v = el.value;
+    }
+    return v || '';
+  }
+
   async function sendMsg(text) {
     if (!text.trim()) return;
     textarea.value = '';

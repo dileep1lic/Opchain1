@@ -88,6 +88,8 @@ class Command(BaseCommand):
     
     # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
     FIXED_SYMOL = "NIFTY" 
+    # pri market hours: 9:00 AM to 3:30 PM
+    is_market_hours = lambda self: dt_time(9, 0, 0) <= datetime.now().time() <= dt_time(15, 30, 0)
     # Trading hours: 9:15 AM to 3:30 PM
     is_trading_hours = lambda self: dt_time(9, 15, 5) <= datetime.now().time() <= dt_time(15, 30, 5)
     # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
@@ -179,6 +181,10 @@ class Command(BaseCommand):
         has_new_data_to_save = True
 
         while True:
+            if not self.is_market_hours():
+                print("⏸️  NIFTY Loop Outside Market Hours. Sleeping for 60s.")
+                await asyncio.sleep(60)
+                continue
             await sync_to_async(close_old_connections)()
             
             # 1. DB Control Check
