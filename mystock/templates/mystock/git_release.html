@@ -1,0 +1,440 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpChain — Git Release Manager</title>
+<style>
+  :root {
+    --bg: #0d0f14; --surface: #13161e; --card: #1a1d27; --border: #252836;
+    --text: #e8eaf0; --muted: #6b7090;
+    --green: #00d4a0; --green-bg: rgba(0,212,160,0.1); --green-border: rgba(0,212,160,0.3);
+    --red: #ff5e72;   --red-bg: rgba(255,94,114,0.1);  --red-border: rgba(255,94,114,0.3);
+    --amber: #f5a623; --amber-bg: rgba(245,166,35,0.1);
+    --blue: #4a9eff;  --blue-bg: rgba(74,158,255,0.1);
+    --accent: #7c6fff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; padding: 28px 20px;
+  }
+
+  /* ── Animated background ── */
+  body::before {
+    content:''; position:fixed; inset:0;
+    background-image:
+      linear-gradient(rgba(124,111,255,.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,111,255,.025) 1px, transparent 1px);
+    background-size:40px 40px; pointer-events:none;
+  }
+  .orb { position:fixed; border-radius:50%; filter:blur(100px); opacity:.08; pointer-events:none; }
+  .orb-1 { width:500px; height:500px; background:#7c6fff; top:-150px; left:-100px; }
+  .orb-2 { width:400px; height:400px; background:#4a9eff; bottom:-100px; right:-100px; }
+
+  .page-wrap { max-width: 860px; margin: 0 auto; position: relative; z-index: 10; }
+
+  /* ── Header ── */
+  .header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 24px;
+    background: var(--surface); border:1px solid var(--border);
+    border-radius:16px; margin-bottom:28px; flex-wrap:wrap; gap:12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  }
+  .header-left { display:flex; align-items:center; gap:14px; }
+  .header-icon {
+    width:48px; height:48px; border-radius:14px;
+    background:linear-gradient(135deg,#7c6fff,#4a9eff);
+    display:flex; align-items:center; justify-content:center;
+    font-size:22px; box-shadow:0 4px 16px rgba(124,111,255,.35);
+  }
+  .header-title { font-size:20px; font-weight:700; letter-spacing:-.3px; }
+  .header-sub   { font-size:12px; color:var(--muted); margin-top:2px; }
+  .btn-back {
+    padding:9px 16px; border:1px solid var(--border); border-radius:10px;
+    background:var(--card); color:var(--text); text-decoration:none;
+    font-size:12px; font-weight:600; transition:.2s;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .btn-back:hover { border-color:var(--accent); color:var(--accent); background:rgba(124,111,255,.06); }
+
+  /* ── Version badge ── */
+  .version-row {
+    display:flex; align-items:center; gap:14px; margin-bottom:20px; flex-wrap:wrap;
+  }
+  .version-label { font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.8px; }
+  .version-badge {
+    background:rgba(124,111,255,.12); border:1px solid rgba(124,111,255,.35);
+    color:#a89fff; border-radius:20px; padding:5px 16px;
+    font-size:14px; font-weight:700; font-family:monospace;
+    transition: all .3s;
+  }
+  .btn-refresh {
+    background:transparent; border:1px solid var(--border);
+    color:var(--muted); padding:5px 12px; border-radius:8px;
+    font-size:11px; cursor:pointer; transition:.2s;
+  }
+  .btn-refresh:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* ── Card ── */
+  .card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:16px; padding:24px; margin-bottom:24px;
+    box-shadow:0 4px 24px rgba(0,0,0,.3);
+  }
+  .section-label {
+    font-size:11px; color:var(--muted); font-weight:700;
+    text-transform:uppercase; letter-spacing:1px; margin-bottom:12px;
+  }
+
+  /* ── Bump Type Pills ── */
+  .bump-grid { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  .bump-label {
+    flex:1; min-width:140px;
+    display:flex; align-items:center; gap:10px;
+    padding:14px 18px; border-radius:12px; cursor:pointer;
+    border:2px solid var(--border); transition:.2s;
+    background:var(--card);
+  }
+  .bump-label:hover { border-color:rgba(124,111,255,.5); background:rgba(124,111,255,.05); }
+  .bump-label input { display:none; }
+  .bump-label .bump-emoji { font-size:22px; }
+  .bump-label .bump-name { font-size:14px; font-weight:700; }
+  .bump-label .bump-eg   { font-size:10px; color:var(--muted); margin-top:2px; }
+  .bump-label.selected {
+    border-color:rgba(124,111,255,.7);
+    background:rgba(124,111,255,.1);
+    box-shadow:0 0 16px rgba(124,111,255,.15);
+  }
+
+  /* ── Commit input ── */
+  .commit-input {
+    width:100%; padding:13px 16px;
+    background:var(--bg); border:1px solid var(--border);
+    color:var(--text); border-radius:10px; font-size:14px;
+    font-family:inherit; outline:none; transition:.2s;
+    margin-bottom:20px;
+  }
+  .commit-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(124,111,255,.12); }
+
+  /* ── Staged Files Box ── */
+  .staged-header {
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:10px;
+  }
+  .staged-count {
+    background:rgba(124,111,255,.15); border:1px solid rgba(124,111,255,.3);
+    color:#a89fff; border-radius:10px; padding:2px 10px;
+    font-size:11px; margin-left:8px; font-weight:600;
+  }
+  .staged-box {
+    background:var(--bg); border:1px solid var(--border);
+    border-radius:10px; padding:12px 16px;
+    min-height:60px; max-height:200px; overflow-y:auto;
+    font-family:'Courier New',monospace; font-size:12px;
+    line-height:2.2; margin-bottom:8px;
+    scrollbar-width:thin; scrollbar-color: var(--border) transparent;
+  }
+  .staged-legend { font-size:10px; color:var(--muted); }
+
+  /* ── Release Button ── */
+  .btn-release {
+    width:100%; padding:16px;
+    background:linear-gradient(135deg,rgba(124,111,255,.25),rgba(74,158,255,.2));
+    border:1px solid rgba(124,111,255,.6);
+    color:#d0c8ff; border-radius:12px;
+    font-size:15px; font-weight:700; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    transition:all .25s; letter-spacing:.3px;
+    box-shadow:0 4px 20px rgba(124,111,255,.15);
+  }
+  .btn-release:hover {
+    background:linear-gradient(135deg,rgba(124,111,255,.4),rgba(74,158,255,.3));
+    box-shadow:0 8px 30px rgba(124,111,255,.25);
+    transform:translateY(-1px);
+  }
+  .btn-release:active { transform:translateY(0); }
+  .btn-release:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+
+  /* ── Output Terminal ── */
+  .output-box { margin-top:20px; display:none; }
+  .output-label { font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .output-pre {
+    background:#060810; border:1px solid var(--border);
+    border-radius:10px; padding:16px;
+    font-family:'Courier New',monospace; font-size:12px;
+    color:#a0e8a0; line-height:1.8;
+    max-height:260px; overflow-y:auto;
+    white-space:pre-wrap; word-break:break-all;
+  }
+
+  /* ── Toast ── */
+  #toast {
+    position:fixed; bottom:28px; right:28px;
+    padding:13px 22px; border-radius:12px;
+    font-size:13px; font-weight:600; color:#fff;
+    opacity:0; transform:translateY(10px);
+    transition:.3s; pointer-events:none; z-index:999;
+  }
+  #toast.show { opacity:1; transform:translateY(0); }
+  #toast.ok  { background:#1a5e3a; border:1px solid var(--green); }
+  #toast.err { background:#5e1a1a; border:1px solid var(--red); }
+  #toast.warn { background:#4a3500; border:1px solid var(--amber); }
+
+  /* ── Spinner ── */
+  .spin {
+    display:inline-block; width:15px; height:15px;
+    border:2px solid rgba(255,255,255,.3);
+    border-top-color:#fff; border-radius:50%;
+    animation:spin .7s linear infinite; vertical-align:middle;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* ── Warning box ── */
+  .warn-box {
+    background:rgba(245,166,35,.07); border:1px solid rgba(245,166,35,.25);
+    border-radius:10px; padding:12px 16px; font-size:12px; color:#fcd34d;
+    display:flex; align-items:flex-start; gap:10px; margin-bottom:20px;
+    line-height:1.6;
+  }
+</style>
+</head>
+<body>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<div class="page-wrap">
+
+  <!-- ── HEADER ── -->
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon">🚀</div>
+      <div>
+        <div class="header-title">Git Release Manager</div>
+        <div class="header-sub">Commit • Tag • Push — एक क्लिक में</div>
+      </div>
+    </div>
+    <a href="{% url 'admin_panel' %}" class="btn-back">← Admin Panel</a>
+  </div>
+
+  <!-- ── CURRENT VERSION ── -->
+  <div class="card">
+    <div class="section-label">📌 वर्तमान वर्ज़न (Current Version)</div>
+    <div class="version-row">
+      <span class="version-label">Latest Tag:</span>
+      <div class="version-badge" id="git-current-ver">⏳ लोड हो रहा है...</div>
+      <button class="btn-refresh" onclick="fetchCurrentVersion()">🔄 Refresh</button>
+    </div>
+
+    <!-- Warning -->
+    <div class="warn-box">
+      ⚠️
+      <span>
+        केवल <code>git add</code> से <strong>staged</strong> की हुई फाइलें ही commit होंगी।
+        Release करने से पहले टर्मिनल में <code>git add &lt;file&gt;</code> ज़रूर करें।
+      </span>
+    </div>
+  </div>
+
+  <!-- ── BUMP TYPE ── -->
+  <div class="card">
+    <div class="section-label">🎯 रिलीज़ टाइप चुनें</div>
+    <div class="bump-grid">
+      <label class="bump-label selected" id="lbl-patch">
+        <input type="radio" name="bump_type" value="patch" checked>
+        <span class="bump-emoji">🩹</span>
+        <div>
+          <div class="bump-name">Patch</div>
+          <div class="bump-eg">v1.0.0 → v1.0.1</div>
+        </div>
+      </label>
+      <label class="bump-label" id="lbl-minor">
+        <input type="radio" name="bump_type" value="minor">
+        <span class="bump-emoji">✨</span>
+        <div>
+          <div class="bump-name">Minor</div>
+          <div class="bump-eg">v1.0.0 → v1.1.0</div>
+        </div>
+      </label>
+      <label class="bump-label" id="lbl-major">
+        <input type="radio" name="bump_type" value="major">
+        <span class="bump-emoji">🔥</span>
+        <div>
+          <div class="bump-name">Major</div>
+          <div class="bump-eg">v1.0.0 → v2.0.0</div>
+        </div>
+      </label>
+    </div>
+
+    <!-- Commit Message -->
+    <div class="section-label">📝 कमिट मैसेज</div>
+    <input
+      type="text" id="git-msg" class="commit-input"
+      placeholder="जैसे: पासवर्ड रिसेट फीचर जोड़ा / Login bug fix किया"
+      onkeydown="if(event.key==='Enter') triggerGitRelease()"
+    >
+
+    <!-- Staged Files -->
+    <div class="staged-header">
+      <div class="section-label" style="margin-bottom:0;">
+        📋 Staged Files
+        <span class="staged-count" id="staged-count-badge">0</span>
+      </div>
+      <button class="btn-refresh" onclick="refreshStagedFiles()">🔄 Refresh</button>
+    </div>
+    <div class="staged-box" id="staged-files-box">
+      <span style="color:var(--muted);">⏳ लोड हो रहा है...</span>
+    </div>
+    <div class="staged-legend">
+      🟢 Added &nbsp; 🟡 Modified &nbsp; 🔴 Deleted &nbsp; 🔵 Renamed
+      &nbsp;|&nbsp; <em>ये फाइलें <code>git add</code> से stage हुई हैं</em>
+    </div>
+  </div>
+
+  <!-- ── RELEASE BUTTON ── -->
+  <div class="card">
+    <button id="git-release-btn" class="btn-release" onclick="triggerGitRelease()">
+      🚀 <span id="git-btn-txt">Release Deploy करें</span>
+    </button>
+
+    <!-- Output Terminal -->
+    <div class="output-box" id="git-output-box">
+      <div class="output-label">📟 Script Output</div>
+      <pre class="output-pre" id="git-output-pre"></pre>
+    </div>
+  </div>
+
+</div><!-- /page-wrap -->
+
+<div id="toast"></div>
+
+<script>
+const CSRF = '{{ csrf_token }}';
+
+// ── Toast ─────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, type='ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = '', 2800);
+}
+
+// ── Bump Type Radio highlight ──────────────────────────────────────
+document.querySelectorAll('input[name="bump_type"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('.bump-label').forEach(l => l.classList.remove('selected'));
+    const sel = document.getElementById(`lbl-${radio.value}`);
+    if (sel) sel.classList.add('selected');
+  });
+});
+
+// ── Fetch Current Version ──────────────────────────────────────────
+async function fetchCurrentVersion() {
+  const badge = document.getElementById('git-current-ver');
+  badge.textContent = '⏳ लोड हो रहा है...';
+  try {
+    const resp = await fetch('/api/git-current-version/');
+    const data = await resp.json();
+    badge.textContent = data.version || 'v0.0.0 (कोई tag नहीं)';
+  } catch(e) {
+    badge.textContent = '⚠️ fetch नहीं हुआ';
+  }
+}
+fetchCurrentVersion();
+
+// ── Staged Files Preview ───────────────────────────────────────────
+async function refreshStagedFiles() {
+  const box   = document.getElementById('staged-files-box');
+  const badge = document.getElementById('staged-count-badge');
+  try {
+    const resp = await fetch('/api/git-staged-files/');
+    const data = await resp.json();
+    badge.textContent = data.staged_count || 0;
+
+    if (!data.staged || data.staged.length === 0) {
+      box.innerHTML = `<span style="color:var(--muted);">⚠️ कोई staged file नहीं — टर्मिनल में <code style="color:#a89fff;">git add &lt;file&gt;</code> करें।</span>`;
+      badge.style.background  = 'rgba(255,94,114,.15)';
+      badge.style.borderColor = 'rgba(255,94,114,.3)';
+      badge.style.color       = '#ff9090';
+    } else {
+      badge.style.background  = 'rgba(124,111,255,.15)';
+      badge.style.borderColor = 'rgba(124,111,255,.3)';
+      badge.style.color       = '#a89fff';
+      box.innerHTML = data.staged.map(f =>
+        `<div style="color:var(--text);">${f.icon} <span style="color:var(--muted);font-size:10px;">[${f.status}]</span> ${f.file}</div>`
+      ).join('');
+    }
+  } catch(e) {
+    box.innerHTML = `<span style="color:var(--red);">API Error: ${e.message}</span>`;
+  }
+}
+refreshStagedFiles();
+setInterval(refreshStagedFiles, 5000);
+
+// ── Trigger Git Release ────────────────────────────────────────────
+async function triggerGitRelease() {
+  const bump_type = document.querySelector('input[name="bump_type"]:checked')?.value;
+  const message   = document.getElementById('git-msg').value.trim();
+  const btn       = document.getElementById('git-release-btn');
+  const btnTxt    = document.getElementById('git-btn-txt');
+  const outBox    = document.getElementById('git-output-box');
+  const outPre    = document.getElementById('git-output-pre');
+
+  if (!message) {
+    showToast('⚠️ कमिट मैसेज खाली है!', 'err');
+    document.getElementById('git-msg').focus();
+    return;
+  }
+  if (!confirm(`🚀 "${bump_type}" release बनाना चाहते हैं?\n\nमैसेज: "${message}"\n\nसिर्फ staged फाइलें commit होंगी।`)) return;
+
+  btn.disabled     = true;
+  btnTxt.innerHTML = '<span class="spin"></span> Release हो रहा है...';
+  outBox.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/git-release/', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body:    JSON.stringify({ bump_type, message })
+    });
+    const data = await resp.json();
+
+    if (data.status === 'no_staged') {
+      showToast('⚠️ ' + data.msg, 'err');
+      outBox.style.display = 'block';
+      outPre.style.color   = '#f5a623';
+      outPre.textContent   = `⚠️ ${data.msg}\n\n📋 Git Status:\n${data.unstaged_info || '(कोई changes नहीं)'}`;
+      refreshStagedFiles();
+      return;
+    }
+
+    outBox.style.display = 'block';
+    outPre.textContent   = data.output || '(कोई output नहीं)';
+
+    if (data.status === 'success') {
+      showToast(data.msg || '🎉 Release हो गई!', 'ok');
+      document.getElementById('git-msg').value = '';
+      if (data.new_version) {
+        document.getElementById('git-current-ver').textContent = data.new_version;
+      }
+      outPre.style.color = '#a0e8a0';
+      refreshStagedFiles();
+    } else {
+      showToast('❌ ' + (data.msg || 'Error occurred'), 'err');
+      outPre.style.color = '#ff9090';
+    }
+  } catch(e) {
+    showToast('API Connection Failed', 'err');
+  } finally {
+    btn.disabled = false;
+    btnTxt.textContent = '🚀 Release Deploy करें';
+  }
+}
+</script>
+</body>
+</html>

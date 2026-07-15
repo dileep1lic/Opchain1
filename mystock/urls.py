@@ -16,6 +16,7 @@ urlpatterns = [
     path('api/db-cleanup-preview/', views.db_cleanup_preview_api,  name='db_cleanup_preview_api'),
     
     # ── Git Release ──────────────────────────────────────────────
+    path('git-release/',              views.git_release_page,         name='git_release_page'),
     path('api/git-release/',          views.git_release_api,          name='git_release_api'),
     path('api/git-current-version/',  views.git_current_version_api,  name='git_current_version_api'),
     path('api/git-staged-files/',     views.git_staged_files_api,     name='git_staged_files_api'),
@@ -23,6 +24,12 @@ urlpatterns = [
     path('admin-panel/users/', views.user_approval_list, name='user_approval_list'),
 
     path('admin-panel/users/toggle/<int:user_id>/', views.toggle_user_status, name='toggle_user_status'),
+
+    # एडमिन: यूज़र का पासवर्ड डिफ़ॉल्ट (12345) पर रिसेट करे
+    path('admin-panel/users/reset-password/<int:user_id>/', views.admin_reset_password, name='admin_reset_password'),
+
+    # यूज़र: अपना पासवर्ड बदले (पुराना पासवर्ड ज़रूरी)
+    path('change-password/', views.change_password, name='change_password'),
 
     # यह लाइन जोड़ें ताकि Django हमारे कस्टम लॉगिन व्यू को कॉल करे
     path('accounts/login/', views.login_view, name='login'), 

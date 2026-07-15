@@ -90,7 +90,10 @@
         .btn-reject:hover { opacity: .9; transform: translateY(-1px); }
         .btn-action:active { transform: translateY(0); }
 
+        .btn-reset { background: linear-gradient(135deg, #f97316, #ea580c); box-shadow: 0 4px 12px rgba(249,115,22,.2); }
+        .btn-reset:hover { opacity: .9; transform: translateY(-1px); }
         .empty-state { text-align: center; padding: 40px 0; color: var(--muted); font-size: 14px; }
+        .actions-cell { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     </style>
 </head>
 <body>
@@ -124,6 +127,7 @@
                         <th>📅 जॉइनिंग डेट</th>
                         <th>⚡ स्थिति (Status)</th>
                         <th>⚙️ एक्शन</th>
+                        <th>🔑 पासवर्ड रिसेट</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -142,19 +146,27 @@
                             {% endif %}
                         </td>
                         <td>
-                            <form method="POST" action="{% url 'toggle_user_status' u.id %}">
+                            <div class="actions-cell">
+                                <form method="POST" action="{% url 'toggle_user_status' u.id %}">
+                                    {% csrf_token %}
+                                    {% if u.is_active %}
+                                        <button type="submit" class="btn-action btn-reject">Deactivate</button>
+                                    {% else %}
+                                        <button type="submit" class="btn-action btn-approve">Approve</button>
+                                    {% endif %}
+                                </form>
+                            </div>
+                        </td>
+                        <td>
+                            <form method="POST" action="{% url 'admin_reset_password' u.id %}" onsubmit="return confirm('क्या आप {{ u.first_name }} का पासवर्ड डिफ़ॉल्ट (12345) पर रिसेट करना चाहते हैं?')">
                                 {% csrf_token %}
-                                {% if u.is_active %}
-                                    <button type="submit" class="btn-action btn-reject">Deactivate</button>
-                                {% else %}
-                                    <button type="submit" class="btn-action btn-approve">Approve</button>
-                                {% endif %}
+                                <button type="submit" class="btn-action btn-reset" title="पासवर्ड 12345 पर रिसेट करें">🔑 Reset</button>
                             </form>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="4" class="empty-state">
+                        <td colspan="5" class="empty-state">
                             अभी तक कोई भी यूज़र रजिस्टर्ड नहीं हुआ है।
                         </td>
                     </tr>

@@ -256,7 +256,7 @@ def login_view(request):
             else:
                 messages.error(request, "आपका अकाउंट अभी एडमिन द्वारा एक्टिवेट नहीं किया गया है।")
         else:
-            messages.error(request, "यूज़रनेम/ईमेल या密码 गलत है।")
+            messages.error(request, "यूज़रनेम/ईमेल या पासवर्ड गलत है।")
 
     return render(request, 'registration/login.html')
 
@@ -427,16 +427,78 @@ def toggle_user_status(request, user_id):
     return redirect('user_approval_list')
 
 
+# ── Admin: User ka Password Reset (Default: 12345) ──────────────
+@admin_only
+@require_POST
+def admin_reset_password(request, user_id):
+    """एडमिन किसी भी यूज़र का पासवर्ड डिफ़ॉल्ट (12345) पर रिसेट कर सकता है"""
+    user_to_reset = get_object_or_404(User, id=user_id, is_superuser=False)
+    DEFAULT_PASSWORD = "12345"
+    user_to_reset.set_password(DEFAULT_PASSWORD)
+    user_to_reset.save()
+    messages.success(
+        request,
+        f"✅ {user_to_reset.first_name} ({user_to_reset.username}) का पासवर्ड सफलतापूर्वक डिफ़ॉल्ट (12345) पर रिसेट कर दिया गया है।"
+    )
+    return redirect('user_approval_list')
+
+
+# ── User: Apna Password Change ───────────────────────────────────
+@login_required(login_url='/accounts/login/')
+def change_password(request):
+    """यूज़र अपना पुराना पासवर्ड डालकर नया पासवर्ड सेट कर सकता है"""
+    from django.contrib.auth import update_session_auth_hash
+
+    if request.method == 'POST':
+        old_password    = request.POST.get('old_password', '').strip()
+        new_password    = request.POST.get('new_password', '').strip()
+        confirm_password = request.POST.get('confirm_password', '').strip()
+
+        # 1. पुराना पासवर्ड सही है?
+        if not request.user.check_password(old_password):
+            messages.error(request, "❌ पुराना पासवर्ड गलत है।")
+            return render(request, 'registration/change_password.html')
+
+        # 2. नया पासवर्ड खाली नहीं होना चाहिए
+        if not new_password:
+            messages.error(request, "❌ नया पासवर्ड खाली नहीं हो सकता।")
+            return render(request, 'registration/change_password.html')
+
+        # 3. दोनों नए पासवर्ड मेल खाने चाहिए
+        if new_password != confirm_password:
+            messages.error(request, "❌ नया पासवर्ड और कन्फर्म पासवर्ड मेल नहीं खाते।")
+            return render(request, 'registration/change_password.html')
+
+        # 4. पासवर्ड अपडेट करें और सेशन बनाए रखें (logout नहीं होगा)
+        request.user.set_password(new_password)
+        request.user.save()
+        update_session_auth_hash(request, request.user)  # लॉगआउट से बचाव
+
+        messages.success(request, "✅ पासवर्ड सफलतापूर्वक बदल दिया गया है!")
+        if request.user.is_superuser:
+            return redirect('admin_panel')
+        return redirect('dashboard')
+
+    return render(request, 'registration/change_password.html')
+
+
 # ── Git Release API ─────────────────────────────────────────────
 import subprocess
 import os
 
+# ── Git Release Page (Standalone) ──────────────────────────────
+@admin_only
+def git_release_page(request):
+    """Git Release Manager — अलग standalone page"""
+    return render(request, 'mystock/git_release.html')
+
+
 @admin_only
 @csrf_exempt
 def git_release_api(request):
-    """Admin Panel से Git Release (Tag) बनाने के लिए API।
-    सिर्फ Superuser ही इसे call कर सकता है।
-    केवल staged (git add की हुई) फाइलें ही commit होंगी।
+    """Admin Panel se Git Release (Tag) banane ke liye API.
+    Sirf Superuser hi ise call kar sakta hai.
+    Pure Python implementation - no bash/bat script needed.
     """
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'msg': 'Invalid method'}, status=405)
@@ -475,46 +537,100 @@ def git_release_api(request):
             })
         # ─────────────────────────────────────────────────────────────
 
-        script_path = os.path.join(project_root, 'release.sh')
-        if not os.path.isfile(script_path):
-            return JsonResponse({'status': 'error', 'msg': 'release.sh नहीं मिली। पहले उसे project root में रखें।'})
+        def run_git(*args, timeout=30):
+            """Run a git command and return (returncode, stdout, stderr)."""
+            res = subprocess.run(
+                ['git'] + list(args),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=project_root,
+                encoding='utf-8',
+                errors='replace',
+            )
+            return res.returncode, res.stdout.strip(), res.stderr.strip()
 
-        # Script run करो — script अब git add नहीं करती, सिर्फ commit करती है
-        result = subprocess.run(
-            ['bash', script_path, bump_type, message],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=project_root,
-        )
+        output_lines = []
+        output_lines.append('Staged files jo commit hongi:')
+        for f in staged_files:
+            output_lines.append(f'  + {f}')
 
-        output   = result.stdout.strip()
-        stderr   = result.stderr.strip()
-        combined = output + ('\n' + stderr if stderr else '')
-
-        if result.returncode == 0:
-            # नया वर्ज़न output से निकालो
-            new_version = ''
-            for line in output.splitlines():
-                if 'टैग बन गया' in line:
-                    parts = line.split()
-                    for p in parts:
-                        if p.startswith('v') and '.' in p:
-                            new_version = p
-                            break
-            return JsonResponse({
-                'status':       'success',
-                'msg':          f'🎉 Release {new_version} successfully created!',
-                'new_version':  new_version,
-                'staged_files': staged_files,
-                'output':       combined,
-            })
+        # ── Latest tag ──────────────────────────────────────────────
+        rc, latest_tag, _ = run_git('describe', '--tags', '--abbrev=0')
+        if rc != 0 or not latest_tag:
+            latest_tag = 'v0.0.0'
+            output_lines.append('No previous version found. Starting from v0.0.0')
         else:
+            output_lines.append(f'Current version: {latest_tag}')
+
+        # ── Version bump ─────────────────────────────────────────────
+        version_num = latest_tag.lstrip('v')
+        parts = version_num.split('.')
+        try:
+            major = int(parts[0]) if len(parts) > 0 else 0
+            minor = int(parts[1]) if len(parts) > 1 else 0
+            patch = int(parts[2]) if len(parts) > 2 else 0
+        except (ValueError, IndexError):
+            major, minor, patch = 0, 0, 0
+
+        if bump_type == 'major':
+            major += 1; minor = 0; patch = 0
+        elif bump_type == 'minor':
+            minor += 1; patch = 0
+        elif bump_type == 'patch':
+            patch += 1
+
+        new_version = f'v{major}.{minor}.{patch}'
+        output_lines.append(f'New version calculated: {new_version}')
+
+        # ── Git commit ───────────────────────────────────────────────
+        rc, commit_out, commit_err = run_git('commit', '-m', message)
+        if rc != 0:
+            err_detail = commit_err or commit_out
+            output_lines.append(f'Commit failed: {err_detail}')
             return JsonResponse({
                 'status': 'error',
-                'msg':    'Script में कुछ गड़बड़ हुई — नीचे output देखें।',
-                'output': combined,
+                'msg':    'Commit failed. See output below.',
+                'output': '\n'.join(output_lines),
             })
+        output_lines.append(f'Commit successful: {message}')
+
+        # ── Git tag ──────────────────────────────────────────────────
+        tag_msg = f'Release {new_version}: {message}'
+        rc, tag_out, tag_err = run_git('tag', '-a', new_version, '-m', tag_msg)
+        if rc != 0:
+            err_detail = tag_err or tag_out
+            output_lines.append(f'Tag failed: {err_detail}')
+            return JsonResponse({
+                'status': 'error',
+                'msg':    f'Tag creation failed for {new_version}.',
+                'output': '\n'.join(output_lines),
+            })
+        output_lines.append(f'Tag created: {new_version}')
+
+        # ── Git push ─────────────────────────────────────────────────
+        output_lines.append('Pushing to remote...')
+        rc1, push_out,  push_err  = run_git('push', timeout=60)
+        rc2, ptag_out, ptag_err   = run_git('push', 'origin', new_version, timeout=60)
+
+        if rc1 != 0 or rc2 != 0:
+            push_error = push_err or push_out or ptag_err or ptag_out
+            output_lines.append(f'Push error: {push_error}')
+            return JsonResponse({
+                'status': 'error',
+                'msg':    'Commit+Tag created but push failed.',
+                'output': '\n'.join(output_lines),
+            })
+
+        output_lines.append(f'Push successful! {new_version} is live.')
+
+        return JsonResponse({
+            'status':       'success',
+            'msg':          f'Release {new_version} successfully created!',
+            'new_version':  new_version,
+            'staged_files': staged_files,
+            'output':       '\n'.join(output_lines),
+        })
 
     except subprocess.TimeoutExpired:
         return JsonResponse({'status': 'error', 'msg': 'Script timeout (60s) — git push में देरी हो रही है।'})
