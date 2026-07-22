@@ -3936,32 +3936,51 @@ def save_ltp_levels_api(request):
         if ce_strike == pe_strike:
             ce_strike = pe_strike + step
 
-        # Step 3: OptionChain से latest CE_LTP और PE_LTP निकालें
-        today_date = timezone.now().date()
+        # Step 3: Cache (API Data) से लेटेस्ट CE_LTP और PE_LTP निकालें, ना मिले तो DB से
+        from django.core.cache import caches
+        
+        ce_ltp = pe_ltp = 0.0
+        expiry = ""
+        
+        # पहले Cache से कोशिश करें
+        live_data = caches['default'].get(f'live_nifty_data_{symbol}')
+        
+        if live_data:
+            for row in live_data:
+                strike = float(row.get('Strike_Price', 0))
+                if strike == ce_strike:
+                    ce_ltp = float(row.get('CE_LTP') or 0)
+                    expiry = str(row.get('expiry') or "")
+                if strike == pe_strike:
+                    pe_ltp = float(row.get('PE_LTP') or 0)
+        
+        # अगर Cache में नहीं मिला, तो DB से fallback (पुराना तरीका)
+        if ce_ltp <= 0 or pe_ltp <= 0:
+            ce_row = (
+                OptionChain.objects
+                .filter(Symbol=symbol, Strike_Price=ce_strike)
+                .order_by("-Time")
+                .values("CE_LTP", "Expiry_Date")
+                .first()
+            )
+            pe_row = (
+                OptionChain.objects
+                .filter(Symbol=symbol, Strike_Price=pe_strike)
+                .order_by("-Time")
+                .values("PE_LTP")
+                .first()
+            )
 
-        ce_row = (
-            OptionChain.objects
-            .filter(Symbol=symbol, Strike_Price=ce_strike, Time__date=today_date)
-            .order_by("-Time")
-            .values("CE_LTP", "Expiry_Date")
-            .first()
-        )
-        pe_row = (
-            OptionChain.objects
-            .filter(Symbol=symbol, Strike_Price=pe_strike, Time__date=today_date)
-            .order_by("-Time")
-            .values("PE_LTP")
-            .first()
-        )
+            if not ce_row and ce_ltp <= 0:
+                return JsonResponse({"status": "error", "msg": f"CE Data नहीं मिला: {symbol} Strike {ce_strike}"}, status=404)
+            if not pe_row and pe_ltp <= 0:
+                return JsonResponse({"status": "error", "msg": f"PE Data नहीं मिला: {symbol} Strike {pe_strike}"}, status=404)
 
-        if not ce_row:
-            return JsonResponse({"status": "error", "msg": f"CE Data नहीं मिला: {symbol} Strike {ce_strike}"}, status=404)
-        if not pe_row:
-            return JsonResponse({"status": "error", "msg": f"PE Data नहीं मिला: {symbol} Strike {pe_strike}"}, status=404)
-
-        ce_ltp = float(ce_row.get("CE_LTP") or 0)
-        pe_ltp = float(pe_row.get("PE_LTP") or 0)
-        expiry = str(ce_row.get("Expiry_Date") or "")
+            if ce_ltp <= 0 and ce_row:
+                ce_ltp = float(ce_row.get("CE_LTP") or 0)
+                expiry = str(ce_row.get("Expiry_Date") or "")
+            if pe_ltp <= 0 and pe_row:
+                pe_ltp = float(pe_row.get("PE_LTP") or 0)
 
         if ce_ltp <= 0 or pe_ltp <= 0:
             return JsonResponse({
