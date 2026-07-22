@@ -44,3 +44,4 @@ channels
 channels-redis
 groq
 python-dotenv
+google-genai
