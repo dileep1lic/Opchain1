@@ -153,6 +153,7 @@ def update_instrument_store_bulk():
 
         # ========= MERGE =========
         final_df = grouped.merge(underlying_df, on='symbol', how='inner')
+        final_df = final_df.drop_duplicates(subset=['symbol'], keep='first')
 
         if final_df.empty:
             print("❌ No matching underlying instruments found.")

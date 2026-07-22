@@ -368,6 +368,80 @@
       100% { transform: translateX(-100%); }
     }
 
+    /* ── VIEW DROPDOWN MENU ─────────────────────────── */
+    .view-menu-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+    .view-menu-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .view-menu-btn .arrow {
+      font-size: .55rem;
+      opacity: .7;
+      transition: transform .2s;
+    }
+    .view-menu-btn.open .arrow { transform: rotate(180deg); }
+
+    .view-dropdown {
+      display: none;
+      /* fixed: toolbar overflow से clip नहीं होगा */
+      position: fixed;
+      top: 0; left: 0;          /* JS से override होगा */
+      background: #1a1e2a;
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      padding: 6px 0;
+      min-width: 190px;
+      z-index: 9000;
+      box-shadow: 0 8px 32px rgba(0,0,0,.7);
+      pointer-events: auto;
+    }
+    .view-dropdown.open { display: block; }
+
+    .vd-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 14px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text2);
+      cursor: pointer;
+      transition: background .12s;
+      gap: 10px;
+      user-select: none;
+    }
+    .vd-item:hover { background: var(--surface2); color: var(--text); }
+    .vd-item .vd-label { flex: 1; }
+    .vd-item .vd-pill {
+      font-size: .62rem;
+      padding: 2px 7px;
+      border-radius: 99px;
+      background: rgba(255,255,255,.07);
+      color: var(--muted);
+      transition: all .15s;
+    }
+    .vd-item.on .vd-pill {
+      background: rgba(38,166,154,.2);
+      color: var(--green);
+    }
+    .vd-item.on .vd-label { color: var(--text); }
+    .vd-sep {
+      height: 1px;
+      background: var(--border2);
+      margin: 4px 0;
+    }
+    .vd-section {
+      padding: 4px 14px 2px;
+      font-size: .58rem;
+      color: var(--muted2);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
     </style>
 </head>
 <body>
@@ -442,7 +516,7 @@
     <span id="ar-icon">⏸</span><span id="ar-label">Auto</span>
   </button>
 
-  <button class="tb-btn active" id="reversal-toggle-btn" onclick="toggleReversalLines()">
+  <button class="tb-btn active" id="reversal-toggle-btn" style="display:none" onclick="toggleReversalLines()">
     <span id="rv-label">Reversal ✓</span>
   </button>
 
@@ -450,9 +524,41 @@
     <span id="alert-label">🔕 Alerts OFF</span>
   </button>
 
-  <button class="tb-btn" id="table-toggle-btn" onclick="toggleTable()">
-    <span id="table-icon">☰</span> <span id="table-label">Table</span>
-  </button>
+  <div class="toolbar-sep"></div>
+
+  <!-- ── VIEW MENU ── -->
+  <div class="view-menu-wrap" id="view-menu-wrap">
+    <button class="tb-btn view-menu-btn" id="view-menu-trigger" onclick="toggleViewMenu(event)">
+      ⚙ View <span class="arrow">▼</span>
+    </button>
+    <div class="view-dropdown" id="view-dropdown">
+
+      <div class="vd-section">Overlays</div>
+
+      <!-- Reversal Lines -->
+      <div class="vd-item on" id="vd-reversal" onclick="vdToggleReversal()">
+        <span class="vd-label">↕ Reversal Lines</span>
+        <span class="vd-pill" id="vd-rv-pill">ON</span>
+      </div>
+
+      <!-- Weekly Range (LTP Lines) -->
+      <div class="vd-item on" id="vd-weekly" onclick="vdToggleWeeklyRange()">
+        <span class="vd-label">📐 Weekly Range</span>
+        <span class="vd-pill" id="vd-wr-pill">ON</span>
+      </div>
+
+      <div class="vd-sep"></div>
+      <div class="vd-section">Data</div>
+
+      <!-- Table -->
+      <div class="vd-item" id="vd-table" onclick="vdToggleTable()">
+        <span class="vd-label">☰ Candle Table</span>
+        <span class="vd-pill" id="vd-tbl-pill">OFF</span>
+      </div>
+
+    </div>
+  </div>
+
 </div>
 
 <!-- ─── OHLCV BAR ─────────────────────────────────── -->
@@ -507,6 +613,11 @@ let lastReversals  = [];
 let reversalVisible = true;
 let tableVisible   = false;
 const IST_OFFSET   = 19800;  // +5:30 in seconds
+
+// ── LTP Levels Lines ──────────────────────────────────
+let ltpLinesSeries  = [];   // chart पर drawn lines
+let ltpLinesVisible = true; // toggle state
+let _ltpFetchTimer  = null;
 
 // ── Init chart ────────────────────────────────────────
 function initChart() {
@@ -1090,6 +1201,143 @@ function checkReversalAlerts(currentPrice, reversals) {
 }
 
 // ══════════════════════════════════════════════════════
+//  LTP LEVELS LINES — Fetch & Draw
+// ══════════════════════════════════════════════════════
+
+// Pair config — Weekly Range palette
+const LTP_PAIRS = [
+  // R1 / S1 — Magenta zone (strong, solid)
+  { rKey:'r1', sKey:'s1', rLabel:'R1', sLabel:'S1',
+    rColor:'#e040fb', sColor:'#e040fb',
+    width:2, style:0 },
+  // R2 / S2 — Cyan zone (medium, dashed)
+  { rKey:'r2', sKey:'s2', rLabel:'R2', sLabel:'S2',
+    rColor:'#00bcd4', sColor:'#00bcd4',
+    width:1, style:2 },
+  // R3 / S3 — Amber zone (outer, dashed)
+  { rKey:'r3', sKey:'s3', rLabel:'R3', sLabel:'S3',
+    rColor:'#ffab40', sColor:'#ffab40',
+    width:1, style:2 },
+];
+
+async function fetchAndDrawLtpLines() {
+  if (!candleSeries) return;
+  const sym = (document.getElementById('ctrl-symbol').value || 'NIFTY').trim().toUpperCase();
+  try {
+    const resp = await fetch(`/api/get-ltp-levels/?symbol=${sym}&limit=1&today_only=0`);
+    const data = await resp.json();
+    _clearLtpLines();
+    if (!data.rows || data.rows.length === 0) return;
+    const row = data.rows[0];
+    if (!ltpLinesVisible) return;
+    LTP_PAIRS.forEach(pair => {
+      const rVal = parseFloat(row[pair.rKey]);
+      const sVal = parseFloat(row[pair.sKey]);
+      if (rVal > 0) {
+        try {
+          ltpLinesSeries.push(candleSeries.createPriceLine({
+            price: rVal, color: pair.rColor,
+            lineWidth: pair.width, lineStyle: pair.style,
+            axisLabelVisible: true, title: pair.rLabel,
+          }));
+        } catch(e) {}
+      }
+      if (sVal > 0) {
+        try {
+          ltpLinesSeries.push(candleSeries.createPriceLine({
+            price: sVal, color: pair.sColor,
+            lineWidth: pair.width, lineStyle: pair.style,
+            axisLabelVisible: true, title: pair.sLabel,
+          }));
+        } catch(e) {}
+      }
+    });
+    if (!window._ltpLinesLoaded) {
+      const r = data.rows[0];
+      showToast(`📐 Weekly Range loaded — R1:${r.r1} | S1:${r.s1}`);
+      window._ltpLinesLoaded = true;
+    }
+  } catch(e) {
+    console.warn('Weekly Range fetch failed:', e.message);
+  }
+}
+
+function _clearLtpLines() {
+  ltpLinesSeries.forEach(pl => { try { candleSeries.removePriceLine(pl); } catch(e){} });
+  ltpLinesSeries = [];
+}
+
+function toggleLtpLines() {
+  ltpLinesVisible = !ltpLinesVisible;
+  if (ltpLinesVisible) fetchAndDrawLtpLines(); else _clearLtpLines();
+}
+
+// ═══════════════════════════════════════════════════════
+//  VIEW DROPDOWN MENU
+// ═══════════════════════════════════════════════════════
+
+function toggleViewMenu(e) {
+  e.stopPropagation();
+  const dd  = document.getElementById('view-dropdown');
+  const btn = document.getElementById('view-menu-trigger');
+  const isOpen = dd.classList.contains('open');
+
+  if (!isOpen) {
+    // Button की screen position लो
+    const rect = btn.getBoundingClientRect();
+    dd.style.top  = (rect.bottom + 4) + 'px';
+    // Right edge से align करो
+    const ddW = 190;
+    let left = rect.right - ddW;
+    if (left < 4) left = 4; // left edge से बाहर न जाए
+    dd.style.left = left + 'px';
+    dd.style.right = 'auto';
+  }
+
+  dd.classList.toggle('open', !isOpen);
+  btn.classList.toggle('open', !isOpen);
+}
+
+// Outside click पर menu बंद हो
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('view-menu-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('view-dropdown').classList.remove('open');
+    document.getElementById('view-menu-trigger').classList.remove('open');
+  }
+});
+
+// Reversal (View Menu)
+function vdToggleReversal() {
+  toggleReversalLines();
+  const isOn = reversalVisible;
+  const item = document.getElementById('vd-reversal');
+  const pill = document.getElementById('vd-rv-pill');
+  item.classList.toggle('on', isOn);
+  pill.textContent = isOn ? 'ON' : 'OFF';
+}
+
+// Weekly Range (View Menu)
+function vdToggleWeeklyRange() {
+  toggleLtpLines();
+  const isOn = ltpLinesVisible;
+  const item = document.getElementById('vd-weekly');
+  const pill = document.getElementById('vd-wr-pill');
+  item.classList.toggle('on', isOn);
+  pill.textContent = isOn ? 'ON' : 'OFF';
+}
+
+// Table (View Menu)
+function vdToggleTable() {
+  toggleTable();
+  const isOn = tableVisible;
+  const item = document.getElementById('vd-table');
+  const pill = document.getElementById('vd-tbl-pill');
+  item.classList.toggle('on', isOn);
+  pill.textContent = isOn ? 'ON' : 'OFF';
+}
+
+// ══════════════════════════════════════════════════════
 //  LOCAL STORAGE (Save & Load Settings)
 // ══════════════════════════════════════════════════════
 
@@ -1235,7 +1483,10 @@ window.addEventListener('DOMContentLoaded', () => {
   loadSettings(); 
   initChart();
   loadChart();
-  
+
+  // LTP Lines — chart load के बाद एक बार fetch करो (7 दिन तक valid)
+  setTimeout(fetchAndDrawLtpLines, 1500);
+
   // 👇 यहाँ टिकर चालू करें 👇
   startLiveTicker();
 

@@ -57,6 +57,7 @@ urlpatterns = [
 
 
     path('api/resistance/', views.resistance_live_api, name='resistance_live_api'),
+    path('api/reversal-base/', views.reversal_base_status_api, name='reversal_base_status_api'),
     path('resistance/', views.resistance_dashboard, name='resistance_dashboard'),
     path('sr-data/', views.support_resistance_view, name='sr_data'),
 
@@ -107,5 +108,7 @@ urlpatterns = [
     path('api/voice-chat/', seed_voice.voice_chat_api, name='voice_chat_api'),
     path('api/voice-chat/stream/', seed_voice.voice_chat_stream, name='voice_chat_stream'),  # 🚀 SSE Streaming
 
-    
+    # ── LTP Levels (बटन क्लिक पर DB में save) ──────────────────
+    path('api/save-ltp-levels/',  views.save_ltp_levels_api, name='save_ltp_levels'),
+    path('api/get-ltp-levels/',   views.get_ltp_levels_api,  name='get_ltp_levels'),
 ]

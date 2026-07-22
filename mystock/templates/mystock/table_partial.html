@@ -100,6 +100,9 @@
 
             <td class="col-reversl rev-val {% if row.Reversl_Ce < spot %}breakout{% endif %}">
                 {% if row.Reversl_Ce < spot %}Breakout{% else %}{{ row.Reversl_Ce |floatformat:2 }}{% endif %}
+                {% if row.CE_Rev_Pct != None %}
+                    <br><span class="pct-text {% if row.CE_Rev_Pct >= 0 %}pos-val{% else %}neg-val{% endif %}">({% if row.CE_Rev_Pct > 0 %}+{% endif %}{{ row.CE_Rev_Pct|floatformat:2 }}%)</span>
+                {% endif %}
             </td>
 
             <td class="col-strike strike">
@@ -112,6 +115,9 @@
 
             <td class="col-reversl rev-val {% if row.Reversl_Pe > spot %}breakdown{% endif %}">
                 {% if row.Reversl_Pe > spot %}Breakdown{% else %}{{ row.Reversl_Pe |floatformat:2 }}{% endif %}
+                {% if row.PE_Rev_Pct != None %}
+                    <br><span class="pct-text {% if row.PE_Rev_Pct >= 0 %}pos-val{% else %}neg-val{% endif %}">({% if row.PE_Rev_Pct > 0 %}+{% endif %}{{ row.PE_Rev_Pct|floatformat:2 }}%)</span>
+                {% endif %}
             </td>
 
             <td class="col-ltp {% if row.Strike_Price > spot %}itm-bg{% else %}otm-bg{% endif %} white-text">

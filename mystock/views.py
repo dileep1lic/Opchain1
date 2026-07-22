@@ -48,6 +48,7 @@ from .models import (
     TradeStatus,
     TradeType,
     TradingJournal,
+    LtpLevels,
 )
 from .symbol import symbols as ALL_SYMBOLS
 from .trade_logic import get_master_levels
@@ -880,6 +881,58 @@ def option_chain_dashboard(request):
         'expiry_date': None,
         'monika_user_name': monika_user_name,
     })
+def _get_all_strikes_reversal_base(symbol, today_date):
+    """
+    9:20 (9:18 - 9:22) window के दौरान सभी स्ट्राइक्स की Reversal Value को cache करता है।
+    अगर इस window में कोई डेटा नहीं है, तो आज के दिन का सबसे पहला available डेटा ले लेता है।
+    Return format: { strike_price: {'ce': base_val, 'pe': base_val} }
+    """
+    cache_key = f"all_strikes_reversal_base_{symbol}_{today_date}_v3"
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        return cached_data
+
+    IST_tz = pytz.timezone('Asia/Kolkata')
+    window_start = timezone.make_aware(datetime.combine(today_date, dt_time(9, 18)), IST_tz)
+    window_end   = timezone.make_aware(datetime.combine(today_date, dt_time(9, 22)), IST_tz)
+    end_of_day   = timezone.make_aware(datetime.combine(today_date, dt_time(23, 59, 59)), IST_tz)
+
+    base_data = {}
+    
+    # 1. Try to get data within 9:18 to 9:22
+    qs = OptionChain.objects.filter(
+        Symbol=symbol, Time__gte=window_start, Time__lte=window_end
+    ).order_by('Time').values('Strike_Price', 'Reversl_Ce', 'Reversl_Pe')
+
+    # 2. Fallback: If no data in 9:20 window, get earliest data available today
+    if not qs.exists():
+        day_start = timezone.make_aware(datetime.combine(today_date, dt_time(9, 0)), IST_tz)
+        qs = OptionChain.objects.filter(
+            Symbol=symbol, Time__gte=day_start, Time__lte=end_of_day
+        ).order_by('Time').values('Strike_Price', 'Reversl_Ce', 'Reversl_Pe')
+
+    for row in qs:
+        sp = float(row['Strike_Price'])
+        if sp not in base_data:
+            base_data[sp] = {'ce': 0.0, 'pe': 0.0}
+            
+        r_ce = row.get('Reversl_Ce')
+        r_pe = row.get('Reversl_Pe')
+        
+        if base_data[sp]['ce'] == 0.0 and r_ce and float(r_ce) > 0:
+            base_data[sp]['ce'] = float(r_ce)
+            
+        if base_data[sp]['pe'] == 0.0 and r_pe and float(r_pe) > 0:
+            base_data[sp]['pe'] = float(r_pe)
+
+    # Cache if we have data
+    now_ist = datetime.now(IST_tz)
+    if base_data:
+        seconds_till_close = max(300, int((datetime.combine(today_date, dt_time(18, 0)) - datetime.combine(today_date, now_ist.time())).total_seconds()))
+        cache.set(cache_key, base_data, timeout=seconds_till_close)
+
+    return base_data
+
 @login_required
 def table_update_api(request):
     """
@@ -915,6 +968,42 @@ def table_update_api(request):
 
     # 🟢 SR Data को भी कैश से लिया जा सकता है अगर आपने वहां सेट किया है
     latest_sr = LiveSRData.objects.filter(Symbol='NIFTY').order_by('-Time').first()
+
+    # 🟢 Calculate % change of reversal values from 9:20 base
+    today_date = latest_time.date() if timezone.is_aware(latest_time) else timezone.make_aware(latest_time).date()
+    # (Because latest_time from OptionChain is usually the row's Time)
+    try:
+        base_reversals = _get_all_strikes_reversal_base('NIFTY', today_date)
+    except Exception as e:
+        print(f"Error fetching base reversals: {e}")
+        base_reversals = {}
+        
+    for row in display_data:
+        # Convert row (dictionary or object) to mutable if needed. In _get_nifty_chain_context, display_data has objects.
+        sp = float(row.Strike_Price) if hasattr(row, 'Strike_Price') else float(row['Strike_Price'])
+        
+        ce_rev = row.Reversl_Ce if hasattr(row, 'Reversl_Ce') else row['Reversl_Ce']
+        pe_rev = row.Reversl_Pe if hasattr(row, 'Reversl_Pe') else row['Reversl_Pe']
+        
+        ce_pct = None
+        pe_pct = None
+        
+        if sp in base_reversals:
+            base_ce = base_reversals[sp]['ce']
+            base_pe = base_reversals[sp]['pe']
+            
+            if base_ce > 0 and ce_rev and float(ce_rev) > 0:
+                ce_pct = round(((float(ce_rev) - base_ce) / base_ce) * 100, 2)
+            if base_pe > 0 and pe_rev and float(pe_rev) > 0:
+                pe_pct = round(((float(pe_rev) - base_pe) / base_pe) * 100, 2)
+                
+        # Inject custom attributes
+        if hasattr(row, 'Strike_Price'):
+            row.CE_Rev_Pct = ce_pct
+            row.PE_Rev_Pct = pe_pct
+        else:
+            row['CE_Rev_Pct'] = ce_pct
+            row['PE_Rev_Pct'] = pe_pct
 
     context = {
         'data': display_data,
@@ -3799,3 +3888,339 @@ def journal_delete(request, pk):
 
 
 # Trade journal views End Here
+
+
+# ════════════════════════════════════════════════════════════════
+#  LTP Levels API — बटन क्लिक पर DB में save करने के लिए
+#  Formula:
+#    ltp_total = CE_LTP (spot से ऊपर वाली strike) + PE_LTP (spot से नीचे वाली strike)
+#    R1 = spot + ltp_total    S1 = spot - ltp_total
+#    R2 = R1 + ltp_total      S2 = S1 - ltp_total
+#    R3 = R2 + ltp_total      S3 = S2 - ltp_total
+# ════════════════════════════════════════════════════════════════
+
+@login_required
+@csrf_exempt
+def save_ltp_levels_api(request):
+    """
+    POST: Dashboard के बटन से call होता है।
+    - Symbol और Spot Price लेता है
+    - OptionChain से latest CE/PE LTP निकालता है
+    - Levels calculate करके LtpLevels model में save करता है
+    """
+    if request.method != "POST":
+        return JsonResponse({"status": "error", "msg": "POST method required"}, status=405)
+
+    try:
+        data   = json.loads(request.body)
+        symbol = data.get("symbol", "NIFTY").upper()
+        spot   = float(data.get("spot", 0))
+
+        if spot <= 0:
+            return JsonResponse({"status": "error", "msg": "Spot Price invalid है"}, status=400)
+
+        # Step 1: Strike size determine करें
+        step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+
+        # Step 2: CE Strike = spot से ऊपर की nearest strike
+        #         PE Strike = spot से नीचे की nearest strike
+        # nearest strike = round to nearest step
+        # CE Strike ≥ spot  →  ceil(spot / step) * step
+        # PE Strike ≤ spot  →  floor(spot / step) * step
+
+        import math as _math
+        ce_strike = _math.ceil(spot / step) * step   # मार्केट से बड़ी (ऊपर)
+        pe_strike = _math.floor(spot / step) * step  # मार्केट से छोटी (नीचे)
+
+        # अगर spot exact strike पर है तो CE एक step ऊपर और PE exact
+        if ce_strike == pe_strike:
+            ce_strike = pe_strike + step
+
+        # Step 3: OptionChain से latest CE_LTP और PE_LTP निकालें
+        today_date = timezone.now().date()
+
+        ce_row = (
+            OptionChain.objects
+            .filter(Symbol=symbol, Strike_Price=ce_strike, Time__date=today_date)
+            .order_by("-Time")
+            .values("CE_LTP", "Expiry_Date")
+            .first()
+        )
+        pe_row = (
+            OptionChain.objects
+            .filter(Symbol=symbol, Strike_Price=pe_strike, Time__date=today_date)
+            .order_by("-Time")
+            .values("PE_LTP")
+            .first()
+        )
+
+        if not ce_row:
+            return JsonResponse({"status": "error", "msg": f"CE Data नहीं मिला: {symbol} Strike {ce_strike}"}, status=404)
+        if not pe_row:
+            return JsonResponse({"status": "error", "msg": f"PE Data नहीं मिला: {symbol} Strike {pe_strike}"}, status=404)
+
+        ce_ltp = float(ce_row.get("CE_LTP") or 0)
+        pe_ltp = float(pe_row.get("PE_LTP") or 0)
+        expiry = str(ce_row.get("Expiry_Date") or "")
+
+        if ce_ltp <= 0 or pe_ltp <= 0:
+            return JsonResponse({
+                "status": "error",
+                "msg": f"LTP zero है — CE_LTP={ce_ltp}, PE_LTP={pe_ltp}. मार्केट खुला है?"
+            }, status=400)
+
+        # Step 4: Calculate levels
+        ltp_total = round(ce_ltp + pe_ltp, 2)
+
+        r1 = round(spot + ltp_total, 2)
+        r2 = round(r1  + ltp_total, 2)
+        r3 = round(r2  + ltp_total, 2)
+
+        s1 = round(spot - ltp_total, 2)
+        s2 = round(s1  - ltp_total, 2)
+        s3 = round(s2  - ltp_total, 2)
+
+        # Step 5: DB में save करें
+        record = LtpLevels.objects.create(
+            symbol       = symbol,
+            expiry_date  = expiry,
+            market_price = spot,
+            ce_strike    = ce_strike,
+            ce_ltp       = ce_ltp,
+            pe_strike    = pe_strike,
+            pe_ltp       = pe_ltp,
+            ltp_total    = ltp_total,
+            r1=r1, r2=r2, r3=r3,
+            s1=s1, s2=s2, s3=s3,
+        )
+
+        return JsonResponse({
+            "status":       "saved",
+            "id":           record.id,
+            "symbol":       symbol,
+            "market_price": spot,
+            "ce_strike":    ce_strike,
+            "ce_ltp":       ce_ltp,
+            "pe_strike":    pe_strike,
+            "pe_ltp":       pe_ltp,
+            "ltp_total":    ltp_total,
+            "r1": r1, "r2": r2, "r3": r3,
+            "s1": s1, "s2": s2, "s3": s3,
+            "saved_at":     localtime(record.saved_at).strftime("%H:%M:%S"),
+        })
+
+    except Exception as e:
+        import traceback
+        print("save_ltp_levels_api ERROR:", traceback.format_exc())
+        return JsonResponse({"status": "error", "msg": str(e)}, status=500)
+
+
+@login_required
+@require_GET
+def get_ltp_levels_api(request):
+    """
+    GET: Saved LTP Levels JSON में देता है।
+    Query params:
+      symbol     (default=NIFTY)
+      limit      (default=20)
+      today_only (default=1) — 0 करने पर पिछले 7 दिनों की latest entry मिलेगी
+    """
+    symbol     = request.GET.get("symbol", "NIFTY").upper()
+    limit      = min(int(request.GET.get("limit", 20)), 100)
+    today_only = request.GET.get("today_only", "1") != "0"
+
+    qs = LtpLevels.objects.filter(symbol=symbol)
+
+    if today_only:
+        today = timezone.now().date()
+        qs = qs.filter(saved_at__date=today)
+    else:
+        # पिछले 7 दिनों में से latest entry
+        cutoff = timezone.now() - timedelta(days=7)
+        qs = qs.filter(saved_at__gte=cutoff)
+
+    records = qs.order_by("-saved_at")[:limit]
+
+    rows = []
+    for r in records:
+        rows.append({
+            "id":           r.id,
+            "saved_at":     localtime(r.saved_at).strftime("%H:%M:%S"),
+            "market_price": r.market_price,
+            "ce_strike":    r.ce_strike,
+            "ce_ltp":       r.ce_ltp,
+            "pe_strike":    r.pe_strike,
+            "pe_ltp":       r.pe_ltp,
+            "ltp_total":    r.ltp_total,
+            "r1": r.r1, "r2": r.r2, "r3": r.r3,
+            "s1": r.s1, "s2": r.s2, "s3": r.s3,
+        })
+
+    return JsonResponse({"status": "ok", "symbol": symbol, "rows": rows})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9:20 Reversal Base Tracker API
+# ─────────────────────────────────────────────────────────────────────────────
+# यह API:
+#   1. 9:20 के आसपास की Reversal Value को Redis cache में "base" के रूप में store करती है
+#   2. Current reversal value vs base से % change calculate करके return करती है
+#   3. हर 1 मिनट पर frontend polling करता है
+#
+# Cache Keys:
+#   reversal_base_{symbol}       → {r_val, s_val, captured_at}  (9:20 की base value)
+#   reversal_base_locked_{symbol} → True (एक बार set होने के बाद lock)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@login_required
+def reversal_base_status_api(request):
+    """
+    9:20 के आसपास की Reversal value को base/reference के रूप में store करें।
+    Current value से % change calculate करके return करें।
+
+    Query Params:
+        symbol  : NIFTY / BANKNIFTY / FINNIFTY / SENSEX  (default: NIFTY)
+        reset   : '1' — base value को force-reset करें
+    """
+    import math as _math
+
+    symbol      = request.GET.get('symbol', 'NIFTY').upper()
+    force_reset = request.GET.get('reset', '0') == '1'
+
+    IST_tz   = pytz.timezone('Asia/Kolkata')
+    now_ist  = datetime.now(IST_tz)
+    today    = now_ist.date()
+    now_time = now_ist.time()
+
+    # ── 1. Master Levels (current R/S reversal values) ────────────────────────
+    try:
+        master = get_master_levels(symbol, today)
+    except Exception:
+        master = None
+
+    current_r = float(master["R"]["entry"] or 0) if master and master.get("R") else 0.0
+    current_s = float(master["S"]["entry"] or 0) if master and master.get("S") else 0.0
+
+    # ── 2. Base Cache Keys ────────────────────────────────────────────────────
+    base_key   = f"reversal_base_{symbol}_{today}"
+    locked_key = f"reversal_base_locked_{symbol}_{today}"
+
+    # Force reset: admin/user manually reset करे
+    if force_reset:
+        cache.delete(base_key)
+        cache.delete(locked_key)
+
+    existing_base = cache.get(base_key)
+    is_locked     = cache.get(locked_key)
+
+    # ── 3. Base Value Capture Logic ───────────────────────────────────────────
+    # Window: 9:18 से 9:22 के बीच पहली बार valid value मिले → capture करो
+    capture_start = dt_time(9, 18)
+    capture_end   = dt_time(9, 22)
+
+    should_capture = (
+        not is_locked
+        and existing_base is None
+        and capture_start <= now_time <= capture_end
+        and (current_r > 0 or current_s > 0)
+    )
+
+    # अगर अभी capture window नहीं है लेकिन base नहीं है, DB से 9:20 का data लेने की कोशिश करें
+    if not existing_base and not is_locked and now_time > capture_end:
+        try:
+            # 9:18 से 9:22 के बीच का पहला valid record DB से लो
+            window_start = timezone.make_aware(
+                datetime.combine(today, dt_time(9, 18)), IST_tz
+            )
+            window_end   = timezone.make_aware(
+                datetime.combine(today, dt_time(9, 22)), IST_tz
+            )
+            # eff_res_strike और eff_sup_strike जानने के लिए master levels चाहिए
+            if master and master.get("R") and master.get("S"):
+                eff_r_strike = float(master["R"].get("strike") or 0)
+                eff_s_strike = float(master["S"].get("strike") or 0)
+
+                if eff_r_strike > 0:
+                    db_r = (
+                        OptionChain.objects
+                        .filter(Symbol=symbol, Strike_Price=eff_r_strike,
+                                Time__gte=window_start, Time__lte=window_end)
+                        .order_by('Time')
+                        .values_list('Reversl_Ce', flat=True)
+                        .first()
+                    )
+                    if db_r:
+                        current_r = float(db_r)
+
+                if eff_s_strike > 0:
+                    db_s = (
+                        OptionChain.objects
+                        .filter(Symbol=symbol, Strike_Price=eff_s_strike,
+                                Time__gte=window_start, Time__lte=window_end)
+                        .order_by('Time')
+                        .values_list('Reversl_Pe', flat=True)
+                        .first()
+                    )
+                    if db_s:
+                        current_s = float(db_s)
+
+            if current_r > 0 or current_s > 0:
+                should_capture = True
+        except Exception as e:
+            print(f"[reversal_base_api] DB fallback error: {e}")
+
+    if should_capture and (current_r > 0 or current_s > 0):
+        base_data = {
+            "r_base"      : current_r,
+            "s_base"      : current_s,
+            "captured_at" : now_ist.strftime("%H:%M:%S"),
+        }
+        # दिन के अंत तक store करो (18:00 IST तक)
+        seconds_till_close = max(300, int(
+            (datetime.combine(today, dt_time(18, 0)) - datetime.combine(today, now_time))
+            .total_seconds()
+        ))
+        cache.set(base_key,   base_data,  timeout=seconds_till_close)
+        cache.set(locked_key, True,        timeout=seconds_till_close)
+        existing_base = base_data
+
+    # ── 4. % Change Calculate करें ───────────────────────────────────────────
+    def _pct(current, base):
+        """base से current का % change, 2 decimal तक rounded"""
+        try:
+            c = float(current)
+            b = float(base)
+            if b == 0 or not _math.isfinite(c) or not _math.isfinite(b):
+                return None
+            return round(((c - b) / b) * 100, 2)
+        except (TypeError, ValueError):
+            return None
+
+    r_pct = None
+    s_pct = None
+    r_base_val = None
+    s_base_val = None
+    captured_at = None
+
+    if existing_base:
+        r_base_val  = existing_base.get("r_base", 0)
+        s_base_val  = existing_base.get("s_base", 0)
+        captured_at = existing_base.get("captured_at", "–")
+        r_pct       = _pct(current_r, r_base_val)
+        s_pct       = _pct(current_s, s_base_val)
+
+    return JsonResponse({
+        "symbol"      : symbol,
+        "now"         : now_ist.strftime("%H:%M:%S"),
+        "base_locked" : bool(existing_base),
+        "captured_at" : captured_at,
+        # Base (9:20) values
+        "r_base"      : r_base_val,
+        "s_base"      : s_base_val,
+        # Current live values
+        "r_current"   : current_r if current_r > 0 else None,
+        "s_current"   : current_s if current_s > 0 else None,
+        # % Change from base
+        "r_pct"       : r_pct,
+        "s_pct"       : s_pct,
+    })

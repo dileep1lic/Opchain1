@@ -273,7 +273,7 @@ def get_master_levels(symbol, selected_date=None):
     elif sup_type == "WTT"          and res_type == "WTT"           : eff_sup = sup_base 
     elif sup_type == "WTT"          and res_type == "STRONG"        : eff_sup = sup_base 
     elif sup_type == "WTT"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base + step
-    elif sup_type == "WTT"          and res_type == "SHIFTED WTT"   : eff_sup = sup_base 
+    elif sup_type == "WTT"          and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
     #--------sup strong-------------
     elif sup_type == "STRONG"       and res_type == "WTB"           : eff_sup = sup_base - step # Test ok
     elif sup_type == "STRONG"       and res_type == "WTT"           : eff_sup = sup_base - step # test ok

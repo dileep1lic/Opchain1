@@ -635,6 +635,22 @@
             <span class="label">Last Sync</span>
             <span id="header-time" class="value sync-val">{{ latest_time|date:"H:i:s" }}</span>
         </div>
+        
+        <!-- 9:20 Base Tracker UI -->
+        <div class="stat-item" style="border-left: 1px solid var(--border-color); padding-left: 15px; margin-left: 5px;">
+            <span class="label" title="9:20 Reversal Base Value">R-Base (<span id="base-r-time">--:--</span>) <a href="#" id="reset-base-btn" style="font-size: 8px; color: #ff5252; text-decoration: none; margin-left: 5px; display: none;" onclick="fetchReversalBase(true); return false;">[RST]</a></span>
+            <div style="display: flex; gap: 8px; align-items: baseline;">
+                <span id="base-r-val" class="value" style="color: var(--accent-red); font-size: 14px;">--</span>
+                <span id="base-r-pct" style="font-size: 11px; font-weight: bold; background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px;">--%</span>
+            </div>
+        </div>
+        <div class="stat-item">
+            <span class="label" title="9:20 Support Base Value">S-Base (<span id="base-s-time">--:--</span>)</span>
+            <div style="display: flex; gap: 8px; align-items: baseline;">
+                <span id="base-s-val" class="value" style="color: var(--accent-green); font-size: 14px;">--</span>
+                <span id="base-s-pct" style="font-size: 11px; font-weight: bold; background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px;">--%</span>
+            </div>
+        </div>
     </div>
 
     <div class="controls-group">
@@ -657,6 +673,7 @@
         <button class="dropbtn" id="chartToggleBtn" onclick="toggleChart()" style="border-color: var(--text-secondary);">
             <span id="chartToggleText">📉 Chart: OFF</span>
         </button>
+
 
         <div class="dropdown">
             <button class="dropbtn" onclick="toggleDropdown(event)" style="border-color: var(--accent-red);">
@@ -1075,7 +1092,50 @@ window.addEventListener('DOMContentLoaded', () => {
     // FIX: Page load पर तुरंत table fetch करो (shell है, data नहीं आया)
     // इससे user को spinner/empty state की जगह data दिखेगा
     refreshData();
+    
+    // Start tracking reversal base
+    fetchReversalBase();
+    setInterval(fetchReversalBase, 60000);
 });
+
+// ── Reversal Base Logic ────────────────────────────────────
+function fetchReversalBase(reset = false) {
+    const symbol = '{{ data.0.Symbol|default:"NIFTY" }}';
+    let url = `/api/reversal-base/?symbol=${symbol}`;
+    if (reset) url += '&reset=1';
+    
+    fetch(url)
+    .then(r => r.json())
+    .then(data => {
+        // Update UI
+        document.getElementById('base-r-time').textContent = data.captured_at || '--:--';
+        document.getElementById('base-s-time').textContent = data.captured_at || '--:--';
+        
+        document.getElementById('base-r-val').textContent = data.r_base || '--';
+        document.getElementById('base-s-val').textContent = data.s_base || '--';
+        
+        const rPct = document.getElementById('base-r-pct');
+        if (data.r_pct !== null) {
+            rPct.textContent = (data.r_pct > 0 ? '+' : '') + data.r_pct + '%';
+            rPct.style.color = data.r_pct > 0 ? '#00e676' : (data.r_pct < 0 ? '#ff5252' : '#fff');
+        } else {
+            rPct.textContent = '--%';
+            rPct.style.color = '#fff';
+        }
+        
+        const sPct = document.getElementById('base-s-pct');
+        if (data.s_pct !== null) {
+            sPct.textContent = (data.s_pct > 0 ? '+' : '') + data.s_pct + '%';
+            sPct.style.color = data.s_pct > 0 ? '#00e676' : (data.s_pct < 0 ? '#ff5252' : '#fff');
+        } else {
+            sPct.textContent = '--%';
+            sPct.style.color = '#fff';
+        }
+        
+        // Show reset button only if locked
+        document.getElementById('reset-base-btn').style.display = data.base_locked ? 'inline' : 'none';
+    }).catch(e => console.error("Error fetching reversal base:", e));
+}
 
 window.addEventListener('load', () => {
     scrollToSpot();
@@ -1547,3 +1607,5 @@ startPolling();
   window.speechSynthesis && (window.speechSynthesis.onvoiceschanged = () => {});
 })();
 </script>
+</body>
+</html>

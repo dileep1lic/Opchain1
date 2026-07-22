@@ -517,6 +517,185 @@
   </div>
 </div>
 
+<!-- ── LTP LEVELS ── -->
+<div class="section-title">📐 LTP Levels — Save to Database</div>
+<div style="
+    background:var(--card);
+    border:1px solid rgba(245,166,35,0.35);
+    border-radius:14px;
+    padding:20px 24px;
+    margin-bottom:28px;
+">
+
+  <!-- Top row: Symbol + Save button -->
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+    
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px;text-transform:uppercase;">Symbol</label>
+      <select id="ltp-sym" style="
+          background:var(--bg);border:1px solid var(--border);
+          color:var(--text);border-radius:8px;padding:8px 14px;
+          font-size:13px;font-family:inherit;cursor:pointer;
+      " onchange="loadAdminLtpHistory()">
+        <option value="NIFTY">NIFTY</option>
+        <option value="BANKNIFTY">BANKNIFTY</option>
+        <option value="FINNIFTY">FINNIFTY</option>
+        <option value="MIDCAPNIFTY">MIDCAPNIFTY</option>
+        <option value="SENSEX">SENSEX</option>
+      </select>
+    </div>
+
+    <!-- Current Spot (auto-filled) -->
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px;text-transform:uppercase;">Current Spot</label>
+      <div id="ltp-spot-display" style="
+          background:var(--bg);border:1px solid var(--border);
+          border-radius:8px;padding:8px 14px;
+          font-size:15px;font-weight:700;color:var(--amber);
+          min-width:100px;text-align:center;
+      ">—</div>
+    </div>
+
+    <!-- Save Button -->
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:transparent;">Action</label>
+      <button id="ltp-save-btn" onclick="adminSaveLtpLevels()" style="
+          padding:9px 22px;
+          background:linear-gradient(135deg,rgba(245,166,35,.25),rgba(245,166,35,.15));
+          border:1px solid rgba(245,166,35,.6);
+          color:var(--amber);
+          border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;
+          transition:all .2s;display:flex;align-items:center;gap:8px;
+      " onmouseover="this.style.background='rgba(245,166,35,.3)'"
+         onmouseout="this.style.background='linear-gradient(135deg,rgba(245,166,35,.25),rgba(245,166,35,.15))'">
+        💾 DB में Save करें
+      </button>
+    </div>
+
+    <!-- Status message -->
+    <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px;">
+      <label style="font-size:11px;color:transparent;">Status</label>
+      <div id="ltp-save-status" style="
+          font-size:12px;color:var(--muted);
+          padding:8px 12px;border-radius:8px;
+          background:var(--bg);border:1px solid var(--border);
+          min-height:36px;line-height:1.5;
+      ">यहाँ Save का result दिखेगा...</div>
+    </div>
+
+  </div>
+
+  <!-- Levels Display Grid (appears after save) -->
+  <div id="ltp-levels-display" style="display:none;margin-bottom:16px;">
+    <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">
+      📊 Last Saved Levels
+    </div>
+
+    <!-- Info Pills -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:12px;">
+        <span style="color:var(--muted);">Market Price: </span>
+        <strong id="ltp-mp-val" style="color:var(--text);">—</strong>
+      </div>
+      <div style="background:var(--bg);border:1px solid rgba(255,94,114,.3);border-radius:8px;padding:8px 14px;font-size:12px;">
+        <span style="color:var(--muted);">CE </span>
+        <strong id="ltp-ce-val" style="color:#ff5e72;">—</strong>
+      </div>
+      <div style="background:var(--bg);border:1px solid rgba(0,212,160,.3);border-radius:8px;padding:8px 14px;font-size:12px;">
+        <span style="color:var(--muted);">PE </span>
+        <strong id="ltp-pe-val" style="color:var(--green);">—</strong>
+      </div>
+      <div style="background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.4);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;">
+        <span style="color:var(--muted);">LTP Total: </span>
+        <strong id="ltp-total-val" style="color:var(--amber);">—</strong>
+      </div>
+    </div>
+
+    <!-- R/S Grid -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr) 8px repeat(3,1fr);gap:8px;align-items:center;">
+      <!-- R1 -->
+      <div style="background:rgba(255,94,114,.08);border:1px solid rgba(255,94,114,.25);border-radius:10px;padding:12px 16px;text-align:center;">
+        <div style="font-size:10px;color:rgba(255,94,114,.6);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">R1</div>
+        <div id="ltp-r1" style="font-size:18px;font-weight:700;color:#ff5e72;">—</div>
+      </div>
+      <!-- R2 -->
+      <div style="background:rgba(255,94,114,.05);border:1px solid rgba(255,94,114,.18);border-radius:10px;padding:12px 16px;text-align:center;">
+        <div style="font-size:10px;color:rgba(255,94,114,.5);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">R2</div>
+        <div id="ltp-r2" style="font-size:18px;font-weight:700;color:#f97316;">—</div>
+      </div>
+      <!-- R3 -->
+      <div style="background:rgba(255,94,114,.03);border:1px solid rgba(255,94,114,.12);border-radius:10px;padding:12px 16px;text-align:center;">
+        <div style="font-size:10px;color:rgba(255,94,114,.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">R3</div>
+        <div id="ltp-r3" style="font-size:18px;font-weight:700;color:#fbbf24;">—</div>
+      </div>
+      <!-- Divider -->
+      <div style="background:var(--border);width:1px;height:40px;margin:0 auto;"></div>
+      <!-- S1 -->
+      <div style="background:rgba(0,212,160,.08);border:1px solid rgba(0,212,160,.25);border-radius:10px;padding:12px 16px;text-align:center;">
+        <div style="font-size:10px;color:rgba(0,212,160,.6);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">S1</div>
+        <div id="ltp-s1" style="font-size:18px;font-weight:700;color:var(--green);">—</div>
+      </div>
+      <!-- S2 -->
+      <div style="background:rgba(0,212,160,.05);border:1px solid rgba(0,212,160,.18);border-radius:10px;padding:12px 16px;text-align:center;">
+        <div style="font-size:10px;color:rgba(0,212,160,.5);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">S2</div>
+        <div id="ltp-s2" style="font-size:18px;font-weight:700;color:#10b981;">—</div>
+      </div>
+      <!-- S3 -->
+      <div style="background:rgba(0,212,160,.03);border:1px solid rgba(0,212,160,.12);border-radius:10px;padding:12px 16px;text-align:center;">
+        <div style="font-size:10px;color:rgba(0,212,160,.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">S3</div>
+        <div id="ltp-s3" style="font-size:18px;font-weight:700;color:#059669;">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Today's History Table -->
+  <div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;text-transform:uppercase;">
+        📜 आज की History
+      </div>
+      <button onclick="loadAdminLtpHistory()" style="
+          font-size:11px;color:var(--muted);background:none;
+          border:1px solid var(--border);border-radius:6px;
+          padding:3px 10px;cursor:pointer;transition:.2s;
+      " onmouseover="this.style.color='var(--text)'"
+         onmouseout="this.style.color='var(--muted)'">
+        🔄 Refresh
+      </button>
+    </div>
+    <div id="ltp-history-table" style="
+        overflow-x:auto;background:var(--bg);
+        border:1px solid var(--border);border-radius:10px;
+    ">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px;">
+        <thead>
+          <tr style="background:var(--surface);">
+            <th style="padding:8px 12px;text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);">Time</th>
+            <th style="padding:8px 12px;text-align:center;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);">Spot</th>
+            <th style="padding:8px 12px;text-align:center;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);">CE</th>
+            <th style="padding:8px 12px;text-align:center;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);">PE</th>
+            <th style="padding:8px 12px;text-align:center;color:var(--amber);font-weight:600;border-bottom:1px solid var(--border);">LTP Total</th>
+            <th style="padding:8px 12px;text-align:center;color:#ff5e72;font-weight:600;border-bottom:1px solid var(--border);">R1</th>
+            <th style="padding:8px 12px;text-align:center;color:#f97316;font-weight:600;border-bottom:1px solid var(--border);">R2</th>
+            <th style="padding:8px 12px;text-align:center;color:#fbbf24;font-weight:600;border-bottom:1px solid var(--border);">R3</th>
+            <th style="padding:8px 12px;text-align:center;color:var(--green);font-weight:600;border-bottom:1px solid var(--border);">S1</th>
+            <th style="padding:8px 12px;text-align:center;color:#10b981;font-weight:600;border-bottom:1px solid var(--border);">S2</th>
+            <th style="padding:8px 12px;text-align:center;color:#059669;font-weight:600;border-bottom:1px solid var(--border);">S3</th>
+          </tr>
+        </thead>
+        <tbody id="ltp-history-tbody">
+          <tr>
+            <td colspan="11" style="padding:24px;text-align:center;color:var(--muted);">
+              ⏳ लोड हो रहा है...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
 <!-- ── ACTIVITY LOG ── -->
 <div class="section-title">🗒️ Activity Log</div>
 <div class="log-box">
@@ -1056,6 +1235,143 @@ async function fetchGitVersionMini() {
   }
 }
 fetchGitVersionMini();
+
+
+// ════════════════════════════════════════════════════════════
+//  LTP LEVELS — Admin Panel Functions
+// ════════════════════════════════════════════════════════════
+
+// Spot price auto-update from admin-status
+async function _ltpAdminSpotRefresh() {
+    try {
+        const resp = await fetch('/api/admin-status/');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const spot = data.stats?.spot;
+        if (spot) {
+            document.getElementById('ltp-spot-display').textContent = spot.toFixed(2);
+        }
+    } catch(e) {}
+}
+_ltpAdminSpotRefresh();
+setInterval(_ltpAdminSpotRefresh, 10000); // 10 sec में refresh
+
+// Save करो
+async function adminSaveLtpLevels() {
+    const sym = document.getElementById('ltp-sym').value;
+    const spotText = document.getElementById('ltp-spot-display').textContent.trim();
+    const spot = parseFloat(spotText) || 0;
+
+    const btn = document.getElementById('ltp-save-btn');
+    const status = document.getElementById('ltp-save-status');
+
+    if (!spot || spot <= 0) {
+        status.style.color = 'var(--red)';
+        status.textContent = '⚠️ Spot Price उपलब्ध नहीं है। Admin Status API चालू है?';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span> Saving...';
+    status.style.color = 'var(--muted)';
+    status.textContent = `${sym} के लिए ${spot} पर levels calculate हो रही हैं...`;
+
+    try {
+        const resp = await fetch('/api/save-ltp-levels/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF
+            },
+            body: JSON.stringify({ symbol: sym, spot: spot })
+        });
+        const data = await resp.json();
+
+        if (data.status === 'saved') {
+            // Status message
+            status.style.color = 'var(--green)';
+            status.innerHTML = `✅ <strong>Saved!</strong> [${data.saved_at}] — LTP Total: <strong style="color:var(--amber)">${data.ltp_total}</strong> | CE: ${data.ce_strike}@${data.ce_ltp} | PE: ${data.pe_strike}@${data.pe_ltp}`;
+
+            // Levels display
+            document.getElementById('ltp-levels-display').style.display = 'block';
+            document.getElementById('ltp-mp-val').textContent   = data.market_price.toFixed(2);
+            document.getElementById('ltp-ce-val').textContent   = `${data.ce_strike} / ${data.ce_ltp.toFixed(2)}`;
+            document.getElementById('ltp-pe-val').textContent   = `${data.pe_strike} / ${data.pe_ltp.toFixed(2)}`;
+            document.getElementById('ltp-total-val').textContent = data.ltp_total.toFixed(2);
+            document.getElementById('ltp-r1').textContent = data.r1.toFixed(2);
+            document.getElementById('ltp-r2').textContent = data.r2.toFixed(2);
+            document.getElementById('ltp-r3').textContent = data.r3.toFixed(2);
+            document.getElementById('ltp-s1').textContent = data.s1.toFixed(2);
+            document.getElementById('ltp-s2').textContent = data.s2.toFixed(2);
+            document.getElementById('ltp-s3').textContent = data.s3.toFixed(2);
+
+            // Log
+            addLog(`📐 LTP Saved [${sym}] — Spot:${data.market_price} | LTP:${data.ltp_total} | R1:${data.r1} S1:${data.s1}`, 'ok');
+            showToast(`✅ LTP Levels Saved! [${sym}]`, 'ok');
+
+            // History refresh
+            loadAdminLtpHistory();
+        } else {
+            status.style.color = 'var(--red)';
+            status.textContent = `❌ Error: ${data.msg || 'Unknown error'}`;
+            addLog(`❌ LTP Save Error: ${data.msg}`, 'err');
+            showToast('LTP Save Failed', 'err');
+        }
+    } catch(e) {
+        status.style.color = 'var(--red)';
+        status.textContent = `❌ Network Error: ${e.message}`;
+        addLog(`❌ LTP API Error: ${e.message}`, 'err');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '💾 DB में Save करें';
+    }
+}
+
+// History table load करो
+async function loadAdminLtpHistory() {
+    const sym = document.getElementById('ltp-sym').value;
+    const tbody = document.getElementById('ltp-history-tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="11" style="padding:20px;text-align:center;color:var(--muted);">⏳ लोड हो रहा है...</td></tr>`;
+
+    try {
+        const resp = await fetch(`/api/get-ltp-levels/?symbol=${sym}&limit=20`);
+        const data = await resp.json();
+
+        if (!data.rows || data.rows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="11" style="padding:24px;text-align:center;color:var(--muted);">आज कोई entry नहीं (${sym})</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = data.rows.map((r, i) => `
+            <tr style="
+                border-bottom:1px solid var(--border);
+                background:${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'};
+                transition:.15s;
+            " onmouseover="this.style.background='rgba(245,166,35,0.05)'"
+               onmouseout="this.style.background='${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'}'">
+                <td style="padding:8px 12px;color:var(--muted);font-family:monospace;">${r.saved_at}</td>
+                <td style="padding:8px 12px;text-align:center;color:var(--text);font-weight:600;">${r.market_price.toFixed(2)}</td>
+                <td style="padding:8px 12px;text-align:center;color:#ff5e72;font-size:11px;">${r.ce_strike}@${r.ce_ltp}</td>
+                <td style="padding:8px 12px;text-align:center;color:var(--green);font-size:11px;">${r.pe_strike}@${r.pe_ltp}</td>
+                <td style="padding:8px 12px;text-align:center;color:var(--amber);font-weight:700;">${r.ltp_total.toFixed(2)}</td>
+                <td style="padding:8px 12px;text-align:center;color:#ff5e72;font-weight:600;">${r.r1.toFixed(2)}</td>
+                <td style="padding:8px 12px;text-align:center;color:#f97316;font-weight:600;">${r.r2.toFixed(2)}</td>
+                <td style="padding:8px 12px;text-align:center;color:#fbbf24;font-weight:600;">${r.r3.toFixed(2)}</td>
+                <td style="padding:8px 12px;text-align:center;color:var(--green);font-weight:600;">${r.s1.toFixed(2)}</td>
+                <td style="padding:8px 12px;text-align:center;color:#10b981;font-weight:600;">${r.s2.toFixed(2)}</td>
+                <td style="padding:8px 12px;text-align:center;color:#059669;font-weight:600;">${r.s3.toFixed(2)}</td>
+            </tr>
+        `).join('');
+
+    } catch(e) {
+        tbody.innerHTML = `<tr><td colspan="11" style="padding:20px;text-align:center;color:var(--red);">❌ Load error: ${e.message}</td></tr>`;
+    }
+}
+
+// Page load पर history load करो
+loadAdminLtpHistory();
 
 
 </script>

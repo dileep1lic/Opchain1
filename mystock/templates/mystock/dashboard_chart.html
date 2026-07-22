@@ -68,6 +68,49 @@
       animation: slideIn 0.3s ease-out forwards;
     }
     @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    /* ── VIEW DROPDOWN MENU ──────────────────────────────── */
+    .view-menu-wrap { position: relative; display: inline-flex; }
+    .view-menu-btn { display: flex; align-items: center; gap: 5px; }
+    .view-menu-btn .arrow { font-size: .55rem; opacity: .7; transition: transform .2s; }
+    .view-menu-btn.open .arrow { transform: rotate(180deg); }
+
+    .view-dropdown {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 6px 0;
+      min-width: 190px;
+      z-index: 9000;
+      box-shadow: 0 8px 32px rgba(0,0,0,.75);
+      pointer-events: auto;
+    }
+    .view-dropdown.open { display: block; }
+
+    .vd-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 14px; font-size: 12px;
+      color: var(--muted); cursor: pointer;
+      transition: background .12s; gap: 10px; user-select: none;
+    }
+    .vd-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+    .vd-item .vd-label { flex: 1; }
+    .vd-item .vd-pill {
+      font-size: .62rem; padding: 2px 7px;
+      border-radius: 99px;
+      background: rgba(255,255,255,.07);
+      color: var(--muted); transition: all .15s;
+    }
+    .vd-item.on .vd-pill { background: rgba(63,185,80,.2); color: var(--green); }
+    .vd-item.on .vd-label { color: var(--text); }
+    .vd-sep { height: 1px; background: #30363d; margin: 4px 0; }
+    .vd-section {
+      padding: 4px 14px 2px; font-size: .6rem;
+      color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -99,14 +142,37 @@
         <button id="auto-refresh-btn" onclick="toggleAutoRefresh()" title="Auto Refresh">
             <span id="ar-icon">⏸</span> Auto
         </button>
-        
-        <button id="reversal-toggle-btn" class="btn-active" onclick="toggleReversalLines()" title="Toggle Reversal Lines">
+
+        <!-- Reversal button hidden — View menu से कंट्रोल होगा -->
+        <button id="reversal-toggle-btn" class="btn-active" style="display:none" onclick="toggleReversalLines()" title="Toggle Reversal Lines">
             <span id="rv-label">➖ Rev: ON</span>
         </button>
 
         <button id="alert-toggle-btn" onclick="toggleAlerts()" title="Toggle Sound Alerts">
             <span id="alert-label">🔕 Alerts OFF</span>
         </button>
+
+        <!-- VIEW MENU -->
+        <div class="view-menu-wrap" id="view-menu-wrap">
+          <button class="btn-active view-menu-btn" id="view-menu-trigger" onclick="toggleViewMenu(event)">
+            ⚙ View <span class="arrow">▼</span>
+          </button>
+          <div class="view-dropdown" id="view-dropdown">
+
+            <div class="vd-section">Overlays</div>
+
+            <div class="vd-item on" id="vd-reversal" onclick="vdToggleReversal()">
+              <span class="vd-label">↕ Reversal Lines</span>
+              <span class="vd-pill" id="vd-rv-pill">ON</span>
+            </div>
+
+            <div class="vd-item on" id="vd-weekly" onclick="vdToggleWeeklyRange()">
+              <span class="vd-label">📐 Weekly Range</span>
+              <span class="vd-pill" id="vd-wr-pill">ON</span>
+            </div>
+
+          </div>
+        </div>
     </div>
 </div>
 
@@ -121,13 +187,23 @@
 
 <script>
   let mainChart = null;
-  let reversalMode = 1; // 1 = ON (Straight), 0 = OFF
+  let reversalMode = 1; // 1 = ON, 0 = OFF
   let savedRange = null;
   let lastCandles = [];
   let lastReversals = [];
-  let candleSeries = null;          // <--- नया (चार्ट डेटा को अपडेट रखने के लिए)
-  let currentChartSettings = "";    // <--- नया (सिंबल या टाइमफ्रेम बदलने को ट्रैक करने के लिए)
-  let currentBar = null;           // <--- नया (लाइव कैंडल को ट्रैक करने के लिए)
+  let candleSeries = null;
+  let currentChartSettings = "";
+  let currentBar = null;
+
+  // ── Weekly Range (LTP Lines) state ──
+  let ltpLinesSeries  = [];
+  let ltpLinesVisible = true;
+
+  const LTP_PAIRS = [
+    { rKey:'r1', sKey:'s1', rLabel:'R1', sLabel:'S1', rColor:'#e040fb', sColor:'#e040fb', width:2, style:0 },
+    { rKey:'r2', sKey:'s2', rLabel:'R2', sLabel:'S2', rColor:'#00bcd4', sColor:'#00bcd4', width:1, style:2 },
+    { rKey:'r3', sKey:'s3', rLabel:'R3', sLabel:'S3', rColor:'#ffab40', sColor:'#ffab40', width:1, style:2 },
+  ];
  
   // ══════════════════════════════════════════════════════
   //  SOUND ALERTS & NOTIFICATIONS LOGIC
@@ -576,6 +652,100 @@ function checkReversalAlerts(currentPrice, reversals) {
   loadChart();
   startAutoRefresh(); 
   startLiveTicker();
+
+  // Weekly Range — page load पर एक बार fetch (7 दिन तक valid, बार-बार refresh नहीं)
+  setTimeout(fetchAndDrawLtpLines, 1500);
+
+  // ── Weekly Range (LTP Lines) Functions ───────────────────────
+  async function fetchAndDrawLtpLines() {
+    if (!candleSeries) return;
+    const sym = (document.getElementById('ctrl-symbol').value || 'NIFTY').trim().toUpperCase();
+    try {
+      const resp = await fetch(`/api/get-ltp-levels/?symbol=${sym}&limit=1&today_only=0`);
+      const data = await resp.json();
+      _clearLtpLines();
+      if (!data.rows || data.rows.length === 0) return;
+      const row = data.rows[0];
+      if (!ltpLinesVisible) return;
+      LTP_PAIRS.forEach(pair => {
+        const rVal = parseFloat(row[pair.rKey]);
+        const sVal = parseFloat(row[pair.sKey]);
+        if (rVal > 0) {
+          try {
+            ltpLinesSeries.push(candleSeries.createPriceLine({
+              price: rVal, color: pair.rColor,
+              lineWidth: pair.width, lineStyle: pair.style,
+              axisLabelVisible: true, title: pair.rLabel,
+            }));
+          } catch(e) {}
+        }
+        if (sVal > 0) {
+          try {
+            ltpLinesSeries.push(candleSeries.createPriceLine({
+              price: sVal, color: pair.sColor,
+              lineWidth: pair.width, lineStyle: pair.style,
+              axisLabelVisible: true, title: pair.sLabel,
+            }));
+          } catch(e) {}
+        }
+      });
+      if (!window._ltpLinesLoaded) {
+        showToast(`📐 Weekly Range — R1:${data.rows[0].r1} | S1:${data.rows[0].s1}`);
+        window._ltpLinesLoaded = true;
+      }
+    } catch(e) { console.warn('Weekly Range fetch failed:', e.message); }
+  }
+
+  function _clearLtpLines() {
+    ltpLinesSeries.forEach(pl => { try { candleSeries.removePriceLine(pl); } catch(e){} });
+    ltpLinesSeries = [];
+  }
+
+  function toggleLtpLines() {
+    ltpLinesVisible = !ltpLinesVisible;
+    if (ltpLinesVisible) fetchAndDrawLtpLines(); else _clearLtpLines();
+  }
+
+  // ── VIEW DROPDOWN MENU ────────────────────────────────
+  function toggleViewMenu(e) {
+    e.stopPropagation();
+    const dd  = document.getElementById('view-dropdown');
+    const btn = document.getElementById('view-menu-trigger');
+    const isOpen = dd.classList.contains('open');
+    if (!isOpen) {
+      const rect = btn.getBoundingClientRect();
+      dd.style.top  = (rect.bottom + 4) + 'px';
+      const ddW = 190;
+      let left = rect.right - ddW;
+      if (left < 4) left = 4;
+      dd.style.left = left + 'px';
+      dd.style.right = 'auto';
+    }
+    dd.classList.toggle('open', !isOpen);
+    btn.classList.toggle('open', !isOpen);
+  }
+
+  document.addEventListener('click', function(e) {
+    const wrap = document.getElementById('view-menu-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      document.getElementById('view-dropdown').classList.remove('open');
+      document.getElementById('view-menu-trigger').classList.remove('open');
+    }
+  });
+
+  function vdToggleReversal() {
+    toggleReversalLines();
+    const isOn = (reversalMode === 1);
+    document.getElementById('vd-reversal').classList.toggle('on', isOn);
+    document.getElementById('vd-rv-pill').textContent = isOn ? 'ON' : 'OFF';
+  }
+
+  function vdToggleWeeklyRange() {
+    toggleLtpLines();
+    const isOn = ltpLinesVisible;
+    document.getElementById('vd-weekly').classList.toggle('on', isOn);
+    document.getElementById('vd-wr-pill').textContent = isOn ? 'ON' : 'OFF';
+  }
 </script>
 </body>
 </html>

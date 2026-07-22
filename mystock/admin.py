@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, InstrumentStore
+from .models import OptionChain, SupportResistance, SyncControl, TempOptionChain, InstrumentStore, LtpLevels
 
 # 1. OptionChain Model
 @admin.register(OptionChain)
@@ -38,3 +38,15 @@ class InstrumentStoreAdmin(admin.ModelAdmin):
     # आप चाहें तो इसमें भी सर्च और फ़िल्टर लगा सकते हैं
     list_filter = ('symbol',)
     search_fields = ('symbol', 'instrument_key')
+
+# 6. LTP Levels — बटन क्लिक से save होने वाले levels
+@admin.register(LtpLevels)
+class LtpLevelsAdmin(admin.ModelAdmin):
+    list_display = (
+        'saved_at', 'symbol', 'market_price',
+        'ce_strike', 'ce_ltp', 'pe_strike', 'pe_ltp',
+        'ltp_total', 'r1', 'r2', 'r3', 's1', 's2', 's3'
+    )
+    list_filter = ('symbol', 'saved_at')
+    ordering = ('-saved_at',)
+    readonly_fields = ('saved_at',)

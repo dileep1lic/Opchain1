@@ -378,3 +378,47 @@ class VoiceCommand(models.Model):
 
     def __str__(self):
         return f"#{self.order} — {self.text[:60]}"
+
+
+class LtpLevels(models.Model):
+    """
+    LTP से calculate किए गए Support/Resistance Levels store करने के लिए।
+    Button click पर यह save होता है।
+    Formula:
+      ltp_total = CE_LTP (मार्केट से ऊपर की strike) + PE_LTP (मार्केट से नीचे की strike)
+      R1 = market_price + ltp_total
+      R2 = R1 + ltp_total
+      R3 = R2 + ltp_total
+      S1 = market_price - ltp_total
+      S2 = S1 - ltp_total
+      S3 = S2 - ltp_total
+    """
+    saved_at      = models.DateTimeField(auto_now_add=True, db_index=True)
+    symbol        = models.CharField(max_length=50, db_index=True)
+    expiry_date   = models.CharField(max_length=20, null=True, blank=True)
+
+    market_price  = models.FloatField(verbose_name="Market Price (Spot)")
+
+    ce_strike     = models.FloatField(verbose_name="CE Strike (ऊपर वाली)")
+    ce_ltp        = models.FloatField(verbose_name="CE LTP")
+
+    pe_strike     = models.FloatField(verbose_name="PE Strike (नीचे वाली)")
+    pe_ltp        = models.FloatField(verbose_name="PE LTP")
+
+    ltp_total     = models.FloatField(verbose_name="LTP Total (CE+PE)")
+
+    r1 = models.FloatField(verbose_name="R1")
+    r2 = models.FloatField(verbose_name="R2")
+    r3 = models.FloatField(verbose_name="R3")
+
+    s1 = models.FloatField(verbose_name="S1")
+    s2 = models.FloatField(verbose_name="S2")
+    s3 = models.FloatField(verbose_name="S3")
+
+    class Meta:
+        ordering            = ['-saved_at']
+        verbose_name        = "LTP Levels"
+        verbose_name_plural = "LTP Levels"
+
+    def __str__(self):
+        return f"{self.symbol} | {self.saved_at.strftime('%d-%b %H:%M')} | MP={self.market_price} | LTP={self.ltp_total}"
