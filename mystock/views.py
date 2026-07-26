@@ -1780,9 +1780,11 @@ def candle_api(request):
 
     cached_data = cache.get(cache_key)
     if cached_data:
+        cached_data = dict(cached_data)
         if show_reversal:
-            cached_data = dict(cached_data)
             cached_data["reversal_lines"] = get_reversal_lines(symbol, from_date, to_date)
+        else:
+            cached_data["reversal_lines"] = []  # reversal=0 → खाली lines
         print(f"⚡ FAST CHART: {symbol} ({interval}m) served from CACHE 🚀")
         return JsonResponse(cached_data)
 
@@ -3929,64 +3931,81 @@ def save_ltp_levels_api(request):
         # PE Strike ≤ spot  →  floor(spot / step) * step
 
         import math as _math
-        ce_strike = _math.ceil(spot / step) * step   # मार्केट से बड़ी (ऊपर)
-        pe_strike = _math.floor(spot / step) * step  # मार्केट से छोटी (नीचे)
 
-        # अगर spot exact strike पर है तो CE एक step ऊपर और PE exact
-        if ce_strike == pe_strike:
-            ce_strike = pe_strike + step
+        # ── Manual Mode: अगर values directly POST में आई हैं ──
+        manual_ce_strike = data.get("ce_strike")
+        manual_pe_strike = data.get("pe_strike")
+        manual_ce_ltp    = data.get("ce_ltp")
+        manual_pe_ltp    = data.get("pe_ltp")
 
-        # Step 3: Cache (API Data) से लेटेस्ट CE_LTP और PE_LTP निकालें, ना मिले तो DB से
-        from django.core.cache import caches
-        
-        ce_ltp = pe_ltp = 0.0
-        expiry = ""
-        
-        # पहले Cache से कोशिश करें
-        live_data = caches['default'].get(f'live_nifty_data_{symbol}')
-        
-        if live_data:
-            for row in live_data:
-                strike = float(row.get('Strike_Price', 0))
-                if strike == ce_strike:
-                    ce_ltp = float(row.get('CE_LTP') or 0)
-                    expiry = str(row.get('expiry') or "")
-                if strike == pe_strike:
-                    pe_ltp = float(row.get('PE_LTP') or 0)
-        
-        # अगर Cache में नहीं मिला, तो DB से fallback (पुराना तरीका)
-        if ce_ltp <= 0 or pe_ltp <= 0:
-            ce_row = (
-                OptionChain.objects
-                .filter(Symbol=symbol, Strike_Price=ce_strike)
-                .order_by("-Time")
-                .values("CE_LTP", "Expiry_Date")
-                .first()
-            )
-            pe_row = (
-                OptionChain.objects
-                .filter(Symbol=symbol, Strike_Price=pe_strike)
-                .order_by("-Time")
-                .values("PE_LTP")
-                .first()
-            )
+        if manual_ce_strike and manual_pe_strike and manual_ce_ltp and manual_pe_ltp:
+            # Manual mode — सीधे values लो
+            ce_strike = float(manual_ce_strike)
+            pe_strike = float(manual_pe_strike)
+            ce_ltp    = float(manual_ce_ltp)
+            pe_ltp    = float(manual_pe_ltp)
+            expiry    = ""
+        else:
+            # Auto mode — Strike calculate करो
+            ce_strike = _math.ceil(spot / step) * step   # मार्केट से बड़ी (ऊपर)
+            pe_strike = _math.floor(spot / step) * step  # मार्केट से छोटी (नीचे)
 
-            if not ce_row and ce_ltp <= 0:
-                return JsonResponse({"status": "error", "msg": f"CE Data नहीं मिला: {symbol} Strike {ce_strike}"}, status=404)
-            if not pe_row and pe_ltp <= 0:
-                return JsonResponse({"status": "error", "msg": f"PE Data नहीं मिला: {symbol} Strike {pe_strike}"}, status=404)
+            # अगर spot exact strike पर है तो CE एक step ऊपर
+            if ce_strike == pe_strike:
+                ce_strike = pe_strike + step
 
-            if ce_ltp <= 0 and ce_row:
-                ce_ltp = float(ce_row.get("CE_LTP") or 0)
-                expiry = str(ce_row.get("Expiry_Date") or "")
-            if pe_ltp <= 0 and pe_row:
-                pe_ltp = float(pe_row.get("PE_LTP") or 0)
+            # Step 3: Cache (API Data) से लेटेस्ट CE_LTP और PE_LTP निकालें, ना मिले तो DB से
+            from django.core.cache import caches
+
+            ce_ltp = pe_ltp = 0.0
+            expiry = ""
+
+            # पहले Cache से कोशिश करें
+            live_data = caches['default'].get(f'live_nifty_data_{symbol}')
+
+            if live_data:
+                for row in live_data:
+                    strike = float(row.get('Strike_Price', 0))
+                    if strike == ce_strike:
+                        ce_ltp = float(row.get('CE_LTP') or 0)
+                        expiry = str(row.get('expiry') or "")
+                    if strike == pe_strike:
+                        pe_ltp = float(row.get('PE_LTP') or 0)
+
+            # अगर Cache में नहीं मिला, तो DB से fallback
+            if ce_ltp <= 0 or pe_ltp <= 0:
+                ce_row = (
+                    OptionChain.objects
+                    .filter(Symbol=symbol, Strike_Price=ce_strike)
+                    .order_by("-Time")
+                    .values("CE_LTP", "Expiry_Date")
+                    .first()
+                )
+                pe_row = (
+                    OptionChain.objects
+                    .filter(Symbol=symbol, Strike_Price=pe_strike)
+                    .order_by("-Time")
+                    .values("PE_LTP")
+                    .first()
+                )
+
+                if not ce_row and ce_ltp <= 0:
+                    return JsonResponse({"status": "error", "msg": f"CE Data नहीं मिला: {symbol} Strike {ce_strike}"}, status=404)
+                if not pe_row and pe_ltp <= 0:
+                    return JsonResponse({"status": "error", "msg": f"PE Data नहीं मिला: {symbol} Strike {pe_strike}"}, status=404)
+
+                if ce_ltp <= 0 and ce_row:
+                    ce_ltp = float(ce_row.get("CE_LTP") or 0)
+                    expiry = str(ce_row.get("Expiry_Date") or "")
+                if pe_ltp <= 0 and pe_row:
+                    pe_ltp = float(pe_row.get("PE_LTP") or 0)
 
         if ce_ltp <= 0 or pe_ltp <= 0:
             return JsonResponse({
                 "status": "error",
                 "msg": f"LTP zero है — CE_LTP={ce_ltp}, PE_LTP={pe_ltp}. मार्केट खुला है?"
             }, status=400)
+
 
         # Step 4: Calculate levels
         ltp_total = round(ce_ltp + pe_ltp, 2)

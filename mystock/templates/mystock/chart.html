@@ -871,20 +871,61 @@ function buildTable(candles) {
   tbody.replaceChildren(frag);
 }
 
+// ── आज की date check करने का helper ────────────────────
+function getTodayStr() {
+  const t = new Date();
+  const y = t.getFullYear();
+  const m = String(t.getMonth() + 1).padStart(2, '0');
+  const d = String(t.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 async function loadChart() {
   const symbol   = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
   const unit     = document.getElementById('ctrl-unit').value;
   const interval = parseInt(document.getElementById('ctrl-interval').value) || 5;
   const fromDate = document.getElementById('ctrl-from').value;
   const toDate   = document.getElementById('ctrl-to').value;
-  
-  // Reversal लाइन्स टॉगल का स्टेटस
-  const reversal = reversalVisible ? '1' : '0';
 
   if (!fromDate || !toDate) { 
       showMsg('❌ कृपया From और To date चुनें'); 
       return; 
   }
+
+  // ════════════════════════════════════════════════════
+  //  DATE RULE:
+  //  आज का chart  → Reversal Lines ON  + Weekly Range ON
+  //  Past का chart → Reversal Lines OFF + Weekly Range ON
+  // ════════════════════════════════════════════════════
+  const todayStr = getTodayStr();
+  const isToday  = (fromDate === todayStr && toDate === todayStr);
+
+  if (isToday) {
+    // ✅ आज का दिन — Reversal Lines चालू करो
+    reversalVisible = true;
+    const rvItem = document.getElementById('vd-reversal');
+    const rvPill = document.getElementById('vd-rv-pill');
+    if (rvItem) rvItem.classList.add('on');
+    if (rvPill) rvPill.textContent = 'ON';
+    // reversal toggle button दिखाएं
+    const rvBtn = document.getElementById('reversal-toggle-btn');
+    if (rvBtn) { rvBtn.style.display = ''; rvBtn.classList.add('active'); }
+    const rvLabel = document.getElementById('rv-label');
+    if (rvLabel) rvLabel.textContent = 'Reversal ✓';
+  } else {
+    // ❌ Past date — Reversal Lines बंद करो
+    reversalVisible = false;
+    const rvItem = document.getElementById('vd-reversal');
+    const rvPill = document.getElementById('vd-rv-pill');
+    if (rvItem) rvItem.classList.remove('on');
+    if (rvPill) rvPill.textContent = 'OFF';
+    // reversal toggle button छुपाएं (past chart में जरूरत नहीं)
+    const rvBtn = document.getElementById('reversal-toggle-btn');
+    if (rvBtn) { rvBtn.style.display = 'none'; rvBtn.classList.remove('active'); }
+  }
+
+  // API को reversal flag भेजो (आज = 1, past = 0)
+  const reversal = isToday ? '1' : '0';
 
   showLoading(true); 
   hideMsg();
@@ -907,11 +948,14 @@ async function loadChart() {
         return; 
     }
 
-    // असली डेटा को चार्ट में पास करें
-    lastReversals = data.reversal_lines || [];
+    // आज = reversal lines दिखाएं, past = खाली
+    lastReversals = isToday ? (data.reversal_lines || []) : [];
     window._chartInitialized = false;
     
     updateChartData(data.candles, lastReversals);
+    
+    // Weekly Range lines — chart reload के बाद redraw करो (हमेशा)
+    setTimeout(fetchAndDrawLtpLines, 200);
     
     if (isAutoRefresh) {
       document.getElementById('live-dot').style.display = 'block';
@@ -934,7 +978,11 @@ async function silentRefresh() {
   const interval = parseInt(document.getElementById('ctrl-interval').value) || 5;
   const fromDate = document.getElementById('ctrl-from').value;
   const toDate   = document.getElementById('ctrl-to').value;
-  const reversal = reversalVisible ? '1' : '0';
+
+  // आज = reversal ON, past = reversal OFF
+  const todayStr = getTodayStr();
+  const isToday  = (fromDate === todayStr && toDate === todayStr);
+  const reversal = isToday ? '1' : '0';
 
   try {
     // API को साइलेंटली कॉल करें
@@ -949,7 +997,8 @@ async function silentRefresh() {
     }
 
     // नया डेटा सफलतापूर्वक मिलने पर चार्ट अपडेट करें
-    lastReversals = data.reversal_lines || [];
+    // आज = reversal lines, past = खाली
+    lastReversals = isToday ? (data.reversal_lines || []) : [];
     updateChartData(data.candles, lastReversals);
 
   } catch (err) {
@@ -1373,12 +1422,9 @@ function loadSettings() {
       if(settings.interval) document.getElementById('ctrl-interval').value = settings.interval;
       if(settings.refreshInterval) document.getElementById('refresh-interval').value = settings.refreshInterval;
 
-      // Dates
-      if(settings.fromDate) document.getElementById('ctrl-from').value = settings.fromDate;
-      else setDefaultDates();
-      
-      if(settings.toDate) document.getElementById('ctrl-to').value = settings.toDate;
-      else setDefaultDates();
+      // Dates — हमेशा आज की date set करो
+      // (localStorage से पुरानी date restore नहीं करते — इससे reversal rule सही काम करता है)
+      setDefaultDates();
 
       // Toggles & States
       if (settings.isAutoRefresh) {

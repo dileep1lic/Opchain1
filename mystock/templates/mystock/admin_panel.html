@@ -556,6 +556,16 @@
       ">—</div>
     </div>
 
+    <!-- Auto/Manual Toggle -->
+    <div style="display:flex;flex-direction:column;gap:4px;justify-content:flex-end;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px;text-transform:uppercase;">Mode</label>
+      <button id="ltp-mode-btn" onclick="toggleLtpMode()" style="
+          padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;
+          border:1px solid rgba(88,166,255,.4);color:#58a6ff;
+          background:rgba(88,166,255,.1);cursor:pointer;transition:.2s;
+      ">⚡ Auto</button>
+    </div>
+
     <!-- Save Button -->
     <div style="display:flex;flex-direction:column;gap:4px;">
       <label style="font-size:11px;color:transparent;">Action</label>
@@ -583,6 +593,48 @@
       ">यहाँ Save का result दिखेगा...</div>
     </div>
 
+  </div>
+
+  <!-- Manual Input Row (hidden by default) -->
+  <div id="ltp-manual-row" style="display:none;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:14px 0;border-top:1px solid var(--border);margin-top:4px;">
+    <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.8px;text-transform:uppercase;width:100%;margin-bottom:4px;">
+      ✏️ Manual Input — सीधे values डालें
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);">Spot Price</label>
+      <input type="number" id="man-spot" placeholder="24200" step="0.05" style="
+          background:var(--bg);border:1px solid var(--border);color:var(--amber);
+          border-radius:8px;padding:7px 12px;font-size:13px;font-weight:700;width:110px;
+      ">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);">CE Strike</label>
+      <input type="number" id="man-ce-strike" placeholder="24250" step="50" style="
+          background:var(--bg);border:1px solid rgba(255,94,114,.4);color:#ff5e72;
+          border-radius:8px;padding:7px 12px;font-size:13px;font-weight:700;width:110px;
+      ">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);">CE LTP</label>
+      <input type="number" id="man-ce-ltp" placeholder="120.5" step="0.05" style="
+          background:var(--bg);border:1px solid rgba(255,94,114,.4);color:#ff5e72;
+          border-radius:8px;padding:7px 12px;font-size:13px;width:100px;
+      ">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);">PE Strike</label>
+      <input type="number" id="man-pe-strike" placeholder="24200" step="50" style="
+          background:var(--bg);border:1px solid rgba(0,212,160,.4);color:var(--green);
+          border-radius:8px;padding:7px 12px;font-size:13px;font-weight:700;width:110px;
+      ">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);">PE LTP</label>
+      <input type="number" id="man-pe-ltp" placeholder="95.0" step="0.05" style="
+          background:var(--bg);border:1px solid rgba(0,212,160,.4);color:var(--green);
+          border-radius:8px;padding:7px 12px;font-size:13px;width:100px;
+      ">
+    </div>
   </div>
 
   <!-- Levels Display Grid (appears after save) -->
@@ -1257,6 +1309,27 @@ _ltpAdminSpotRefresh();
 setInterval(_ltpAdminSpotRefresh, 10000); // 10 sec में refresh
 
 // Save करो
+let ltpManualMode = false;
+
+function toggleLtpMode() {
+    ltpManualMode = !ltpManualMode;
+    const btn = document.getElementById('ltp-mode-btn');
+    const row = document.getElementById('ltp-manual-row');
+    if (ltpManualMode) {
+        btn.textContent = '✏️ Manual';
+        btn.style.borderColor = 'rgba(245,166,35,.5)';
+        btn.style.color = 'var(--amber)';
+        btn.style.background = 'rgba(245,166,35,.12)';
+        row.style.display = 'flex';
+    } else {
+        btn.textContent = '⚡ Auto';
+        btn.style.borderColor = 'rgba(88,166,255,.4)';
+        btn.style.color = '#58a6ff';
+        btn.style.background = 'rgba(88,166,255,.1)';
+        row.style.display = 'none';
+    }
+}
+
 async function adminSaveLtpLevels() {
     const sym = document.getElementById('ltp-sym').value;
     const spotText = document.getElementById('ltp-spot-display').textContent.trim();
@@ -1265,34 +1338,54 @@ async function adminSaveLtpLevels() {
     const btn = document.getElementById('ltp-save-btn');
     const status = document.getElementById('ltp-save-status');
 
-    if (!spot || spot <= 0) {
-        status.style.color = 'var(--red)';
-        status.textContent = '⚠️ Spot Price उपलब्ध नहीं है। Admin Status API चालू है?';
-        return;
+    if (ltpManualMode) {
+        // Manual Mode: input fields से values लो
+        const manSpot     = parseFloat(document.getElementById('man-spot').value);
+        const manCeStrike = parseFloat(document.getElementById('man-ce-strike').value);
+        const manCeLtp    = parseFloat(document.getElementById('man-ce-ltp').value);
+        const manPeStrike = parseFloat(document.getElementById('man-pe-strike').value);
+        const manPeLtp    = parseFloat(document.getElementById('man-pe-ltp').value);
+
+        if (!manSpot || !manCeStrike || !manCeLtp || !manPeStrike || !manPeLtp) {
+            status.style.color = 'var(--red)';
+            status.textContent = '⚠️ सभी fields भरें (Spot, CE Strike, CE LTP, PE Strike, PE LTP)';
+            return;
+        }
+        body = JSON.stringify({
+            symbol: sym, spot: manSpot,
+            ce_strike: manCeStrike, ce_ltp: manCeLtp,
+            pe_strike: manPeStrike, pe_ltp: manPeLtp,
+        });
+    } else {
+        // Auto Mode: Spot display से लो
+        const spotText = document.getElementById('ltp-spot-display').textContent.trim();
+        const spot = parseFloat(spotText) || 0;
+        if (!spot || spot <= 0) {
+            status.style.color = 'var(--red)';
+            status.textContent = '⚠️ Spot Price उपलब्ध नहीं है। Manual mode इस्तेमाल करें।';
+            return;
+        }
+        body = JSON.stringify({ symbol: sym, spot: spot });
     }
 
+    let body_to_send = body;
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span> Saving...';
     status.style.color = 'var(--muted)';
-    status.textContent = `${sym} के लिए ${spot} पर levels calculate हो रही हैं...`;
+    status.textContent = `${sym} के लिए levels calculate हो रही हैं...`;
 
     try {
         const resp = await fetch('/api/save-ltp-levels/', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': CSRF
-            },
-            body: JSON.stringify({ symbol: sym, spot: spot })
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: body_to_send
         });
         const data = await resp.json();
 
         if (data.status === 'saved') {
-            // Status message
             status.style.color = 'var(--green)';
             status.innerHTML = `✅ <strong>Saved!</strong> [${data.saved_at}] — LTP Total: <strong style="color:var(--amber)">${data.ltp_total}</strong> | CE: ${data.ce_strike}@${data.ce_ltp} | PE: ${data.pe_strike}@${data.pe_ltp}`;
 
-            // Levels display
             document.getElementById('ltp-levels-display').style.display = 'block';
             document.getElementById('ltp-mp-val').textContent   = data.market_price.toFixed(2);
             document.getElementById('ltp-ce-val').textContent   = `${data.ce_strike} / ${data.ce_ltp.toFixed(2)}`;
@@ -1305,11 +1398,8 @@ async function adminSaveLtpLevels() {
             document.getElementById('ltp-s2').textContent = data.s2.toFixed(2);
             document.getElementById('ltp-s3').textContent = data.s3.toFixed(2);
 
-            // Log
             addLog(`📐 LTP Saved [${sym}] — Spot:${data.market_price} | LTP:${data.ltp_total} | R1:${data.r1} S1:${data.s1}`, 'ok');
             showToast(`✅ LTP Levels Saved! [${sym}]`, 'ok');
-
-            // History refresh
             loadAdminLtpHistory();
         } else {
             status.style.color = 'var(--red)';
@@ -1327,6 +1417,7 @@ async function adminSaveLtpLevels() {
     }
 }
 
+
 // History table load करो
 async function loadAdminLtpHistory() {
     const sym = document.getElementById('ltp-sym').value;
@@ -1336,7 +1427,7 @@ async function loadAdminLtpHistory() {
     tbody.innerHTML = `<tr><td colspan="11" style="padding:20px;text-align:center;color:var(--muted);">⏳ लोड हो रहा है...</td></tr>`;
 
     try {
-        const resp = await fetch(`/api/get-ltp-levels/?symbol=${sym}&limit=20`);
+        const resp = await fetch(`/api/get-ltp-levels/?symbol=${sym}&limit=20&today_only=0`);
         const data = await resp.json();
 
         if (!data.rows || data.rows.length === 0) {

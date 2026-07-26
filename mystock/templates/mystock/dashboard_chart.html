@@ -519,6 +519,10 @@ function checkReversalAlerts(currentPrice, reversals) {
               let incomingReversals = (d.reversal_lines||[]).filter(r=>r.price>0); 
               buildCharts(d.candles, incomingReversals); 
               updateTopbar(d.candles);
+              // Weekly Range lines — chart reload के बाद redraw करो
+              if (ltpLinesVisible) {
+                setTimeout(fetchAndDrawLtpLines, 200);
+              }
           }
       }).catch(err => {
           document.getElementById("loading").style.display = "none";
