@@ -1,11 +1,23 @@
 from django.urls import path
+from django.http import JsonResponse
 from . import views, seed_voice
 from . import replay_views
 
+import datetime
 
+# ✅ Health Check View — Render को alive रखने के लिए
+def health_check(request):
+    return JsonResponse({
+        "status": "ok",
+        "time": datetime.datetime.now().isoformat(),
+        "server": "optchain"
+    })
 
 
 urlpatterns = [
+    # 🟢 Keep-Alive URL — UptimeRobot / Render Cron इसे ping करेगा
+    path('health/', health_check, name='health_check'),
+
     path('', views.option_chain_dashboard, name='dashboard'),
     # Admin panel और API endpoints
     path('admin-panel/', views.admin_panel_view,  name='admin_panel'),
