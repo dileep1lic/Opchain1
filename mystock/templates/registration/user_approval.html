@@ -1,4 +1,5 @@
 {% load tz %}
+{% load custom_filters %}
 <!DOCTYPE html>
 <html lang="hi">
 <head>
@@ -127,6 +128,7 @@
                         <th>👤 यूज़र विवरण</th>
                         <th>📅 जॉइनिंग डेट</th>
                         <th>🕐 लास्ट लॉगिन</th>
+                        <th>📋 लॉगिन स्टेटस</th>
                         <th>⚡ स्थिति (Status)</th>
                         <th>⚙️ एक्शन</th>
                         <th>🔑 पासवर्ड रिसेट</th>
@@ -147,6 +149,23 @@
                             {% else %}
                                 <span style="color: var(--muted); font-size:12px;">कभी नहीं</span>
                             {% endif %}
+                        </td>
+                        <td>
+                            {% with log=last_logs|get_item:u.id %}
+                            {% if log %}
+                                {% if log.status == 'success' %}
+                                    <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#4ade80;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">✅ सफल</span>
+                                {% elif log.status == 'failed' %}
+                                    <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">❌ गलत पासवर्ड</span>
+                                {% elif log.status == 'inactive' %}
+                                    <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.3);color:#fcd34d;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">⏳ पेंडिंग</span>
+                                {% endif %}
+                                <br><span style="font-size:10px;color:var(--muted);margin-top:3px;display:block;">{{ log.timestamp|localtime|date:"d M, H:i" }}</span>
+                                {% if log.ip_address %}<span style="font-size:10px;color:var(--muted);">📍 {{ log.ip_address }}</span>{% endif %}
+                            {% else %}
+                                <span style="color:var(--muted);font-size:12px;">—</span>
+                            {% endif %}
+                            {% endwith %}
                         </td>
                         <td>
                             {% if u.is_active %}
@@ -176,7 +195,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="6" class="empty-state">
+                        <td colspan="7" class="empty-state">
                             अभी तक कोई भी यूज़र रजिस्टर्ड नहीं हुआ है।
                         </td>
                     </tr>

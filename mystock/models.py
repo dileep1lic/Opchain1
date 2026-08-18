@@ -453,3 +453,29 @@ class StaticReversal(models.Model):
     def __str__(self):
         fv = f" [{self.filter_value}]" if self.filter_value else ""
         return f"{self.symbol} {self.reversal_type}{fv} | Spot={self.spot_price} | {self.saved_at.strftime('%d-%b %H:%M')}"
+
+
+# ── Login Log Model ──────────────────────────────────────────────────
+class LoginLog(models.Model):
+    STATUS_CHOICES = [
+        ('success',  '✅ सफल लॉगिन'),
+        ('failed',   '❌ गलत पासवर्ड'),
+        ('inactive', '⏳ अकाउंट पेंडिंग'),
+    ]
+
+    user        = models.ForeignKey(
+                    'auth.User', null=True, blank=True,
+                    on_delete=models.SET_NULL,
+                    related_name='login_logs'
+                  )
+    username_entered = models.CharField(max_length=254)   # जो भी user ने type किया
+    status      = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    ip_address  = models.GenericIPAddressField(null=True, blank=True)
+    timestamp   = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = "Login Log"
+
+    def __str__(self):
+        return f"{self.username_entered} | {self.status} | {self.timestamp.strftime('%d-%b %H:%M')}"

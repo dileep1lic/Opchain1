@@ -227,17 +227,27 @@ def login_view(request):
         username_or_email = request.POST.get('username', '').strip()
         passw = request.POST.get('password', '')
 
-        # ── STEP 1: पहले DB में user ढूंढो ──
+        # IP Address निकालो
+        from mystock.models import LoginLog
         from django.db.models import Q
         from django.contrib.auth.models import User as AuthUser
-        
+
+        def get_client_ip(req):
+            x_forwarded = req.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded:
+                return x_forwarded.split(',')[0].strip()
+            return req.META.get('REMOTE_ADDR')
+
+        ip = get_client_ip(request)
+
+        # ── STEP 1: पहले DB में user ढूंढो ──
         user_obj = None
         # पहले exact username से match करो
         try:
             user_obj = AuthUser.objects.get(username=username_or_email)
         except AuthUser.DoesNotExist:
             pass
-        
+
         # अगर username से नहीं मिला तो email से ढूंढो
         if user_obj is None:
             try:
@@ -245,14 +255,19 @@ def login_view(request):
             except AuthUser.DoesNotExist:
                 user_obj = None
             except AuthUser.MultipleObjectsReturned:
-                # Same email वाले multiple users — username match वाला लो
                 user_obj = AuthUser.objects.filter(email=username_or_email).first()
 
         # ── STEP 2: पासवर्ड चेक करो ──
         if user_obj is not None and user_obj.check_password(passw):
             # पासवर्ड सही है — अब active check करो
             if not user_obj.is_active:
-                # Inactive / Deactivated user → अलग पेज पर भेजो
+                # ❌ Inactive user log
+                LoginLog.objects.create(
+                    user=user_obj,
+                    username_entered=username_or_email,
+                    status='inactive',
+                    ip_address=ip,
+                )
                 return redirect('inactive_account')
 
             # Active user → normal login flow
@@ -269,6 +284,14 @@ def login_view(request):
             user_obj.backend = 'django.contrib.auth.backends.ModelBackend'
             login(request, user_obj)
 
+            # ✅ Success log
+            LoginLog.objects.create(
+                user=user_obj,
+                username_entered=username_or_email,
+                status='success',
+                ip_address=ip,
+            )
+
             next_url = request.POST.get('next')
             if next_url:
                 return redirect(next_url)
@@ -278,10 +301,17 @@ def login_view(request):
             else:
                 return redirect('dashboard')
         else:
-            # गलत username/email या गलत पासवर्ड
+            # ❌ Failed log (गलत पासवर्ड / user नहीं मिला)
+            LoginLog.objects.create(
+                user=user_obj,          # अगर user मिला पर password गलत था
+                username_entered=username_or_email,
+                status='failed',
+                ip_address=ip,
+            )
             messages.error(request, "यूज़रनेम/ईमेल या पासवर्ड गलत है।")
 
     return render(request, 'registration/login.html')
+
 
 
 def inactive_account_view(request):
@@ -434,9 +464,20 @@ def close_all_open_trades_api(request):
 @admin_only
 def user_approval_list(request):
     """सभी नॉर्मल यूज़र्स की लिस्ट दिखाने के लिए (सुपरयूज़र को छोड़कर)"""
-    # नए रजिस्टर हुए यूज़र्स सबसे ऊपर दिखेंगे
+    from mystock.models import LoginLog
+
     managed_users = User.objects.filter(is_superuser=False).order_by('-date_joined')
-    return render(request, 'registration/user_approval.html', {'managed_users': managed_users})
+
+    # हर user का आखिरी login log
+    last_logs = {}
+    for u in managed_users:
+        log = LoginLog.objects.filter(user=u).first()  # ordering=-timestamp से first = latest
+        last_logs[u.id] = log
+
+    return render(request, 'registration/user_approval.html', {
+        'managed_users': managed_users,
+        'last_logs': last_logs,
+    })
 
 # @user_passes_test(is_superuser_check, login_url='/dashboard/')
 @admin_only
