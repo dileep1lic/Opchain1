@@ -194,6 +194,9 @@
   let candleSeries = null;
   let currentChartSettings = "";
   let currentBar = null;
+  let lastReversalHash = null;   // 🔴 Live Reversal: hash compare
+  let lastRStrike = null;        // 🔴 पिछली R Strike
+  let lastSStrike = null;        // 🔴 पिछली S Strike
 
   // ── Weekly Range (LTP Lines) state ──
   let ltpLinesSeries  = [];
@@ -609,6 +612,65 @@ function checkReversalAlerts(currentPrice, reversals) {
       document.getElementById('tp-close').textContent = liveSpotPrice.toFixed(2);
   }
 
+  // ══════════════════════════════════════════════════════
+  //  🔴 LIVE REVERSAL LINES UPDATER
+  //  WebSocket message मिलने पर reversal lines तुरंत check होंगी
+  // ══════════════════════════════════════════════════════
+  async function fetchAndUpdateReversalLines() {
+      if (!mainChart || !candleSeries || reversalMode !== 1) return;
+
+      const sym      = document.getElementById('ctrl-symbol').value.trim();
+      const fromDate = document.getElementById('ctrl-from').value;
+      const toDate   = document.getElementById('ctrl-to').value;
+
+      if (!sym) return;
+
+      try {
+          const resp = await fetch(`/api/reversal-lines/?symbol=${sym}&from_date=${fromDate}&to_date=${toDate}`);
+          if (!resp.ok) return;
+          const data = await resp.json();
+
+          // Hash check: कुछ बदला है तो ही update करो
+          if (data.lines_hash === lastReversalHash) return;
+          lastReversalHash = data.lines_hash;
+
+          const incomingReversals = (data.reversal_lines || []).filter(r => r.price > 0);
+
+          // पुरानी reversal lines हटाओ
+          if (window._reversalSeries) {
+              window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
+          }
+          window._reversalSeries = [];
+
+          // नई lines बनाओ (candle timestamps चाहिए)
+          const IST_OFFSET = 19800;
+          const cdData = lastCandles.map(c => ({
+              time: Math.floor(new Date(c.time).getTime() / 1000) + IST_OFFSET
+          }));
+
+          incomingReversals.forEach(rev => {
+              try {
+                  const ls = mainChart.addLineSeries({
+                      color: rev.color, lineWidth: rev.width || 1, lineStyle: rev.dash || 0,
+                      priceLineVisible: false, lastValueVisible: true, title: rev.label || ''
+                  });
+                  const lineData = cdData.map(c => ({ time: c.time, value: Number(rev.price) }));
+                  if (lineData.length > 0) { ls.setData(lineData); }
+                  window._reversalSeries.push(ls);
+              } catch (e) {
+                  console.warn("Live Reversal line error:", e.message);
+              }
+          });
+
+          lastReversals = incomingReversals;
+          console.log(`🔴 Reversal lines live updated: ${incomingReversals.length} lines (hash: ${data.lines_hash})`);
+          showToast(`🔄 Reversal lines updated — ${incomingReversals.length} levels`);
+
+      } catch(err) {
+          console.warn('Reversal live fetch error:', err);
+      }
+  }
+
   let liveSocket = null;
   function startLiveTicker() {
       if (liveSocket) liveSocket.close();
@@ -626,9 +688,25 @@ function checkReversalAlerts(currentPrice, reversals) {
           try {
               const data = JSON.parse(e.data);
               if (data.symbol === symbol && data.spot_price) {
-                  let spotPrice = parseFloat(data.spot_price);
-                  const serverTime = data.data_time; 
-                  updateLiveCandle(spotPrice, serverTime);
+                  // ─ Candle live update ─
+                  updateLiveCandle(parseFloat(data.spot_price), data.data_time);
+
+                  // 🔴 सिर्फ SR_UPDATE मेसेज आने पर Strike compare करो
+                  if (data.message === 'SR_UPDATE') {
+                      const newR = data.r_strike;  // बैकएंड से आयी R Strike
+                      const newS = data.s_strike;  // बैकएंड से आयी S Strike
+
+                      // क्या Strike बदली?
+                      if (newR !== null && newS !== null) {
+                          if (newR !== lastRStrike || newS !== lastSStrike) {
+                              console.log(`🔴 Strike changed! R: ${lastRStrike}→${newR} | S: ${lastSStrike}→${newS}`);
+                              lastRStrike = newR;
+                              lastSStrike = newS;
+                              lastReversalHash = null; // force full redraw
+                              fetchAndUpdateReversalLines();
+                          }
+                      }
+                  }
               }
           } catch (err) { console.warn("WS error:", err); }
       };

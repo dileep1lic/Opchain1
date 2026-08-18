@@ -1,0 +1,937 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market News — Upstox Live Feed</title>
+    <meta name="description" content="Real-time stock market news powered by Upstox API. Search by symbol name.">
+    <link rel="icon" type="image/x-icon" href="{% static 'favicon.ico' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        /* ══════════════════════════════════════
+           CORE DESIGN SYSTEM
+        ══════════════════════════════════════ */
+        :root {
+            --bg-base:        #080c10;
+            --bg-surface:     #0e1318;
+            --bg-card:        #111820;
+            --bg-card-hover:  #16202c;
+            --bg-input:       #0a1018;
+            --border:         #1e2a38;
+            --border-active:  #2563eb;
+            --accent-blue:    #3b82f6;
+            --accent-cyan:    #06b6d4;
+            --accent-green:   #10b981;
+            --accent-red:     #ef4444;
+            --accent-yellow:  #f59e0b;
+            --accent-purple:  #8b5cf6;
+            --text-primary:   #f0f4f8;
+            --text-secondary: #64748b;
+            --text-muted:     #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none; z-index: 0;
+        }
+
+        /* ── HEADER ── */
+        .page-header {
+            position: sticky; top: 0; z-index: 200;
+            background: rgba(8,12,16,0.95);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            display: flex; align-items: center; justify-content: space-between;
+            height: 60px; gap: 16px;
+        }
+        .header-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+        .brand-icon {
+            width: 32px; height: 32px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center; font-size: 16px;
+        }
+        .brand-text { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+        .brand-sub  { font-size: 10px; color: var(--text-secondary); display: block; margin-top:-2px; }
+        .header-nav { display: flex; gap: 8px; align-items: center; }
+        .nav-btn {
+            padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+            text-decoration: none; border: 1px solid var(--border);
+            color: var(--text-secondary); background: transparent; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .nav-btn:hover { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-active); }
+        .nav-btn.primary { background: var(--accent-blue); color:#fff; border-color:transparent; }
+        .nav-btn.primary:hover { background: #2563eb; }
+
+        /* ── PAGE CONTAINER ── */
+        .page-container {
+            max-width: 1280px; margin: 0 auto;
+            padding: 28px 24px;
+            position: relative; z-index: 1;
+        }
+        .page-title-section { margin-bottom: 28px; }
+        .page-title-section h1 {
+            font-size: 28px; font-weight: 800;
+            background: linear-gradient(135deg, #f0f4f8 0%, var(--accent-blue) 60%, var(--accent-cyan) 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            line-height: 1.2; margin-bottom: 6px;
+        }
+        .page-title-section p { color: var(--text-secondary); font-size: 14px; }
+
+        /* ══════════════════════════════════════
+           SEARCH PANEL
+        ══════════════════════════════════════ */
+        .search-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px 24px;
+            margin-bottom: 24px;
+        }
+
+        .search-panel-top {
+            display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
+        }
+
+        /* Symbol search input */
+        .symbol-search-wrap {
+            position: relative; flex: 1; min-width: 260px;
+        }
+        .symbol-search-wrap label {
+            display: block; font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.8px;
+            color: var(--text-secondary); margin-bottom: 6px;
+        }
+        .search-input-row {
+            display: flex; align-items: center; gap: 0;
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 10px; overflow: hidden;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .search-input-row:focus-within {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+        }
+        .search-icon {
+            padding: 0 12px; color: var(--text-secondary); font-size: 15px;
+            display: flex; align-items: center; flex-shrink: 0;
+        }
+        #symbolInput {
+            flex: 1; padding: 11px 4px 11px 0;
+            background: transparent; border: none; outline: none;
+            color: var(--text-primary); font-size: 14px; font-family: 'Inter', sans-serif;
+            font-weight: 500;
+        }
+        #symbolInput::placeholder { color: var(--text-muted); font-weight: 400; }
+
+        /* Autocomplete dropdown */
+        .autocomplete-dropdown {
+            position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+            background: #131c28;
+            border: 1px solid var(--border-active);
+            border-radius: 10px;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+            z-index: 500;
+            overflow: hidden;
+            display: none;
+            max-height: 280px; overflow-y: auto;
+        }
+        .autocomplete-dropdown.open { display: block; }
+        .autocomplete-dropdown::-webkit-scrollbar { width: 4px; }
+        .autocomplete-dropdown::-webkit-scrollbar-thumb { background: #1e2a3a; border-radius: 4px; }
+
+        .ac-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 14px; cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            transition: background 0.15s;
+            gap: 8px;
+        }
+        .ac-item:last-child { border-bottom: none; }
+        .ac-item:hover, .ac-item.focused { background: rgba(59,130,246,0.1); }
+        .ac-symbol {
+            font-weight: 700; font-size: 13px; color: var(--text-primary);
+            font-family: 'Roboto Mono', monospace;
+        }
+        .ac-key {
+            font-size: 10px; color: var(--text-muted);
+            font-family: 'Roboto Mono', monospace;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
+        }
+        .ac-add-icon {
+            flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+            background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3);
+            color: var(--accent-blue); display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 700;
+        }
+        .ac-empty {
+            padding: 18px 14px; text-align: center;
+            color: var(--text-secondary); font-size: 12px;
+        }
+
+        /* Page size + fetch row */
+        .ps-wrap {
+            display: flex; flex-direction: column; gap: 6px; min-width: 110px; max-width: 130px;
+        }
+        .ps-wrap label {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.8px; color: var(--text-secondary);
+        }
+        #pageSize {
+            width: 100%; padding: 11px 12px;
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 10px; color: var(--text-primary);
+            font-size: 14px; outline: none; transition: border-color 0.2s;
+        }
+        #pageSize:focus { border-color: var(--accent-blue); }
+
+        #fetchBtn {
+            align-self: flex-end;
+            padding: 11px 28px; border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            color: #fff; font-size: 14px; font-weight: 700;
+            border: none; cursor: pointer; white-space: nowrap;
+            box-shadow: 0 4px 20px rgba(59,130,246,0.3);
+            display: flex; align-items: center; gap: 8px;
+            transition: all 0.25s;
+        }
+        #fetchBtn:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(59,130,246,0.45); }
+        #fetchBtn:active { transform: translateY(0); }
+        #fetchBtn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        /* Selected symbols tags */
+        .selected-tags-wrap {
+            margin-top: 14px;
+            display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
+        }
+        .selected-tags-label {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.8px; color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .sym-tag {
+            display: inline-flex; align-items: center; gap: 5px;
+            background: rgba(16,185,129,0.1);
+            border: 1px solid rgba(16,185,129,0.3);
+            color: var(--accent-green);
+            padding: 4px 10px; border-radius: 20px;
+            font-size: 12px; font-weight: 700; font-family: 'Roboto Mono', monospace;
+            animation: tagPop 0.2s ease;
+        }
+        @keyframes tagPop {
+            from { transform: scale(0.8); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
+        }
+        .sym-tag .tag-remove {
+            cursor: pointer; color: rgba(16,185,129,0.6);
+            font-size: 14px; line-height: 1; transition: color 0.2s;
+            flex-shrink: 0; display: flex; align-items: center;
+        }
+        .sym-tag .tag-remove:hover { color: var(--accent-red); }
+        .clear-all-btn {
+            font-size: 11px; color: var(--accent-red);
+            background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);
+            border-radius: 20px; padding: 4px 10px; cursor: pointer;
+            font-weight: 600; transition: all 0.2s;
+        }
+        .clear-all-btn:hover { background: rgba(239,68,68,0.18); }
+
+        .no-tags-hint {
+            font-size: 12px; color: var(--text-muted); font-style: italic;
+        }
+
+        /* ══════════════════════════════════════
+           STATS BAR
+        ══════════════════════════════════════ */
+        .stats-bar { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+        .stat-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 10px; padding: 12px 18px;
+            display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 110px;
+        }
+        .s-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary); }
+        .s-val   { font-size: 22px; font-weight: 800; font-family: 'Roboto Mono', monospace; }
+        .s-val.blue   { color: var(--accent-blue); }
+        .s-val.green  { color: var(--accent-green); }
+        .s-val.yellow { color: var(--accent-yellow); }
+        .s-val.purple { color: var(--accent-purple); }
+
+        /* ══════════════════════════════════════
+           NEWS GRID
+        ══════════════════════════════════════ */
+        .news-section-header {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+        }
+        .instrument-tag {
+            font-size: 13px; font-weight: 700; color: var(--accent-cyan);
+            font-family: 'Roboto Mono', monospace;
+            background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.3);
+            padding: 4px 10px; border-radius: 6px;
+        }
+        .count-badge {
+            font-size: 11px; color: var(--text-secondary);
+            background: var(--bg-card); border: 1px solid var(--border);
+            padding: 3px 8px; border-radius: 20px;
+        }
+        .news-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+            gap: 16px; margin-bottom: 32px;
+        }
+        .news-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 14px; overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex; flex-direction: column;
+            animation: cardIn 0.4s ease both;
+        }
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(14px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .news-card:hover {
+            border-color: rgba(59,130,246,0.4);
+            background: var(--bg-card-hover);
+            transform: translateY(-4px);
+            box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.15);
+        }
+        .news-card a { text-decoration:none; color:inherit; display:flex; flex-direction:column; height:100%; }
+        .card-thumb-wrap { overflow:hidden; position:relative; flex-shrink:0; }
+        .card-thumb {
+            width:100%; height:160px; object-fit:cover;
+            display:block; background:var(--bg-input);
+            transition: transform 0.3s;
+        }
+        .news-card:hover .card-thumb { transform: scale(1.03); }
+        .time-badge {
+            position:absolute; top:10px; right:10px;
+            background:rgba(0,0,0,0.75); backdrop-filter:blur(6px);
+            color:var(--text-secondary); font-size:10px;
+            padding:3px 8px; border-radius:20px; font-weight:500;
+        }
+        .card-no-thumb { width:100%; height:5px; background:linear-gradient(90deg,var(--accent-blue),var(--accent-cyan)); }
+        .card-body { padding:14px 16px 16px; flex:1; display:flex; flex-direction:column; gap:8px; }
+        .card-heading {
+            font-size:13.5px; font-weight:700; line-height:1.5; color:var(--text-primary);
+            display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+        }
+        .card-summary {
+            font-size:12px; color:var(--text-secondary); line-height:1.6; flex:1;
+            display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+        }
+        .card-footer {
+            display:flex; align-items:center; justify-content:space-between;
+            padding-top:10px; border-top:1px solid var(--border); margin-top:auto;
+        }
+        .read-link {
+            font-size:11px; font-weight:700; color:var(--accent-blue);
+            display:flex; align-items:center; gap:4px;
+        }
+        .read-link svg { transition: transform 0.2s; }
+        .news-card:hover .read-link svg { transform: translateX(3px); }
+
+        /* ── No News Card ── */
+        .no-news-card {
+            background: var(--bg-card);
+            border: 1px dashed var(--border);
+            border-radius: 14px;
+            padding: 24px;
+            display: flex; align-items: center; gap: 14px;
+            margin-bottom: 32px;
+            animation: cardIn 0.4s ease both;
+        }
+        .no-news-icon { font-size: 28px; flex-shrink: 0; opacity: 0.5; }
+        .no-news-text .nt { font-size: 13px; font-weight: 700; color: var(--text-secondary); }
+        .no-news-text .ns { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+        /* ── States ── */
+        .state-box {
+            display:flex; flex-direction:column; align-items:center;
+            justify-content:center; gap:14px; padding:70px 20px;
+            color:var(--text-secondary); text-align:center;
+        }
+        .state-box .state-icon { font-size:52px; }
+        .state-box .state-title { font-size:18px; font-weight:700; color:var(--text-primary); }
+        .state-box .state-desc { font-size:13px; max-width:380px; line-height:1.7; }
+        .spinner {
+            width:44px; height:44px; border:3px solid var(--border);
+            border-top-color:var(--accent-blue); border-radius:50%;
+            animation:spin 0.7s linear infinite;
+        }
+        @keyframes spin { to { transform:rotate(360deg); } }
+
+        /* ── Pagination ── */
+        .pagination {
+            display:flex; align-items:center; justify-content:center;
+            gap:8px; margin-top:8px; flex-wrap:wrap;
+        }
+        .page-btn {
+            width:36px; height:36px; border-radius:8px;
+            display:flex; align-items:center; justify-content:center;
+            font-size:13px; font-weight:600; cursor:pointer;
+            border:1px solid var(--border); background:var(--bg-card);
+            color:var(--text-secondary); transition:all 0.2s;
+        }
+        .page-btn:hover { border-color:var(--accent-blue); color:var(--accent-blue); }
+        .page-btn.active { background:var(--accent-blue); border-color:var(--accent-blue); color:#fff; }
+        .page-btn.disabled { opacity:0.3; cursor:not-allowed; pointer-events:none; }
+        .page-info { font-size:12px; color:var(--text-secondary); padding:0 8px; }
+
+        /* ── Disclaimer ── */
+        .disclaimer-bar {
+            position:fixed; bottom:0; left:0; width:100%;
+            background:rgba(8,12,16,0.9); border-top:1px solid var(--border);
+            padding:5px 0; overflow:hidden; white-space:nowrap;
+            pointer-events:none; z-index:9999;
+        }
+        .disclaimer-text {
+            display:inline-block;
+            animation:ticker-scroll 32s linear infinite;
+            font-size:11px; color:rgba(245,158,11,0.6); letter-spacing:0.3px;
+        }
+        .disclaimer-text strong { color:rgba(245,158,11,0.85); }
+        @keyframes ticker-scroll {
+            0%   { transform:translateX(100vw); }
+            100% { transform:translateX(-100%); }
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            .page-container { padding:16px; }
+            .search-panel { padding:16px; }
+            .news-grid { grid-template-columns:1fr; }
+            .page-title-section h1 { font-size:22px; }
+            .header-nav .nav-btn:not(.primary) { display:none; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="page-header">
+    <a href="{% url 'dashboard' %}" class="header-brand" style="text-decoration:none;">
+        <div class="brand-icon">📰</div>
+        <div>
+            <span class="brand-text">Market News</span>
+            <span class="brand-sub">Upstox Live Feed</span>
+        </div>
+    </a>
+    <nav class="header-nav">
+        <a href="{% url 'stock_dashboard' %}" class="nav-btn" target="_blank">📊 Market</a>
+        <a href="{% url 'chart' %}"           class="nav-btn" target="_blank">📈 Charts</a>
+        <a href="{% url 'dashboard' %}"        class="nav-btn primary">← Dashboard</a>
+    </nav>
+</header>
+
+<!-- MAIN CONTENT -->
+<div class="page-container">
+
+    <!-- Title -->
+    <div class="page-title-section">
+        <h1>📰 Live Market News</h1>
+        <p>पिछले 7 दिनों की ताज़ा खबरें — symbol का नाम टाइप करें और news देखें</p>
+    </div>
+
+    <!-- Search Panel -->
+    <div class="search-panel">
+        <div class="search-panel-top">
+
+            <!-- Symbol Search -->
+            <div class="symbol-search-wrap">
+                <label for="symbolInput">🔍 Stock का नाम खोजें</label>
+                <div class="search-input-row">
+                    <span class="search-icon">🔎</span>
+                    <input type="text" id="symbolInput"
+                        placeholder="RELIANCE, SUZLON, TATA, HDFC... टाइप करें"
+                        autocomplete="off">
+                </div>
+                <div class="autocomplete-dropdown" id="acDropdown"></div>
+            </div>
+
+            <!-- Page Size -->
+            <div class="ps-wrap">
+                <label for="pageSize">Per Page</label>
+                <input type="number" id="pageSize" value="20" min="1" max="100">
+            </div>
+
+            <!-- Fetch Button -->
+            <button id="fetchBtn" onclick="fetchNews(1)">
+                <span id="fetchBtnText">🔄 News लाएं</span>
+            </button>
+
+        </div>
+
+        <!-- Selected Symbols Tags -->
+        <div class="selected-tags-wrap" id="tagsWrap">
+            <span class="selected-tags-label">चुने गए Stocks:</span>
+            <span class="no-tags-hint" id="noTagsHint">कोई stock नहीं चुना — ऊपर नाम टाइप करके चुनें</span>
+        </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar" id="statsBar" style="display:none;">
+        <div class="stat-card">
+            <span class="s-label">Total News</span>
+            <span class="s-val blue" id="statTotal">0</span>
+        </div>
+        <div class="stat-card">
+            <span class="s-label">Stocks</span>
+            <span class="s-val green" id="statInstruments">0</span>
+        </div>
+        <div class="stat-card">
+            <span class="s-label">Current Page</span>
+            <span class="s-val yellow" id="statPage">1</span>
+        </div>
+        <div class="stat-card">
+            <span class="s-label">Total Pages</span>
+            <span class="s-val purple" id="statPages">1</span>
+        </div>
+    </div>
+
+    <!-- News Container -->
+    <div id="newsContainer">
+        <div class="state-box">
+            <div class="state-icon">🗞️</div>
+            <div class="state-title">Stock का नाम खोजें</div>
+            <div class="state-desc">
+                ऊपर search box में stock का नाम टाइप करें (जैसे RELIANCE, SUZLON)।<br>
+                एक या अधिक stocks चुनें, फिर <strong>News लाएं</strong> दबाएं।
+            </div>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination" id="pagination" style="display:none; padding-bottom:40px;"></div>
+
+</div>
+
+<!-- DISCLAIMER -->
+<div class="disclaimer-bar">
+    <span class="disclaimer-text">
+        ⚠️ <strong>ध्यान दें:</strong> यह Upstox से सीधी news feed है — financial advice नहीं।
+        हम SEBI-पंजीकृत सलाहकार नहीं हैं। कृपया निवेश से पहले अपनी खुद की रिसर्च करें।
+        &nbsp;&nbsp;&nbsp;&nbsp;
+        ⚠️ <strong>Disclaimer:</strong> Direct Upstox news feed, not financial advice. Not SEBI-registered. Do your own research before investing.
+    </span>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════
+// selectedSymbols: Map  symbol → instrument_key
+const selectedSymbols = new Map();
+let currentPage = 1;
+let acFocusIdx  = -1;
+let acItems     = [];
+let searchTimer = null;
+
+// ══════════════════════════════════════════════════════════
+//  AUTOCOMPLETE
+// ══════════════════════════════════════════════════════════
+const inp     = document.getElementById('symbolInput');
+const dropEl  = document.getElementById('acDropdown');
+
+inp.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = inp.value.trim();
+    if (q.length < 1) { closeDropdown(); return; }
+    searchTimer = setTimeout(() => doSearch(q), 200);
+});
+
+inp.addEventListener('keydown', e => {
+    if (!dropEl.classList.contains('open')) {
+        if (e.key === 'Enter') fetchNews(1);
+        return;
+    }
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        acFocusIdx = Math.min(acFocusIdx + 1, acItems.length - 1);
+        renderFocus();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        acFocusIdx = Math.max(acFocusIdx - 1, 0);
+        renderFocus();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (acFocusIdx >= 0 && acItems[acFocusIdx]) {
+            selectSymbol(acItems[acFocusIdx].symbol, acItems[acFocusIdx].instrument_key);
+        }
+    } else if (e.key === 'Escape') {
+        closeDropdown();
+    }
+});
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('.symbol-search-wrap')) closeDropdown();
+});
+
+async function doSearch(q) {
+    try {
+        const resp = await fetch(`/api/symbols/?q=${encodeURIComponent(q)}`);
+        const json = await resp.json();
+        acItems = json.results || [];
+        renderDropdown(acItems, q);
+    } catch(e) {
+        acItems = [];
+        renderDropdown([], q);
+    }
+}
+
+function renderDropdown(items, q) {
+    acFocusIdx = -1;
+    if (!items.length) {
+        dropEl.innerHTML = `<div class="ac-empty">🔍 "${escHtml(q)}" — कोई result नहीं मिला</div>`;
+        dropEl.classList.add('open');
+        return;
+    }
+    let html = '';
+    items.forEach((it, i) => {
+        const alreadySel = selectedSymbols.has(it.symbol);
+        html += `
+        <div class="ac-item" data-idx="${i}" onclick="selectSymbol('${escAttr(it.symbol)}','${escAttr(it.instrument_key)}')">
+            <div>
+                <div class="ac-symbol">${highlightMatch(it.symbol, q)}
+                    ${alreadySel ? ' <span style="color:var(--accent-green);font-size:10px;">✓</span>' : ''}
+                </div>
+                <div class="ac-key">${escHtml(it.instrument_key || '')}</div>
+            </div>
+            <div class="ac-add-icon">${alreadySel ? '✓' : '+'}</div>
+        </div>`;
+    });
+    dropEl.innerHTML = html;
+    dropEl.classList.add('open');
+}
+
+function renderFocus() {
+    dropEl.querySelectorAll('.ac-item').forEach((el, i) => {
+        el.classList.toggle('focused', i === acFocusIdx);
+        if (i === acFocusIdx) el.scrollIntoView({ block: 'nearest' });
+    });
+}
+
+function closeDropdown() {
+    dropEl.classList.remove('open');
+    acFocusIdx = -1;
+}
+
+// ══════════════════════════════════════════════════════════
+//  SELECT / REMOVE SYMBOL
+// ══════════════════════════════════════════════════════════
+function selectSymbol(symbol, instrumentKey) {
+    if (!symbol || !instrumentKey) return;
+    selectedSymbols.set(symbol, instrumentKey);
+    inp.value = '';
+    closeDropdown();
+    renderTags();
+}
+
+function removeSymbol(symbol) {
+    selectedSymbols.delete(symbol);
+    renderTags();
+}
+
+function clearAll() {
+    selectedSymbols.clear();
+    renderTags();
+}
+
+function renderTags() {
+    const wrap  = document.getElementById('tagsWrap');
+    const hint  = document.getElementById('noTagsHint');
+
+    // Remove old tags (keep label + hint)
+    wrap.querySelectorAll('.sym-tag, .clear-all-btn').forEach(el => el.remove());
+
+    if (selectedSymbols.size === 0) {
+        hint.style.display = '';
+        return;
+    }
+    hint.style.display = 'none';
+
+    selectedSymbols.forEach((key, sym) => {
+        const tag = document.createElement('span');
+        tag.className = 'sym-tag';
+        tag.innerHTML = `${escHtml(sym)} <span class="tag-remove" onclick="removeSymbol('${escAttr(sym)}')" title="हटाएं">×</span>`;
+        wrap.appendChild(tag);
+    });
+
+    // Clear all button
+    const btn = document.createElement('button');
+    btn.className = 'clear-all-btn';
+    btn.textContent = '✕ सब हटाएं';
+    btn.onclick = clearAll;
+    wrap.appendChild(btn);
+}
+
+// ══════════════════════════════════════════════════════════
+//  FETCH NEWS
+// ══════════════════════════════════════════════════════════
+async function fetchNews(page) {
+    if (selectedSymbols.size === 0) {
+        showError('⚠️ कृपया पहले कम से कम एक stock खोजकर चुनें।');
+        return;
+    }
+
+    currentPage = page;
+    const btn      = document.getElementById('fetchBtn');
+    const btnText  = document.getElementById('fetchBtnText');
+    const pageSize = parseInt(document.getElementById('pageSize').value) || 20;
+
+    // Collect instrument keys (max 30)
+    const keys = [];
+    selectedSymbols.forEach(v => keys.push(v));
+    const instrumentKeys = keys.slice(0, 30).join(',');
+
+    btn.disabled = true;
+    btnText.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:6px;"></span>Loading...';
+    document.getElementById('statsBar').style.display = 'none';
+    document.getElementById('pagination').style.display = 'none';
+    showLoading();
+
+    try {
+        const params = new URLSearchParams({
+            category: 'instrument_keys',
+            instrument_keys: instrumentKeys,
+            page_number: page,
+            page_size: pageSize,
+        });
+
+        const resp = await fetch(`/api/news/?${params}`);
+        const json = await resp.json();
+
+        if (!resp.ok || json.status === 'error') {
+            throw new Error(json.message || json.detail || 'API Error');
+        }
+
+        renderNews(json);
+
+    } catch(err) {
+        showError(`❌ ${err.message}`);
+    } finally {
+        btn.disabled = false;
+        btnText.innerHTML = '🔄 News लाएं';
+    }
+}
+
+// ══════════════════════════════════════════════════════════
+//  RENDER NEWS
+// ══════════════════════════════════════════════════════════
+function renderNews(json) {
+    const data     = json.data || {};
+    const metadata = json.metadata || {};
+    const pg       = metadata.page || {};
+
+    // Build symbol→name + key reverse map
+    const keyToSym = {};
+    selectedSymbols.forEach((key, sym) => { keyToSym[key] = sym; });
+
+    // All keys that came back from API
+    const returnedKeys = Object.keys(data);
+
+    // All keys we requested (from selectedSymbols)
+    const requestedKeys = [];
+    selectedSymbols.forEach(v => requestedKeys.push(v));
+
+    // Count total news across all returned instruments
+    let totalNews = 0;
+    returnedKeys.forEach(k => { totalNews += (data[k] || []).length; });
+
+    // Keys with actual news
+    const withNews    = returnedKeys.filter(k => (data[k] || []).length > 0);
+    // Keys that were requested but returned 0 news (either not in response or empty array)
+    const withoutNews = requestedKeys.filter(k => !data[k] || (data[k] || []).length === 0);
+
+    // If absolutely nothing came back
+    if (!withNews.length && !withoutNews.length) { showEmpty(); return; }
+
+    // Stats
+    document.getElementById('statTotal').textContent       = pg.total_records || totalNews;
+    document.getElementById('statInstruments').textContent = withNews.length + ' / ' + requestedKeys.length;
+    document.getElementById('statPage').textContent        = pg.page_number   || currentPage;
+    document.getElementById('statPages').textContent       = pg.total_pages   || 1;
+    document.getElementById('statsBar').style.display      = 'flex';
+
+    // If total news is 0, show empty + no-news list
+    if (!totalNews) { showEmpty(); return; }
+
+    let html = '';
+    let delay = 0;
+
+    // ── Stocks WITH news ──
+    withNews.forEach(key => {
+        const articles = data[key];
+        const symLabel = keyToSym[key] || key;
+
+        html += `
+        <div class="news-section-header">
+            <span class="instrument-tag">📌 ${escHtml(symLabel)}</span>
+            <span class="count-badge">${escHtml(key)}</span>
+            <span class="count-badge" style="color:var(--accent-green);border-color:rgba(16,185,129,0.3);">${articles.length} articles</span>
+        </div>
+        <div class="news-grid">`;
+
+        articles.forEach(article => {
+            const timeStr  = formatTime(article.published_time);
+            const hasThumb = article.thumbnail && article.thumbnail.startsWith('http');
+            delay += 35;
+            html += `
+            <div class="news-card" style="animation-delay:${delay}ms;">
+                <a href="${escHtml(article.article_link)}" target="_blank" rel="noopener noreferrer">
+                    ${hasThumb
+                        ? `<div class="card-thumb-wrap">
+                               <img class="card-thumb" src="${escHtml(article.thumbnail)}"
+                                   alt="${escHtml(article.heading)}"
+                                   onerror="this.parentElement.innerHTML='<div class=\\'card-no-thumb\\'></div>'">
+                               <span class="time-badge">🕒 ${timeStr}</span>
+                           </div>`
+                        : `<div class="card-no-thumb"></div>`}
+                    <div class="card-body">
+                        <div class="card-heading">${escHtml(article.heading)}</div>
+                        <div class="card-summary">${escHtml(article.summary || '')}</div>
+                        <div class="card-footer">
+                            <span style="font-size:11px;color:var(--text-secondary);">${!hasThumb?'🕒 '+timeStr:''}</span>
+                            <span class="read-link">
+                                Full Article
+                                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                                </svg>
+                            </span>
+                        </div>
+                    </div>
+                </a>
+            </div>`;
+        });
+
+        html += `</div>`;
+    });
+
+    // ── Stocks WITHOUT news — show a soft notice ──
+    if (withoutNews.length) {
+        withoutNews.forEach(key => {
+            const symLabel = keyToSym[key] || key;
+            html += `
+            <div class="news-section-header" style="margin-top:8px;">
+                <span class="instrument-tag" style="color:var(--text-secondary);border-color:var(--border);background:transparent;">📌 ${escHtml(symLabel)}</span>
+                <span class="count-badge">${escHtml(key)}</span>
+            </div>
+            <div class="no-news-card">
+                <div class="no-news-icon">🔇</div>
+                <div class="no-news-text">
+                    <div class="nt">${escHtml(symLabel)} के लिए पिछले 7 दिनों में कोई news नहीं मिली</div>
+                    <div class="ns">Upstox API returned 0 articles for this instrument in the last 7 days.</div>
+                </div>
+            </div>`;
+        });
+    }
+
+    document.getElementById('newsContainer').innerHTML = html;
+    renderPagination(pg.page_number || 1, pg.total_pages || 1);
+}
+
+// ══════════════════════════════════════════════════════════
+//  PAGINATION
+// ══════════════════════════════════════════════════════════
+function renderPagination(current, total) {
+    const pag = document.getElementById('pagination');
+    if (total <= 1) { pag.style.display = 'none'; return; }
+    pag.style.display = 'flex';
+
+    let html = `<button class="page-btn ${current===1?'disabled':''}" onclick="fetchNews(${current-1})">‹</button>`;
+    const range = pagRange(current, total);
+    let prev = null;
+    range.forEach(p => {
+        if (prev !== null && p - prev > 1) html += `<span class="page-info">…</span>`;
+        html += `<button class="page-btn ${p===current?'active':''}" onclick="fetchNews(${p})">${p}</button>`;
+        prev = p;
+    });
+    html += `<button class="page-btn ${current===total?'disabled':''}" onclick="fetchNews(${current+1})">›</button>`;
+    html += `<span class="page-info">Page ${current} / ${total}</span>`;
+    pag.innerHTML = html;
+}
+function pagRange(c, t) {
+    const pages = [];
+    for (let i = Math.max(1,c-2); i <= Math.min(t,c+2); i++) pages.push(i);
+    if (!pages.includes(1)) pages.unshift(1);
+    if (!pages.includes(t)) pages.push(t);
+    return pages;
+}
+
+// ══════════════════════════════════════════════════════════
+//  UI STATES
+// ══════════════════════════════════════════════════════════
+function showLoading() {
+    document.getElementById('newsContainer').innerHTML = `
+        <div class="state-box">
+            <div class="spinner"></div>
+            <div class="state-title">News लोड हो रही है...</div>
+            <div class="state-desc">Upstox API से डेटा प्राप्त किया जा रहा है।</div>
+        </div>`;
+}
+function showEmpty() {
+    document.getElementById('statsBar').style.display = 'none';
+    document.getElementById('pagination').style.display = 'none';
+    document.getElementById('newsContainer').innerHTML = `
+        <div class="state-box">
+            <div class="state-icon">🔍</div>
+            <div class="state-title">कोई News नहीं मिली</div>
+            <div class="state-desc">चुने गए stocks के लिए पिछले 7 दिनों में कोई news नहीं है। दूसरे stocks try करें।</div>
+        </div>`;
+}
+function showError(msg) {
+    document.getElementById('statsBar').style.display = 'none';
+    document.getElementById('pagination').style.display = 'none';
+    document.getElementById('newsContainer').innerHTML = `
+        <div class="state-box">
+            <div class="state-icon">⚠️</div>
+            <div class="state-title">Error</div>
+            <div class="state-desc" style="color:var(--accent-red);">${escHtml(msg)}</div>
+        </div>`;
+}
+
+// ══════════════════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════════════════
+function formatTime(ms) {
+    if (!ms) return '';
+    const d    = new Date(ms);
+    const diff = Math.floor((Date.now() - d) / 60000);
+    if (diff < 1)    return 'अभी';
+    if (diff < 60)   return diff + ' min पहले';
+    if (diff < 1440) return Math.floor(diff/60) + ' hr पहले';
+    return d.toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+}
+function highlightMatch(str, q) {
+    const idx = str.toUpperCase().indexOf(q.toUpperCase());
+    if (idx < 0) return escHtml(str);
+    return escHtml(str.slice(0,idx)) +
+           `<strong style="color:var(--accent-blue);">${escHtml(str.slice(idx, idx+q.length))}</strong>` +
+           escHtml(str.slice(idx+q.length));
+}
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+    if (!s) return '';
+    return String(s).replace(/'/g,"\\'");
+}
+</script>
+
+</body>
+</html>

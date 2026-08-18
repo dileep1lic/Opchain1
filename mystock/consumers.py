@@ -17,10 +17,10 @@ class OptionChainConsumer(AsyncWebsocketConsumer):
     async def send_data_update(self, event):
         # फ्रंटएंड को JSON मेसेज भेजें
         await self.send(text_data=json.dumps({
-            'symbol': event['symbol'],
-            'message': event['message'],
-            "symbol": event.get("symbol"),           # 👈 यह लाइन जोड़ें
-            "spot_price": event.get("spot_price"),   # 👈 यह लाइन जोड़ें
-            "data_time": event.get("data_time"),      # 👈 यह लाइन जोड़ें
+            "symbol":     event.get("symbol"),
+            "spot_price": event.get("spot_price"),
+            "data_time":  event.get("data_time"),
+            "message":    event.get("message", "UPDATE_NOW"),
+            "r_strike":   event.get("r_strike"),   # 🔴 R Strike (None या float)
+            "s_strike":   event.get("s_strike"),   # 🔴 S Strike (None या float)
         }))
-        

@@ -380,14 +380,14 @@ async def calculate_data_async_optimized(session, symbol, expiry_Date):
                     ) + spot_price
 
         # अब इसे 0.05 के निकटतम गुणज (Multiple) पर राउंड करें
-        df["Reversl_Ce"] = ((calculation_ce / 0.05).round() * 0.05).round(2)
+        df["Reversl_Ce"] = ((calculation_ce / 0.05).round() * 0.05).round(2).replace([np.inf, -np.inf, np.nan], 0.0)
         # PE के लिए भी यही करें
         calculation_pe = (
                     ((df["PE_LTP"].shift(1) - df["CE_LTP"])) / 
                     ((df["CE_Delta"] - df["PE_Delta"].shift(1)))
                     ) + spot_price
         # अब इसे 0.05 के निकटतम गुणज (Multiple) पर राउंड करें
-        df["Reversl_Pe"] = ((calculation_pe / 0.05).round() * 0.05).round(2)
+        df["Reversl_Pe"] = ((calculation_pe / 0.05).round() * 0.05).round(2).replace([np.inf, -np.inf, np.nan], 0.0)
 
 
         ce_oi = df["CE_OI"].replace(0, np.nan)

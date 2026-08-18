@@ -240,7 +240,7 @@ class Command(BaseCommand):
                     await set_cache_async(f'live_nifty_spot_{fixes_sym}', spot_price, 43200)                  
                     
 
-                    # 🚀 === NEW: WebSockets के ज़रिए फ्रंटएंड को तुरंत सिग्नल भेजें === 🚀
+                    # 🚀 === WebSockets के ज़रिए फ्रंटएंड को तुरंत सिग्नल भेजें === 🚀
                     channel_layer = get_channel_layer()
                     await channel_layer.group_send(
                         "live_options_group",  # ग्रुप का नाम
@@ -249,7 +249,9 @@ class Command(BaseCommand):
                             "symbol": fixes_sym,
                             "spot_price": spot_price,               
                             "data_time": datetime.now().isoformat(),
-                            "message": "UPDATE_NOW"
+                            "message": "UPDATE_NOW",
+                            "r_strike": None,  # 🔴 master_levels नीचे compute होगा
+                            "s_strike": None,
                         }
                     )
                     
@@ -334,7 +336,6 @@ class Command(BaseCommand):
                     except Exception as sr_error:
                         print(f"⚠️ LiveSRData Save Error: {sr_error}")
 
-                    # 🟢 Incremental History Update — FIXED
                     master_levels = None
                     try:
                         # ✅ FIX Bug 4: master_levels एक बार निकालो
@@ -342,6 +343,24 @@ class Command(BaseCommand):
                         eff_res = float(master_levels["R"]["strike"] or 0)
                         eff_sup = float(master_levels["S"]["strike"] or 0)
                         t_str   = datetime.now().isoformat()
+
+                        # 🔴 LIVE: Strike info WebSocket में भेजो (frontend इसि से detect करेगा)
+                        try:
+                            channel_layer = get_channel_layer()
+                            await channel_layer.group_send(
+                                "live_options_group",
+                                {
+                                    "type": "send_data_update",
+                                    "symbol": fixes_sym,
+                                    "spot_price": spot_price,
+                                    "data_time": datetime.now().isoformat(),
+                                    "message": "SR_UPDATE",
+                                    "r_strike": eff_res,   # 🔴 R Strike
+                                    "s_strike": eff_sup,   # 🔴 S Strike
+                                }
+                            )
+                        except Exception as ws_err:
+                            pass  # WebSocket error से main loop ना टूटे
 
                         history_key  = f"moving_history_all_{fixes_sym.upper()}"
                         history_data = await get_cache_async(history_key) or {}

@@ -467,6 +467,62 @@
 </div>
 
 
+<!-- ── DB SIZE CHECK ── -->
+<div class="section-title">💾 DB Size Check</div>
+<div style="
+    background:var(--card);
+    border:1px solid rgba(124,111,255,.35);
+    border-radius:14px;
+    padding:20px;
+    margin-bottom:28px;
+">
+
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
+    <button onclick="checkDbSize()" id="dbSizeBtn" style="
+        padding:9px 20px;
+        background:linear-gradient(135deg,rgba(124,111,255,.2),rgba(74,158,255,.15));
+        border:1px solid rgba(124,111,255,.5);color:#c4b8ff;
+        border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+        transition:all .2s;display:flex;align-items:center;gap:8px;
+    " onmouseover="this.style.background='rgba(124,111,255,.3)'"
+       onmouseout="this.style.background='linear-gradient(135deg,rgba(124,111,255,.2),rgba(74,158,255,.15))'">
+      💾 DB Size देखें
+    </button>
+    <div id="db-size-summary" style="font-size:13px;color:var(--muted);">(बटन दबाऐं — database कितनी भरी है यह दिखेगा)</div>
+  </div>
+
+  <div id="db-size-result" style="display:none;">
+
+    <!-- Size Overview Cards -->
+    <div id="db-size-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px;"></div>
+
+    <!-- Fill Gauge -->
+    <div id="db-fill-gauge" style="display:none;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:6px;">
+        <span>🗄️ DB Fill Level</span>
+        <span id="fill-pct-label">—%</span>
+      </div>
+      <div style="background:var(--bg);border-radius:8px;height:12px;overflow:hidden;border:1px solid var(--border);">
+        <div id="fill-bar" style="height:100%;border-radius:8px;transition:width 0.8s ease;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px;">
+        <span id="used-mb-label">Used: —</span>
+        <span id="free-mb-label">Free: —</span>
+      </div>
+    </div>
+
+    <!-- Per-Table Records -->
+    <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">
+      📋 Table-wise Record Count
+    </div>
+    <div id="db-table-grid" style="
+        display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;
+    "></div>
+
+  </div>
+</div>
+
+
 
 
 <!-- ── GIT RELEASE (अलग पेज पर गया है) ── -->
@@ -516,6 +572,102 @@
     </a>
   </div>
 </div>
+
+<!-- ── STATIC REVERSAL (LSR / ESR / DSR) ── -->
+<div class="section-title">📊 Static Reversal — LSR / ESR / DSR</div>
+<div style="
+    background:var(--card);
+    border:1px solid rgba(88,166,255,0.3);
+    border-radius:14px;
+    padding:20px 24px;
+    margin-bottom:28px;
+">
+
+  <!-- Symbol + Tab row -->
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
+
+    <!-- Symbol -->
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.8px;">Symbol</label>
+      <select id="sr-sym" onchange="srLoadFilters()" style="
+          background:var(--bg);border:1px solid var(--border);
+          color:var(--text);border-radius:8px;padding:8px 14px;
+          font-size:13px;font-family:inherit;cursor:pointer;">
+        <option value="NIFTY">NIFTY</option>
+        <option value="BANKNIFTY">BANKNIFTY</option>
+        <option value="FINNIFTY">FINNIFTY</option>
+        <option value="MIDCAPNIFTY">MIDCAPNIFTY</option>
+        <option value="SENSEX">SENSEX</option>
+      </select>
+    </div>
+
+    <!-- Type Tabs -->
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.8px;">Type</label>
+      <div style="display:flex;gap:4px;">
+        <button id="sr-tab-lsr" onclick="srSetTab('LSR')" style="
+            padding:7px 16px;border-radius:8px 0 0 8px;font-size:12px;font-weight:700;cursor:pointer;
+            background:rgba(88,166,255,.25);border:1px solid rgba(88,166,255,.7);color:#58a6ff;">
+          LSR
+        </button>
+        <button id="sr-tab-esr" onclick="srSetTab('ESR')" style="
+            padding:7px 16px;border-radius:0;font-size:12px;font-weight:700;cursor:pointer;
+            background:var(--bg);border:1px solid var(--border);color:var(--muted);">
+          ESR
+        </button>
+        <button id="sr-tab-dsr" onclick="srSetTab('DSR')" style="
+            padding:7px 16px;border-radius:0 8px 8px 0;font-size:12px;font-weight:700;cursor:pointer;
+            background:var(--bg);border:1px solid var(--border);color:var(--muted);">
+          DSR
+        </button>
+      </div>
+    </div>
+
+
+
+    <!-- Save Button -->
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:transparent;">Save</label>
+      <button id="sr-save-btn" onclick="saveStaticReversal()" style="
+          padding:9px 22px;
+          background:linear-gradient(135deg,rgba(88,166,255,.2),rgba(88,166,255,.1));
+          border:1px solid rgba(88,166,255,.6);color:#58a6ff;
+          border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;">
+        💾 Save करें
+      </button>
+    </div>
+
+    <!-- Status -->
+    <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px;">
+      <label style="font-size:11px;color:transparent;">Status</label>
+      <div id="sr-save-status" style="
+          font-size:12px;color:var(--muted);padding:8px 12px;border-radius:8px;
+          background:var(--bg);border:1px solid var(--border);min-height:36px;line-height:1.5;">
+        यहाँ Save का result दिखेगा...
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Saved Records Table -->
+  <div id="sr-saved-records" style="display:none;margin-top:12px;">
+    <div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">💾 Saved Records</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead>
+        <tr style="color:var(--muted);border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:6px 8px;">Type</th>
+          <th style="text-align:left;padding:6px 8px;">Filter</th>
+          <th style="text-align:right;padding:6px 8px;">Spot</th>
+          <th style="text-align:right;padding:6px 8px;">Rows</th>
+          <th style="text-align:right;padding:6px 8px;">Saved At</th>
+        </tr>
+      </thead>
+      <tbody id="sr-records-tbody"></tbody>
+    </table>
+  </div>
+
+</div>
+
 
 <!-- ── LTP LEVELS ── -->
 <div class="section-title">📐 LTP Levels — Save to Database</div>
@@ -1158,6 +1310,107 @@ function getCsrfToken() {
     return match ? match[1] : '';
 }
 
+// ════════════════════════════════════════════════════════════════
+//  DB SIZE CHECK — Database कितनी भरी है यह देखने के लिए
+// ════════════════════════════════════════════════════════════════
+async function checkDbSize() {
+    const btn = document.getElementById('dbSizeBtn');
+    const summary = document.getElementById('db-size-summary');
+    btn.innerHTML = '⏳ लोड हो रहा है...';
+    btn.disabled = true;
+
+    try {
+        const resp = await fetch('/api/db-size/');
+        const data = await resp.json();
+
+        if (data.status !== 'ok') {
+            summary.textContent = '❌ Error: ' + data.msg;
+            btn.innerHTML = '💾 DB Size देखें';
+            btn.disabled = false;
+            return;
+        }
+
+        // ── Overview Cards ──
+        const cardsEl = document.getElementById('db-size-cards');
+        const fillColor = data.page_info.fill_pct > 80
+            ? '#ef4444' : data.page_info.fill_pct > 50 ? '#f59e0b' : '#00d4a0';
+
+        cardsEl.innerHTML = `
+            <div style="background:var(--bg);border:1px solid rgba(124,111,255,.3);border-radius:12px;padding:16px;text-align:center;">
+                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📂 DB File Size</div>
+                <div style="font-size:24px;font-weight:700;color:#c4b8ff;">${data.db_size_mb} <span style="font-size:14px;">MB</span></div>
+                <div style="font-size:10px;color:var(--muted);margin-top:4px;">${(data.db_size_bytes / 1024 / 1024 / 1024).toFixed(3)} GB</div>
+            </div>
+            <div style="background:var(--bg);border:1px solid rgba(0,212,160,.3);border-radius:12px;padding:16px;text-align:center;">
+                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📋 Total Records</div>
+                <div style="font-size:24px;font-weight:700;color:var(--green);">${data.total_records.toLocaleString()}</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:4px;">सभी tables मिलाकर</div>
+            </div>
+            ${data.page_info && data.page_info.fill_pct !== undefined ? `
+            <div style="background:var(--bg);border:1px solid rgba(${data.page_info.fill_pct > 80 ? '239,68,68' : data.page_info.fill_pct > 50 ? '245,158,11' : '0,212,160'},.3);border-radius:12px;padding:16px;text-align:center;">
+                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📊 Fill Level</div>
+                <div style="font-size:24px;font-weight:700;color:${fillColor};">${data.page_info.fill_pct}<span style="font-size:14px;">%</span></div>
+                <div style="font-size:10px;color:var(--muted);margin-top:4px;">${data.db_engine.toUpperCase()} Database</div>
+            </div>
+            ` : ''}
+        `;
+
+        // ── Fill Gauge (SQLite only) ──
+        if (data.page_info && data.page_info.fill_pct !== undefined) {
+            const gauge = document.getElementById('db-fill-gauge');
+            gauge.style.display = 'block';
+            document.getElementById('fill-pct-label').textContent = data.page_info.fill_pct + '%';
+            document.getElementById('used-mb-label').textContent = 'Used: ' + data.page_info.used_mb + ' MB';
+            document.getElementById('free-mb-label').textContent = 'Free: ' + data.page_info.free_mb + ' MB';
+
+            const bar = document.getElementById('fill-bar');
+            bar.style.width = data.page_info.fill_pct + '%';
+            bar.style.background = data.page_info.fill_pct > 80
+                ? 'linear-gradient(90deg,#ef4444,#dc2626)'
+                : data.page_info.fill_pct > 50
+                    ? 'linear-gradient(90deg,#f59e0b,#d97706)'
+                    : 'linear-gradient(90deg,#00d4a0,#059669)';
+        }
+
+        // ── Per-Table Grid ──
+        const TABLE_ICONS = {
+            'OptionChain': '📊', 'SupportResistance': '🎯',
+            'TempOptionChain': '🔄', 'LiveSRData': '📡',
+            'PaperTrade': '📋', 'TradingJournal': '📓',
+            'LtpLevels': '📐'
+        };
+        let gridHtml = '';
+        for (const [tbl, cnt] of Object.entries(data.table_counts)) {
+            const icon = TABLE_ICONS[tbl] || '🗄️';
+            const highlight = cnt > 100000 ? 'rgba(245,158,11,.15)' : 'var(--bg)';
+            const textColor = cnt > 500000 ? '#ef4444' : cnt > 100000 ? '#f59e0b' : 'var(--text)';
+            gridHtml += `
+                <div style="background:${highlight};border:1px solid var(--border);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+                    <div>
+                        <div style="font-size:12px;font-weight:600;">${icon} ${tbl}</div>
+                        <div style="font-size:10px;color:var(--muted);margin-top:2px;">Records</div>
+                    </div>
+                    <div style="font-size:20px;font-weight:700;color:${textColor};font-variant-numeric:tabular-nums;">
+                        ${cnt.toLocaleString()}
+                    </div>
+                </div>
+            `;
+        }
+        document.getElementById('db-table-grid').innerHTML = gridHtml;
+
+        // ── Show Result ──
+        document.getElementById('db-size-result').style.display = 'block';
+        summary.innerHTML = `<span style="color:#c4b8ff;font-weight:600;">✅ ${data.db_size_mb} MB</span> • ${data.total_records.toLocaleString()} total records`;
+        addLog(`💾 DB Size: ${data.db_size_mb} MB | ${data.total_records.toLocaleString()} records | Fill: ${data.page_info?.fill_pct ?? '?'}%`, 'ok');
+
+    } catch(e) {
+        summary.textContent = '❌ Network error: ' + e.message;
+    }
+
+    btn.innerHTML = '🔄 Refresh';
+    btn.disabled = false;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  SMART POLLING MANAGER — Exponential Backoff + Offline UI
 //  Server restart पर log spam नहीं, सिर्फ एक banner दिखेगा
@@ -1309,7 +1562,118 @@ _ltpAdminSpotRefresh();
 setInterval(_ltpAdminSpotRefresh, 10000); // 10 sec में refresh
 
 // Save करो
+// ── Static Reversal (LSR / ESR / DSR) ───────────────────────────────
+let _srCurrentTab = 'LSR';
+
+function srSetTab(tab) {
+    _srCurrentTab = tab;
+    // Tab buttons styling
+    ['LSR','ESR','DSR'].forEach(t => {
+        const btn = document.getElementById(`sr-tab-${t.toLowerCase()}`);
+        const isActive = t === tab;
+        btn.style.background = isActive ? 'rgba(88,166,255,.25)' : 'var(--bg)';
+        btn.style.border     = isActive ? '1px solid rgba(88,166,255,.7)' : '1px solid var(--border)';
+        btn.style.color      = isActive ? '#58a6ff' : 'var(--muted)';
+    });
+    // Status reset
+    const status = document.getElementById('sr-save-status');
+    status.style.color = 'var(--muted)';
+    status.textContent = `${tab} — यहाँ Save का result दिखेगा...`;
+}
+
+// srLoadFilters ab sirf records refresh karega
+function srLoadFilters() {
+    const sym = document.getElementById('sr-sym').value;
+    srRefreshRecords(sym);
+}
+
+async function saveStaticReversal() {
+    const sym    = document.getElementById('sr-sym').value;
+    const btn    = document.getElementById('sr-save-btn');
+    const status = document.getElementById('sr-save-status');
+    const rtype  = _srCurrentTab;
+
+    // Build payload (No expiry/date needed, backend will auto-extract from Live Data)
+    const payload = { symbol: sym, type: rtype };
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span> Saving...';
+    status.style.color = 'var(--muted)';
+    status.textContent = `${sym} [${rtype}] calculate हो रहा है...`;
+
+    try {
+        const resp = await fetch('/api/save-static-reversal/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+
+        if (data.status === 'saved') {
+            const fv = data.filter_value ? ` [${data.filter_value}]` : '';
+            status.style.color = 'var(--green)';
+            status.innerHTML = `✅ <strong>${data.type}${fv} Saved!</strong> [${data.saved_at}] — Spot: <strong style="color:var(--amber)">${data.spot}</strong> | ${data.rows_count} strikes`;
+            addLog(`📊 ${data.type}${fv} Saved [${sym}] Spot:${data.spot} | ${data.rows_count} rows`, 'ok');
+            showToast(`✅ ${data.type} Saved! [${sym}]`, 'ok');
+            srRefreshRecords(sym);
+        } else {
+            status.style.color = 'var(--red)';
+            status.textContent = `❌ Error: ${data.msg || 'Unknown'}`;
+            addLog(`❌ SR Error: ${data.msg}`, 'err');
+        }
+    } catch(e) {
+        status.style.color = 'var(--red)';
+        status.textContent = `❌ Network Error: ${e.message}`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '💾 Save करें';
+    }
+}
+
+// Saved Records table refresh
+async function srRefreshRecords(sym) {
+    if (!sym) sym = document.getElementById('sr-sym').value;
+
+    // Fetch all saved records for this symbol
+    try {
+        const fetches = await Promise.all(['LSR','ESR','DSR'].map(async t => {
+        // Get the latest saved record for each type
+            const r = await fetch(`/api/get-static-reversal/?symbol=${sym}&type=${t}&filter_value=`);
+            return r.json();
+        }));
+
+        const allResults = fetches.filter(d => d.levels && d.levels.length > 0);
+        const tbody = document.getElementById('sr-records-tbody');
+        tbody.innerHTML = '';
+
+        if (allResults.length === 0) {
+            document.getElementById('sr-saved-records').style.display = 'none';
+            return;
+        }
+        document.getElementById('sr-saved-records').style.display = 'block';
+
+        const typeColors = { LSR:'#58a6ff', ESR:'#00e676', DSR:'#ffa726' };
+        allResults.forEach(d => {
+            const color = typeColors[d.type] || 'var(--text)';
+            tbody.innerHTML += `
+              <tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+                <td style="padding:6px 8px;"><strong style="color:${color}">${d.type}</strong></td>
+                <td style="padding:6px 8px;color:var(--muted);">${d.filter_value || '—'}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--amber);">${d.spot}</td>
+                <td style="padding:6px 8px;text-align:right;">${d.levels.length}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--muted);">${d.saved_at}</td>
+              </tr>`;
+        });
+    } catch(e) { console.warn('SR records refresh failed:', e); }
+}
+
+// Page load init
+srLoadFilters();
+
+
+
 let ltpManualMode = false;
+
 
 function toggleLtpMode() {
     ltpManualMode = !ltpManualMode;

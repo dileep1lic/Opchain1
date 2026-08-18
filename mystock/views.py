@@ -17,8 +17,8 @@ from asgiref.sync import async_to_sync
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import caches
-from django.db.models import Count, F, OuterRef, Q, Subquery, Sum
-from django.db.models.functions import Abs
+from django.db.models import Count, F, Max, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Abs, TruncDate
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -49,6 +49,7 @@ from .models import (
     TradeType,
     TradingJournal,
     LtpLevels,
+    StaticReversal,
 )
 from .symbol import symbols as ALL_SYMBOLS
 from .trade_logic import get_master_levels
@@ -223,43 +224,69 @@ def login_view(request):
             return redirect('dashboard') 
 
     if request.method == 'POST':
-        username_or_email = request.POST.get('username')
-        passw = request.POST.get('password')
+        username_or_email = request.POST.get('username', '').strip()
+        passw = request.POST.get('password', '')
 
-        user = authenticate(request, username=username_or_email, password=passw)
+        # ── STEP 1: पहले DB में user ढूंढो ──
+        from django.db.models import Q
+        from django.contrib.auth.models import User as AuthUser
+        
+        user_obj = None
+        # पहले exact username से match करो
+        try:
+            user_obj = AuthUser.objects.get(username=username_or_email)
+        except AuthUser.DoesNotExist:
+            pass
+        
+        # अगर username से नहीं मिला तो email से ढूंढो
+        if user_obj is None:
+            try:
+                user_obj = AuthUser.objects.get(email=username_or_email)
+            except AuthUser.DoesNotExist:
+                user_obj = None
+            except AuthUser.MultipleObjectsReturned:
+                # Same email वाले multiple users — username match वाला लो
+                user_obj = AuthUser.objects.filter(email=username_or_email).first()
 
-        if user is not None:
-            if user.is_active:
-                
-                # 🚀 --- बुलेटप्रूफ 'किक-आउट' (Kick-out) लॉजिक ---
-                # नए लॉगिन से पहले इस यूज़र के पुराने सभी एक्टिव सेशन्स को डिलीट करें
-                active_sessions = Session.objects.filter(expire_date__gt=timezone.now())
-                for session in active_sessions:
-                    try:
-                        session_data = session.get_decoded()
-                        if str(user.pk) == str(session_data.get('_auth_user_id')):
-                            session.delete()
-                    except Exception:
-                        pass
-                # 🚀 -------------------------------------------
+        # ── STEP 2: पासवर्ड चेक करो ──
+        if user_obj is not None and user_obj.check_password(passw):
+            # पासवर्ड सही है — अब active check करो
+            if not user_obj.is_active:
+                # Inactive / Deactivated user → अलग पेज पर भेजो
+                return redirect('inactive_account')
 
-                # अब नए डिवाइस/ब्राउज़र में सुरक्षित लॉगिन करें
-                login(request, user)
-                
-                next_url = request.POST.get('next')
-                if next_url:
-                    return redirect(next_url)
+            # Active user → normal login flow
+            active_sessions = Session.objects.filter(expire_date__gt=timezone.now())
+            for session in active_sessions:
+                try:
+                    session_data = session.get_decoded()
+                    if str(user_obj.pk) == str(session_data.get('_auth_user_id')):
+                        session.delete()
+                except Exception:
+                    pass
 
-                if user.is_superuser:
-                    return redirect('admin_panel')
-                else:
-                    return redirect('dashboard')
+            # Django's login() को backend चाहिए — manually set करो
+            user_obj.backend = 'django.contrib.auth.backends.ModelBackend'
+            login(request, user_obj)
+
+            next_url = request.POST.get('next')
+            if next_url:
+                return redirect(next_url)
+
+            if user_obj.is_superuser:
+                return redirect('admin_panel')
             else:
-                messages.error(request, "आपका अकाउंट अभी एडमिन द्वारा एक्टिवेट नहीं किया गया है।")
+                return redirect('dashboard')
         else:
+            # गलत username/email या गलत पासवर्ड
             messages.error(request, "यूज़रनेम/ईमेल या पासवर्ड गलत है।")
 
     return render(request, 'registration/login.html')
+
+
+def inactive_account_view(request):
+    """दिखाता है कि यूज़र का अकाउंट अभी पेंडिंग है।"""
+    return render(request, 'registration/inactive_account.html')
 
 # ── 2. Admin Status API ─────────────────────────────────────
 @admin_only                          # ← Security fix: पहले यह था ही नहीं!
@@ -887,7 +914,7 @@ def _get_all_strikes_reversal_base(symbol, today_date):
     अगर इस window में कोई डेटा नहीं है, तो आज के दिन का सबसे पहला available डेटा ले लेता है।
     Return format: { strike_price: {'ce': base_val, 'pe': base_val} }
     """
-    cache_key = f"all_strikes_reversal_base_{symbol}_{today_date}_v3"
+    cache_key = f"all_strikes_reversal_base_{symbol}_{today_date}_v4"
     cached_data = cache.get(cache_key)
     if cached_data is not None:
         return cached_data
@@ -919,11 +946,21 @@ def _get_all_strikes_reversal_base(symbol, today_date):
         r_ce = row.get('Reversl_Ce')
         r_pe = row.get('Reversl_Pe')
         
-        if base_data[sp]['ce'] == 0.0 and r_ce and float(r_ce) > 0:
-            base_data[sp]['ce'] = float(r_ce)
+        if base_data[sp]['ce'] == 0.0 and r_ce:
+            try:
+                val_ce = float(r_ce)
+                if math.isfinite(val_ce) and 0 < val_ce < 1000000:
+                    base_data[sp]['ce'] = val_ce
+            except (ValueError, TypeError):
+                pass
             
-        if base_data[sp]['pe'] == 0.0 and r_pe and float(r_pe) > 0:
-            base_data[sp]['pe'] = float(r_pe)
+        if base_data[sp]['pe'] == 0.0 and r_pe:
+            try:
+                val_pe = float(r_pe)
+                if math.isfinite(val_pe) and 0 < val_pe < 1000000:
+                    base_data[sp]['pe'] = val_pe
+            except (ValueError, TypeError):
+                pass
 
     # Cache if we have data
     now_ist = datetime.now(IST_tz)
@@ -992,10 +1029,24 @@ def table_update_api(request):
             base_ce = base_reversals[sp]['ce']
             base_pe = base_reversals[sp]['pe']
             
-            if base_ce > 0 and ce_rev and float(ce_rev) > 0:
-                ce_pct = round(((float(ce_rev) - base_ce) / base_ce) * 100, 2)
-            if base_pe > 0 and pe_rev and float(pe_rev) > 0:
-                pe_pct = round(((float(pe_rev) - base_pe) / base_pe) * 100, 2)
+            if base_ce > 0 and ce_rev:
+                try:
+                    val_ce = float(ce_rev)
+                    if math.isfinite(val_ce) and val_ce > 0:
+                        res = ((val_ce - base_ce) / base_ce) * 100
+                        if math.isfinite(res):
+                            ce_pct = round(res, 2)
+                except (ValueError, TypeError):
+                    pass
+            if base_pe > 0 and pe_rev:
+                try:
+                    val_pe = float(pe_rev)
+                    if math.isfinite(val_pe) and val_pe > 0:
+                        res = ((val_pe - base_pe) / base_pe) * 100
+                        if math.isfinite(res):
+                            pe_pct = round(res, 2)
+                except (ValueError, TypeError):
+                    pass
                 
         # Inject custom attributes
         if hasattr(row, 'Strike_Price'):
@@ -1661,7 +1712,7 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         # 🛡️ FIX: Cache में store करने और return करने से पहले Infinity/NaN साफ़ करें
         lines = sanitize_json_data(lines)
 
-        timeout = 45 if from_date == today_str else 86400
+        timeout = 15 if from_date == today_str else 86400  # 🔴 Live: 15s cache ताकि जल्दी update हो
         cache.set(cache_key, lines, timeout=timeout)
 
         return lines
@@ -1671,6 +1722,45 @@ def get_reversal_lines(symbol: str, from_date: str, to_date: str):
         print(f"Reversal lines error: {e}")
         traceback.print_exc()
         return []
+
+# ─────────────────────────────────────────────
+# View: Live Reversal Lines Only API
+# (Dashboard Chart के live update के लिए)
+# ─────────────────────────────────────────────
+@login_required
+def reversal_lines_api(request):
+    """
+    सिर्फ Reversal Lines return करता है — candle data नहीं।
+    Dashboard Chart इसे हर WebSocket update पर poll करेगा।
+    Cache timeout: 15 seconds (ताकि नया S/R मिलते ही lines update हों)
+
+    Query Params:
+        symbol    : NIFTY / BANKNIFTY etc.
+        from_date : YYYY-MM-DD
+        to_date   : YYYY-MM-DD
+    """
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+
+    symbol    = request.GET.get("symbol",    "NIFTY").strip().upper()
+    from_date = request.GET.get("from_date", today_str)
+    to_date   = request.GET.get("to_date",   today_str)
+
+    # Live reversal lines fetch करें (get_reversal_lines internally cache करता है)
+    lines = get_reversal_lines(symbol, from_date, to_date)
+
+    # एक simple hash बनाएं ताकि frontend detect कर सके कि कुछ बदला या नहीं
+    import hashlib, json
+    lines_hash = hashlib.md5(json.dumps(lines, sort_keys=True, default=str).encode()).hexdigest()[:8]
+
+    return JsonResponse({
+        "symbol":      symbol,
+        "from_date":   from_date,
+        "to_date":     to_date,
+        "lines_hash":  lines_hash,
+        "reversal_lines": lines,
+    })
+
 # ─────────────────────────────────────────────
 # Helper: Upstox API से candle data fetch
 # ─────────────────────────────────────────────
@@ -2851,6 +2941,8 @@ def db_cleanup_api(request):
             "TempOptionChain":   TempOptionChain,
             "LiveSRData":        LiveSRData,
             "PaperTrade":        PaperTrade,
+            "TradingJournal":    TradingJournal,
+            "LtpLevels":         LtpLevels,
         }
 
         allowed = list(TABLE_MAP.keys()) + ["ALL"]
@@ -2865,9 +2957,13 @@ def db_cleanup_api(request):
         results = {}
         total   = 0
         for name, model in targets.items():
-            # PaperTrade टेबल में Time कॉलम नहीं है, उसमें trade_date है
+            # हर Table का date field अलग है:
             if name == "PaperTrade":
                 deleted, _ = model.objects.filter(trade_date__lt=cutoff_date).delete()
+            elif name == "TradingJournal":
+                deleted, _ = model.objects.filter(date__lt=cutoff_date).delete()
+            elif name == "LtpLevels":
+                deleted, _ = model.objects.filter(saved_at__lt=cutoff_time).delete()
             else:
                 deleted, _ = model.objects.filter(Time__lt=cutoff_time).delete()
             
@@ -2934,20 +3030,24 @@ def db_cleanup_preview_api(request):
         "TempOptionChain":   TempOptionChain,
         "LiveSRData":        LiveSRData,
         "PaperTrade":        PaperTrade,
+        "TradingJournal":    TradingJournal,
+        "LtpLevels":         LtpLevels,
     }
 
     targets = TABLE_MAP if table == "ALL" else {table: TABLE_MAP.get(table)}
     if None in targets.values():
         return JsonResponse({"status": "error", "msg": f"Invalid table: {table}"})
 
-   
-
     counts = {}
     total  = 0
     for name, model in targets.items():
-        # यहाँ भी PaperTrade के लिए trade_date का इस्तेमाल करें
+        # हर Table का date field अलग है:
         if name == "PaperTrade":
             c = model.objects.filter(trade_date__lt=cutoff_date).count()
+        elif name == "TradingJournal":
+            c = model.objects.filter(date__lt=cutoff_date).count()
+        elif name == "LtpLevels":
+            c = model.objects.filter(saved_at__lt=cutoff_time).count()
         else:
             c = model.objects.filter(Time__lt=cutoff_time).count()
             
@@ -2961,6 +3061,94 @@ def db_cleanup_preview_api(request):
         "total":       total,
         "details":     counts,
     })
+
+
+# ════════════════════════════════════════════════════════════════
+#  DB Size API — Database कितनी भरी है यह जानने के लिए
+# ════════════════════════════════════════════════════════════════
+@admin_only
+def db_size_api(request):
+    """
+    Database की size और हर table का record count दिखाता है।
+    Admin Panel → DB Cleanup section में "DB Size देखें" बटन से call होता है।
+    """
+    import os
+    from django.db import connection
+
+    try:
+        # ── 1. DB File Size (SQLite) ──────────────────────────────
+        db_path = connection.settings_dict.get('NAME', '')
+        db_size_bytes = 0
+        db_size_mb    = 0.0
+        if db_path and os.path.exists(str(db_path)):
+            db_size_bytes = os.path.getsize(str(db_path))
+            db_size_mb    = round(db_size_bytes / (1024 * 1024), 2)
+
+        # ── 2. हर Table का Record Count ──────────────────────────
+        TABLE_MAP = {
+            "OptionChain":       OptionChain,
+            "SupportResistance": SupportResistance,
+            "TempOptionChain":   TempOptionChain,
+            "LiveSRData":        LiveSRData,
+            "PaperTrade":        PaperTrade,
+            "TradingJournal":    TradingJournal,
+            "LtpLevels":         LtpLevels,
+        }
+
+        table_counts = {}
+        total_records = 0
+        for name, model in TABLE_MAP.items():
+            try:
+                cnt = model.objects.count()
+            except Exception:
+                cnt = 0
+            table_counts[name] = cnt
+            total_records += cnt
+
+        # ── 3. SQLite Page Info (optional deep info) ──────────────
+        page_info = {}
+        if connection.vendor == 'sqlite':
+            with connection.cursor() as cursor:
+                cursor.execute("PRAGMA page_count;")
+                page_count = cursor.fetchone()[0]
+                cursor.execute("PRAGMA page_size;")
+                page_size  = cursor.fetchone()[0]
+                cursor.execute("PRAGMA freelist_count;")
+                free_pages = cursor.fetchone()[0]
+
+                used_pages  = page_count - free_pages
+                used_bytes  = used_pages * page_size
+                used_mb     = round(used_bytes / (1024 * 1024), 2)
+                free_mb     = round((free_pages * page_size) / (1024 * 1024), 2)
+                fill_pct    = round((used_pages / page_count * 100), 1) if page_count > 0 else 0
+
+                page_info = {
+                    "page_count":  page_count,
+                    "page_size":   page_size,
+                    "free_pages":  free_pages,
+                    "used_pages":  used_pages,
+                    "used_mb":     used_mb,
+                    "free_mb":     free_mb,
+                    "fill_pct":    fill_pct,
+                }
+
+        return JsonResponse({
+            "status":        "ok",
+            "db_size_mb":    db_size_mb,
+            "db_size_bytes": db_size_bytes,
+            "total_records": total_records,
+            "table_counts":  table_counts,
+            "page_info":     page_info,
+            "db_engine":     connection.vendor,
+        })
+
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            "status": "error",
+            "msg":    str(e),
+            "detail": traceback.format_exc()
+        }, status=500)
 
 
 # पुराने ट्रेड्स और डैशबोर्ड के लिए व्यू
@@ -3451,330 +3639,6 @@ def get_reversal_lines_for_replay(symbol: str, date_str: str,
 
 
 
-# ─────────────────────────────────────────────────────────────────────
-# फाइल: mystock/views.py में add करें
-# URL:   path('backtest/', backtest_view, name='backtest'),
-#        path('api/backtest/run/', backtest_run_api, name='backtest_run'),
-# ─────────────────────────────────────────────────────────────────────
-
-
-
-# ─────────────────────────────────────────────────────────────────────
-# View 1: HTML Page
-# ─────────────────────────────────────────────────────────────────────
-@login_required
-def backtest_view(request):
-    return render(request, 'mystock/backtesta.html')
-
-
-# ─────────────────────────────────────────────────────────────────────
-# View 2: AJAX API — Backtest Run
-# ─────────────────────────────────────────────────────────────────────
-@login_required
-@require_GET
-def backtest_run_api(request):
-    symbol     = request.GET.get('symbol', 'NIFTY').strip().upper()
-    date_str   = request.GET.get('date', '').strip()
-    interval   = int(request.GET.get('interval', 1))
-    buffer_pts = float(request.GET.get('buffer', 2.0))
-    target_pts = float(request.GET.get('target_pts', 50))
-    sl_pts     = float(request.GET.get('sl_pts', 50))
-
-    if not date_str:
-        return JsonResponse({'error': 'date parameter जरूरी है'}, status=400)
-
-    try:
-        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return JsonResponse({'error': f'Date format गलत: {date_str}'}, status=400)
-
-    step         = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
-    tolerance    = 20.0
-    MARKET_START = dt_time(9, 15)
-    MARKET_END   = dt_time(15, 30)
-
-    day_start = timezone.make_aware(datetime.combine(selected_date, dt_time.min))
-    day_end   = timezone.make_aware(datetime.combine(selected_date, dt_time.max))
-
-    # ── 1. SR Data ──
-    sr_rows = list(
-        LiveSRData.objects
-        .filter(Symbol__iexact=symbol, Time__gte=day_start, Time__lte=day_end)
-        .order_by('Time')
-    )
-    if not sr_rows:
-        return JsonResponse({'error': f'{date_str} को {symbol} का SR Data नहीं मिला'}, status=404)
-
-    # ── 2. OptionChain ticks ──
-    all_oc = list(
-        OptionChain.objects
-        .filter(Symbol__iexact=symbol, Time__gte=day_start, Time__lte=day_end)
-        .order_by('Time')
-        .values('Time', 'Strike_Price', 'Spot_Price', 'Reversl_Ce', 'Reversl_Pe')
-    )
-    if not all_oc:
-        return JsonResponse({'error': f'{date_str} को {symbol} का OptionChain data नहीं मिला'}, status=404)
-
-    spot_by_time   = {}
-    skipped_outside = 0
-    for row in all_oc:
-        t     = row['Time']
-        t_ist = timezone.localtime(t)
-        if not (MARKET_START <= t_ist.time() <= MARKET_END):
-            skipped_outside += 1
-            continue
-        if t_ist.minute % interval == 0:
-            if t not in spot_by_time:
-                spot_by_time[t] = {'spot': float(row['Spot_Price'] or 0), 'ist': t_ist, 'strikes': {}}
-            s = float(row['Strike_Price'] or 0)
-            if s > 0:
-                spot_by_time[t]['strikes'][s] = {
-                    'ce': float(row['Reversl_Ce'] or 0),
-                    'pe': float(row['Reversl_Pe'] or 0),
-                }
-
-    sorted_times = sorted(spot_by_time.keys())
-
-    # ── Helpers ──
-    def get_sr_at_time(tick_time):
-        active = None
-        for sr in sr_rows:
-            if sr.Time <= tick_time:
-                active = sr
-            else:
-                break
-        return active
-
-    def calc_eff_strikes(sr):
-        if not sr:
-            return 0, 0
-        res_status = str(sr.resistance_status or '').upper()
-        sup_status = str(sr.supprt_status or '').upper()
-        res_base   = float(sr.resistance_strike or 0)
-        sup_base   = float(sr.supprt_strike or 0)
-        m_res = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-        m_sup = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-        res_target = float(m_res.group(1)) if m_res else res_base
-        sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-        if   'WTB' in res_status and 'WTB' in sup_status: eff_res = res_target
-        elif 'WTB' in res_status and 'WTT' in sup_status: eff_res = res_base
-        elif 'WTB' in res_status and 'STRONG' in sup_status: eff_res = res_base
-        elif 'WTB' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_base + step
-        elif 'WTB' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base - step
-        elif 'WTT' in res_status and 'WTB' in sup_status: eff_res = res_target
-        elif 'WTT' in res_status and 'WTT' in sup_status: eff_res = res_target + step
-        elif 'WTT' in res_status and 'STRONG' in sup_status: eff_res = res_target
-        elif 'WTT' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_target + step
-        elif 'WTT' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
-        elif 'STRONG' in res_status and 'WTB' in sup_status: eff_res = res_base
-        elif 'STRONG' in res_status and 'WTT' in sup_status: eff_res = res_base + step
-        elif 'STRONG' in res_status and 'STRONG' in sup_status: eff_res = res_base + step
-        elif 'STRONG' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_base + step
-        elif 'STRONG' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
-        elif 'SHIFTED WTB' in res_status and 'WTB' in sup_status: eff_res = res_base
-        elif 'SHIFTED WTB' in res_status and 'WTT' in sup_status: eff_res = res_base + step
-        elif 'SHIFTED WTB' in res_status and 'STRONG' in sup_status: eff_res = res_base + step
-        elif 'SHIFTED WTB' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_base + step
-        elif 'SHIFTED WTB' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
-        elif 'SHIFTED WTT' in res_status and 'WTB' in sup_status: eff_res = res_target - step
-        elif 'SHIFTED WTT' in res_status and 'WTT' in sup_status: eff_res = res_target
-        elif 'SHIFTED WTT' in res_status and 'STRONG' in sup_status: eff_res = res_target - step
-        elif 'SHIFTED WTT' in res_status and 'SHIFTED WTB' in sup_status: eff_res = res_target - step
-        elif 'SHIFTED WTT' in res_status and 'SHIFTED WTT' in sup_status: eff_res = res_base
-        else: eff_res = res_base + step
-
-        if   'WTB' in sup_status and 'WTB' in res_status: eff_sup = sup_target - step
-        elif 'WTB' in sup_status and 'WTT' in res_status: eff_sup = sup_target
-        elif 'WTB' in sup_status and 'STRONG' in res_status: eff_sup = sup_target
-        elif 'WTB' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_target - step
-        elif 'WTB' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base
-        elif 'WTT' in sup_status and 'WTB' in res_status: eff_sup = sup_base
-        elif 'WTT' in sup_status and 'WTT' in res_status: eff_sup = sup_base + step
-        elif 'WTT' in sup_status and 'STRONG' in res_status: eff_sup = sup_base
-        elif 'WTT' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base + step
-        elif 'WTT' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base - step
-        elif 'STRONG' in sup_status and 'WTB' in res_status: eff_sup = sup_base - step
-        elif 'STRONG' in sup_status and 'WTT' in res_status: eff_sup = sup_base
-        elif 'STRONG' in sup_status and 'STRONG' in res_status: eff_sup = sup_base - step
-        elif 'STRONG' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base
-        elif 'STRONG' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base - step
-        elif 'SHIFTED WTB' in sup_status and 'WTB' in res_status: eff_sup = sup_target
-        elif 'SHIFTED WTB' in sup_status and 'WTT' in res_status: eff_sup = sup_target + step
-        elif 'SHIFTED WTB' in sup_status and 'STRONG' in res_status: eff_sup = sup_target + step
-        elif 'SHIFTED WTB' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base
-        elif 'SHIFTED WTB' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_target + step
-        elif 'SHIFTED WTT' in sup_status and 'WTB' in res_status: eff_sup = sup_base - step
-        elif 'SHIFTED WTT' in sup_status and 'WTT' in res_status: eff_sup = sup_base
-        elif 'SHIFTED WTT' in sup_status and 'STRONG' in res_status: eff_sup = sup_base - step
-        elif 'SHIFTED WTT' in sup_status and 'SHIFTED WTB' in res_status: eff_sup = sup_base
-        elif 'SHIFTED WTT' in sup_status and 'SHIFTED WTT' in res_status: eff_sup = sup_base - step
-        else: eff_sup = sup_base - step
-
-        return eff_res, eff_sup
-
-    def get_rev_val_at_time(tick_time, strike, side, period=10):
-        col = 'Reversl_Ce' if side == 'CE' else 'Reversl_Pe'
-        rows = (
-            OptionChain.objects
-            .filter(Symbol__iexact=symbol, Time__lte=tick_time, Time__gte=day_start, Strike_Price=strike)
-            .order_by('-Time').values(col)[:period]
-        )
-        vals = [float(r[col]) for r in rows if r[col] and float(r[col]) > 0]
-        return round(sum(vals) / len(vals), 2) if vals else None
-
-    # ── 3. Simulation ──
-    trades     = []
-    ticks_log  = []   # show-all data
-    open_trade = None
-    warnings   = []
-
-    for tick_time in sorted_times:
-        tick_data = spot_by_time[tick_time]
-        spot      = tick_data['spot']
-        if spot <= 0:
-            continue
-
-        sr = get_sr_at_time(tick_time)
-        if not sr:
-            continue
-
-        eff_res, eff_sup = calc_eff_strikes(sr)
-        if not eff_res or not eff_sup:
-            continue
-
-        r_level = get_rev_val_at_time(tick_time, eff_res, 'CE')
-        s_level = get_rev_val_at_time(tick_time, eff_sup, 'PE')
-        t_ist   = timezone.localtime(tick_time).strftime('%H:%M')
-
-        ticks_log.append({
-            'time': t_ist,
-            'spot': spot,
-            'eff_res': eff_res, 'r_level': r_level,
-            'eff_sup': eff_sup, 's_level': s_level,
-            'res_status': str(sr.resistance_status or '')[:20],
-            'sup_status': str(sr.supprt_status or '')[:20],
-            'open_trade': open_trade['type'] if open_trade else None,
-        })
-
-        # EXIT
-        if open_trade:
-            entry = open_trade['entry_spot']
-            ttype = open_trade['type']
-            target = open_trade.get('target')
-            sl     = open_trade.get('sl')
-
-            if ttype == 'PUT':
-                if not target: target = entry - target_pts
-                if not sl:     sl     = entry + sl_pts
-                if sl <= entry:
-                    sl = entry + sl_pts
-                    warnings.append(f"{t_ist} PUT SL override (entry={entry:.0f})")
-                hit_target = spot <= (target + buffer_pts)
-                hit_sl     = spot >= (sl - buffer_pts)
-            else:
-                if not target: target = entry + target_pts
-                if not sl:     sl     = entry - sl_pts
-                if sl >= entry:
-                    sl = entry - sl_pts
-                    warnings.append(f"{t_ist} CALL SL override (entry={entry:.0f})")
-                hit_target = spot >= (target - buffer_pts)
-                hit_sl     = spot <= (sl + buffer_pts)
-
-            if hit_target or hit_sl:
-                pnl = (spot - entry) if ttype == 'CALL' else (entry - spot)
-                open_trade.update({
-                    'exit_time': timezone.localtime(tick_time).strftime('%H:%M'),
-                    'exit_spot': spot,
-                    'result': 'TARGET' if hit_target else 'SL',
-                    'pnl': round(pnl, 2),
-                    'target_used': round(target, 2),
-                    'sl_used': round(sl, 2),
-                })
-                trades.append(open_trade)
-                open_trade = None
-                continue
-
-        if open_trade:
-            continue
-
-        # ENTRY
-        last_put_sl  = next((t for t in reversed(trades) if t['type'] == 'PUT'  and t['result'] == 'SL'), None)
-        last_call_sl = next((t for t in reversed(trades) if t['type'] == 'CALL' and t['result'] == 'SL'), None)
-        r_paused = last_put_sl  and float(last_put_sl.get('entry_strike', 0)) == eff_res
-        s_paused = last_call_sl and float(last_call_sl.get('entry_strike', 0)) == eff_sup
-
-        if not r_paused and r_level:
-            r_traded = any(abs(t['trigger'] - r_level) <= tolerance for t in trades if t['type'] == 'PUT')
-            if r_traded:
-                eff_res = eff_res + step
-                r_level = get_rev_val_at_time(tick_time, eff_res, 'CE')
-
-        if not s_paused and s_level:
-            s_traded = any(abs(t['trigger'] - s_level) <= tolerance for t in trades if t['type'] == 'CALL')
-            if s_traded:
-                eff_sup = eff_sup - step
-                s_level = get_rev_val_at_time(tick_time, eff_sup, 'PE')
-
-        if not r_paused and r_level and spot >= r_level:
-            open_trade = {
-                'type': 'PUT',
-                'entry_time': t_ist, 'entry_spot': spot, 'entry_strike': eff_res,
-                'trigger': r_level,
-                'target': get_rev_val_at_time(tick_time, eff_res - step, 'CE'),
-                'sl':     get_rev_val_at_time(tick_time, eff_res + step, 'CE'),
-                'exit_time': None, 'exit_spot': None, 'result': 'OPEN', 'pnl': 0,
-            }
-        elif not s_paused and s_level and spot <= s_level:
-            open_trade = {
-                'type': 'CALL',
-                'entry_time': t_ist, 'entry_spot': spot, 'entry_strike': eff_sup,
-                'trigger': s_level,
-                'target': get_rev_val_at_time(tick_time, eff_sup + step, 'PE'),
-                'sl':     get_rev_val_at_time(tick_time, eff_sup - step, 'PE'),
-                'exit_time': None, 'exit_spot': None, 'result': 'OPEN', 'pnl': 0,
-            }
-
-    # EOD
-    if open_trade and sorted_times:
-        last_spot = spot_by_time[sorted_times[-1]]['spot']
-        pnl = (last_spot - open_trade['entry_spot']) if open_trade['type'] == 'CALL' else (open_trade['entry_spot'] - last_spot)
-        open_trade.update({
-            'exit_time': timezone.localtime(sorted_times[-1]).strftime('%H:%M'),
-            'exit_spot': last_spot, 'result': 'EOD', 'pnl': round(pnl, 2),
-        })
-        trades.append(open_trade)
-
-    # ── 4. Summary ──
-    wins     = [t for t in trades if t['result'] == 'TARGET']
-    losses   = [t for t in trades if t['result'] == 'SL']
-    eod_list = [t for t in trades if t['result'] == 'EOD']
-    net_pnl  = round(sum(t['pnl'] for t in trades), 2)
-    win_rate = round(len(wins) / len(trades) * 100, 1) if trades else 0
-
-    # Spot range
-    all_spots = [spot_by_time[t]['spot'] for t in sorted_times]
-
-    return JsonResponse({
-        'symbol': symbol, 'date': date_str, 'interval': interval,
-        'meta': {
-            'sr_rows': len(sr_rows),
-            'total_ticks': len(sorted_times),
-            'skipped_outside': skipped_outside,
-            'spot_high': max(all_spots) if all_spots else 0,
-            'spot_low':  min(all_spots) if all_spots else 0,
-        },
-        'summary': {
-            'total': len(trades), 'wins': len(wins),
-            'losses': len(losses), 'eod': len(eod_list),
-            'win_rate': win_rate, 'net_pnl': net_pnl,
-        },
-        'trades': trades,
-        'ticks': ticks_log,
-        'warnings': warnings,
-    })
-
-
 
 # Trade journal views Start Here
 
@@ -4262,3 +4126,259 @@ def reversal_base_status_api(request):
         "r_pct"       : r_pct,
         "s_pct"       : s_pct,
     })
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Static Reversal API  (LSR / ESR / DSR)
+#  Formula (rows sorted by Strike_Price ascending):
+#    rev_up[i]   = (PE_LTP[i]   - CE_LTP[i+1]) + spot
+#    rev_down[i] = (PE_LTP[i-1] - CE_LTP[i])   + spot
+#  Types:
+#    LSR = Live  — Cache से (market hours)
+#    ESR = Expiry — OptionChain DB, Expiry_Date filter
+#    DSR = Date   — OptionChain DB, Time__date filter
+# ════════════════════════════════════════════════════════════════════════════
+
+def _calc_reversal_levels(rows_dicts, spot):
+    """
+    rows_dicts: list of dicts with 'Strike_Price', 'CE_LTP', 'PE_LTP'
+    spot: float
+    Returns list of level dicts.
+    """
+    rows = sorted(rows_dicts, key=lambda r: float(r.get('Strike_Price', 0)))
+    n = len(rows)
+    levels = []
+    for i, row in enumerate(rows):
+        strike      = float(row.get('Strike_Price', 0))
+        pe_ltp_i    = float(row.get('PE_LTP') or 0)
+        ce_ltp_i    = float(row.get('CE_LTP') or 0)
+        ce_ltp_next = float(rows[i+1].get('CE_LTP') or 0) if i+1 < n else None
+        pe_ltp_prev = float(rows[i-1].get('PE_LTP') or 0) if i > 0 else None
+
+        rev_up   = round((pe_ltp_i   - ce_ltp_next) + spot, 2) if ce_ltp_next  is not None else None
+        rev_down = round((pe_ltp_prev - ce_ltp_i)   + spot, 2) if pe_ltp_prev  is not None else None
+
+        levels.append({
+            "strike"   : strike,
+            "ce_ltp"   : ce_ltp_i,
+            "pe_ltp"   : pe_ltp_i,
+            "rev_up"   : rev_up,
+            "rev_down" : rev_down,
+        })
+    return levels
+
+
+@login_required
+@csrf_exempt
+def save_static_reversal_api(request):
+    """
+    POST body:
+      symbol       (default "NIFTY")
+      type         "LSR" | "ESR" | "DSR"  (default "LSR")
+      expiry_date  YYYY-MM-DD  (ESR के लिए)
+      date         YYYY-MM-DD  (DSR के लिए)
+    """
+    if request.method != "POST":
+        return JsonResponse({"status": "error", "msg": "POST required"}, status=405)
+    try:
+        body         = json.loads(request.body)
+        symbol       = body.get("symbol", "NIFTY").upper()
+        rtype        = body.get("type", "LSR").upper()
+        filter_value = ""
+
+        # ── सभी Types के लिए Live Cache से डेटा लें (Fast Save) ──────────
+        live_data = caches['default'].get(f'live_nifty_data_{symbol}')
+        if not live_data:
+            return JsonResponse({"status": "error",
+                "msg": f"Cache में {symbol} का live data नहीं मिला।"}, status=404)
+        
+        # ── Filter Value set करें ───────────────────────────────────────
+        if rtype == "ESR":
+            expiry_date = str(live_data[0].get("expiry", ""))
+            if not expiry_date:
+                return JsonResponse({"status": "error", "msg": "Live Data में Expiry Date नहीं मिली"}, status=400)
+            filter_value = expiry_date
+        elif rtype == "DSR":
+            time_val = str(live_data[0].get("Time", ""))
+            # Extract date part (YYYY-MM-DD)
+            sel_date = time_val.split("T")[0].split(" ")[0] if time_val else ""
+            if not sel_date or len(sel_date) < 10:
+                sel_date = timezone.now().date().strftime("%Y-%m-%d")
+            filter_value = sel_date
+        elif rtype != "LSR":
+            return JsonResponse({"status": "error", "msg": f"Unknown type: {rtype}"}, status=400)
+        
+        spot = float(caches['default'].get(f'live_nifty_spot_{symbol}') or 0)
+        if spot <= 0 and live_data:
+            spot = float(live_data[0].get('Spot_Price', 0))
+        if spot <= 0:
+            return JsonResponse({"status": "error", "msg": "Spot Price नहीं मिला"}, status=400)
+            
+        rows_dicts = [
+            {"Strike_Price": r.get("Strike_Price"), "CE_LTP": r.get("CE_LTP"), "PE_LTP": r.get("PE_LTP")}
+            for r in live_data
+        ]
+
+        # ── Formula ──────────────────────────────────────────────────
+        levels = _calc_reversal_levels(rows_dicts, spot)
+
+        # ── DB में save (replace) ────────────────────────────────────
+        obj, created = StaticReversal.objects.update_or_create(
+            symbol=symbol,
+            reversal_type=rtype,
+            filter_value=filter_value,
+            defaults={"spot_price": spot, "levels_json": levels},
+        )
+
+        return JsonResponse({
+            "status"       : "saved",
+            "symbol"       : symbol,
+            "type"         : rtype,
+            "filter_value" : filter_value,
+            "spot"         : spot,
+            "rows_count"   : len(levels),
+            "saved_at"     : localtime(obj.saved_at).strftime("%d-%b %H:%M:%S"),
+            "created"      : created,
+        })
+
+    except Exception as e:
+        import traceback as _tb
+        return JsonResponse({"status": "error", "msg": str(e), "trace": _tb.format_exc()}, status=500)
+
+
+@require_GET
+def get_static_reversal_api(request):
+    """
+    GET params:
+      symbol       (default NIFTY)
+      type         LSR | ESR | DSR  (default LSR)
+      filter_value expiry/date string (ESR/DSR के लिए)
+    """
+    symbol       = request.GET.get("symbol", "NIFTY").upper()
+    rtype        = request.GET.get("type", "LSR").upper()
+    filter_value = request.GET.get("filter_value", "")
+
+    try:
+        if filter_value:
+            obj = StaticReversal.objects.get(
+                symbol=symbol, reversal_type=rtype, filter_value=filter_value
+            )
+        else:
+            obj = StaticReversal.objects.filter(
+                symbol=symbol, reversal_type=rtype
+            ).latest('saved_at')
+    except StaticReversal.DoesNotExist:
+        return JsonResponse({"status": "ok", "symbol": symbol, "type": rtype, "data": None})
+
+    return JsonResponse({
+        "status"       : "ok",
+        "symbol"       : symbol,
+        "type"         : rtype,
+        "filter_value" : filter_value,
+        "spot"         : obj.spot_price,
+        "saved_at"     : localtime(obj.saved_at).strftime("%d-%b %H:%M:%S"),
+        "levels"       : obj.levels_json,
+    })
+
+@require_GET
+def get_sr_filters_api(request):
+    """
+    GET: Admin panel के लिए available expiry dates और dates देता है।
+    Params: symbol (default NIFTY)
+    """
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    today = timezone.now().date()
+    thirty_days_ago = timezone.now() - timedelta(days=30)
+
+    # 1. Optimized Expiry Dates (sirf last 30 days ke data me distinct dhundho)
+    expiries = list(
+        OptionChain.objects
+        .filter(Symbol=symbol, Time__gte=thirty_days_ago, Expiry_Date__isnull=False)
+        .values_list('Expiry_Date', flat=True)
+        .distinct()
+        .order_by('Expiry_Date')
+    )
+
+    # 2. Optimized Dates (Index scan instead of full table distinct)
+    dates = []
+    # pichle 60 din check karenge to get ~30 trading days
+    for i in range(60):
+        d = today - timedelta(days=i)
+        start_dt = datetime.combine(d, dt_time.min)
+        end_dt = datetime.combine(d, dt_time.max)
+        if OptionChain.objects.filter(Symbol=symbol, Time__range=(start_dt, end_dt)).exists():
+            dates.append(str(d))
+            if len(dates) >= 30:
+                break
+
+    return JsonResponse({
+        "expiry_dates": [str(e) for e in expiries if e],
+        "dates"       : dates,
+    })
+
+
+# ══════════════════════════════════════════════════════════════
+# 📰 UPSTOX NEWS API — Page + Proxy
+# ══════════════════════════════════════════════════════════════
+
+@login_required(login_url='/accounts/login/')
+def news_page(request):
+    """Upstox News Page — सुंदर dark-themed news feed."""
+    return render(request, 'mystock/news.html')
+
+
+@login_required(login_url='/accounts/login/')
+@require_GET
+def news_api(request):
+    """
+    Upstox News API का Django-side proxy।
+    Frontend से request आती है → यह view Upstox API को call करता है
+    और response वापस भेजता है।
+    Query params: category, instrument_keys, page_number, page_size
+    """
+    UPSTOX_NEWS_URL = 'https://api.upstox.com/v2/news'
+
+    category        = request.GET.get('category', 'instrument_keys')
+    instrument_keys = request.GET.get('instrument_keys', '')
+    page_number     = request.GET.get('page_number', '1')
+    page_size       = request.GET.get('page_size', '20')
+
+    # Validate category
+    allowed_categories = ('instrument_keys', 'positions', 'holdings')
+    if category not in allowed_categories:
+        return JsonResponse({'status': 'error', 'message': f'Invalid category: {category}'}, status=400)
+
+    # Build params for Upstox
+    params = {
+        'category': category,
+        'page_number': page_number,
+        'page_size': page_size,
+    }
+    if category == 'instrument_keys':
+        if not instrument_keys:
+            return JsonResponse({'status': 'error', 'message': 'instrument_keys is required for this category.'}, status=400)
+        params['instrument_keys'] = instrument_keys
+
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {access_token}',
+    }
+
+    try:
+        resp = requests.get(UPSTOX_NEWS_URL, params=params, headers=headers, timeout=15)
+        data = resp.json()
+
+        if not resp.ok:
+            return JsonResponse({
+                'status': 'error',
+                'message': data.get('errors', [{}])[0].get('message', 'Upstox API error') if isinstance(data.get('errors'), list) else str(data),
+            }, status=resp.status_code)
+
+        return JsonResponse(data)
+
+    except requests.exceptions.Timeout:
+        return JsonResponse({'status': 'error', 'message': 'Upstox API timeout — कृपया दोबारा try करें।'}, status=504)
+    except requests.exceptions.ConnectionError:
+        return JsonResponse({'status': 'error', 'message': 'Network error — Upstox API से connect नहीं हो पाया।'}, status=503)
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)

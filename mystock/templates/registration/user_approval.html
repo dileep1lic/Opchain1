@@ -1,3 +1,4 @@
+{% load tz %}
 <!DOCTYPE html>
 <html lang="hi">
 <head>
@@ -125,6 +126,7 @@
                     <tr>
                         <th>👤 यूज़र विवरण</th>
                         <th>📅 जॉइनिंग डेट</th>
+                        <th>🕐 लास्ट लॉगिन</th>
                         <th>⚡ स्थिति (Status)</th>
                         <th>⚙️ एक्शन</th>
                         <th>🔑 पासवर्ड रिसेट</th>
@@ -138,6 +140,14 @@
                             <span class="user-email">{{ u.username }}</span>
                         </td>
                         <td>{{ u.date_joined|date:"d M, Y" }}</td>
+                        <td>
+                            {% if u.last_login %}
+                                <span style="color: var(--text);">{{ u.last_login|localtime|date:"d M, Y" }}</span><br>
+                                <span style="font-size:11px; color: var(--muted);">{{ u.last_login|localtime|time:"h:i A" }}</span>
+                            {% else %}
+                                <span style="color: var(--muted); font-size:12px;">कभी नहीं</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if u.is_active %}
                                 <div class="badge badge-active"><span class="dot"></span>Approved</div>
@@ -166,7 +176,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="5" class="empty-state">
+                        <td colspan="6" class="empty-state">
                             अभी तक कोई भी यूज़र रजिस्टर्ड नहीं हुआ है।
                         </td>
                     </tr>

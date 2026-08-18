@@ -516,9 +516,7 @@
     <span id="ar-icon">⏸</span><span id="ar-label">Auto</span>
   </button>
 
-  <button class="tb-btn active" id="reversal-toggle-btn" style="display:none" onclick="toggleReversalLines()">
-    <span id="rv-label">Reversal ✓</span>
-  </button>
+
 
   <button class="tb-btn" id="alert-toggle-btn" onclick="toggleAlerts()">
     <span id="alert-label">🔕 Alerts OFF</span>
@@ -545,6 +543,20 @@
       <div class="vd-item on" id="vd-weekly" onclick="vdToggleWeeklyRange()">
         <span class="vd-label">📐 Weekly Range</span>
         <span class="vd-pill" id="vd-wr-pill">ON</span>
+      </div>
+
+      <!-- Static Reversal Lines -->
+      <div class="vd-item" id="vd-sr-lsr" onclick="vdToggleSR('LSR')">
+        <span class="vd-label">📊 LSR Lines</span>
+        <span class="vd-pill" id="vd-lsr-pill">OFF</span>
+      </div>
+      <div class="vd-item" id="vd-sr-esr" onclick="vdToggleSR('ESR')">
+        <span class="vd-label">📊 ESR Lines</span>
+        <span class="vd-pill" id="vd-esr-pill">OFF</span>
+      </div>
+      <div class="vd-item" id="vd-sr-dsr" onclick="vdToggleSR('DSR')">
+        <span class="vd-label">📊 DSR Lines</span>
+        <span class="vd-pill" id="vd-dsr-pill">OFF</span>
       </div>
 
       <div class="vd-sep"></div>
@@ -618,6 +630,10 @@ const IST_OFFSET   = 19800;  // +5:30 in seconds
 let ltpLinesSeries  = [];   // chart पर drawn lines
 let ltpLinesVisible = true; // toggle state
 let _ltpFetchTimer  = null;
+
+// ── Static Reversal Lines ─────────────────────────────
+let srLinesSeries = { LSR: [], ESR: [], DSR: [] };
+let srVisible     = { LSR: false, ESR: false, DSR: false };
 
 // ── Init chart ────────────────────────────────────────
 function initChart() {
@@ -907,11 +923,6 @@ async function loadChart() {
     const rvPill = document.getElementById('vd-rv-pill');
     if (rvItem) rvItem.classList.add('on');
     if (rvPill) rvPill.textContent = 'ON';
-    // reversal toggle button दिखाएं
-    const rvBtn = document.getElementById('reversal-toggle-btn');
-    if (rvBtn) { rvBtn.style.display = ''; rvBtn.classList.add('active'); }
-    const rvLabel = document.getElementById('rv-label');
-    if (rvLabel) rvLabel.textContent = 'Reversal ✓';
   } else {
     // ❌ Past date — Reversal Lines बंद करो
     reversalVisible = false;
@@ -919,9 +930,6 @@ async function loadChart() {
     const rvPill = document.getElementById('vd-rv-pill');
     if (rvItem) rvItem.classList.remove('on');
     if (rvPill) rvPill.textContent = 'OFF';
-    // reversal toggle button छुपाएं (past chart में जरूरत नहीं)
-    const rvBtn = document.getElementById('reversal-toggle-btn');
-    if (rvBtn) { rvBtn.style.display = 'none'; rvBtn.classList.remove('active'); }
   }
 
   // API को reversal flag भेजो (आज = 1, past = 0)
@@ -955,7 +963,15 @@ async function loadChart() {
     updateChartData(data.candles, lastReversals);
     
     // Weekly Range lines — chart reload के बाद redraw करो (हमेशा)
-    setTimeout(fetchAndDrawLtpLines, 200);
+    if (ltpLinesVisible) {
+      setTimeout(fetchAndDrawLtpLines, 200);
+    }
+    // Static Reversal lines — chart reload के बाद redraw
+    ['LSR', 'ESR', 'DSR'].forEach(t => {
+      if (srVisible[t]) {
+        setTimeout(() => fetchAndDrawSR(t), 250);
+      }
+    });
     
     if (isAutoRefresh) {
       document.getElementById('live-dot').style.display = 'block';
@@ -1057,8 +1073,11 @@ function updateCountdownText() {
 // ── Reversal toggle ────────────────────────────────── 
 function toggleReversalLines() {
   reversalVisible = !reversalVisible;
-  document.getElementById('reversal-toggle-btn').classList.toggle('active', reversalVisible);
-  document.getElementById('rv-label').textContent = reversalVisible ? 'Reversal ✓' : 'Reversal ✗';
+  // View Dropdown sync
+  const rvItem = document.getElementById('vd-reversal');
+  const rvPill = document.getElementById('vd-rv-pill');
+  if (rvItem) rvItem.classList.toggle('on', reversalVisible);
+  if (rvPill) rvPill.textContent = reversalVisible ? 'ON' : 'OFF';
   updateReversalLines(window._lastCandles || [], reversalVisible ? lastReversals : [], []);
   saveSettings();
 }
@@ -1067,8 +1086,6 @@ function toggleReversalLines() {
 function toggleTable() {
   tableVisible = !tableVisible;
   document.getElementById('table-section').style.display = tableVisible ? 'block' : 'none';
-  document.getElementById('table-toggle-btn').classList.toggle('active', tableVisible);
-  document.getElementById('table-label').textContent = tableVisible ? 'Table ✓' : 'Table';
   if (tableVisible && window._lastCandles) buildTable(window._lastCandles);
   saveSettings();
 }
@@ -1321,6 +1338,95 @@ function toggleLtpLines() {
   if (ltpLinesVisible) fetchAndDrawLtpLines(); else _clearLtpLines();
 }
 
+// ══════════════════════════════════════════════════════
+//  STATIC REVERSAL LINES — Fetch & Draw
+// ══════════════════════════════════════════════════════
+// Colors
+const SR_UP_COLOR   = '#00e676';   // चमकीला हरा — rev_up CE Resistance (ऊपर)
+const SR_DN_COLOR   = '#ff1744';   // चमकीला लाल — rev_down PE Support (नीचे)
+const SR_RANGE      = 15;          // spot के ऊपर/नीचे कितने strikes दिखाएं
+
+async function fetchAndDrawSR(type) {
+  if (!candleSeries) return;
+  const sym = (document.getElementById('ctrl-symbol').value || 'NIFTY').trim().toUpperCase();
+  try {
+    const resp = await fetch(`/api/get-static-reversal/?symbol=${sym}&type=${type}&filter_value=`);
+    const data = await resp.json();
+    _clearSR(type);
+    if (!data.levels || data.levels.length === 0 || !srVisible[type]) return;
+
+    // Use LIVE spot price from the chart (currentBar.close), fallback to data.spot
+    const spot = (typeof currentBar !== 'undefined' && currentBar && currentBar.close) ? currentBar.close : (data.spot || 0);
+
+    // Select 5 closest strikes above spot
+    const strikesAbove = data.levels
+      .filter(r => r.strike > spot)
+      .sort((a, b) => a.strike - b.strike)
+      .slice(0, 5);
+
+    // Select 5 closest strikes below (or equal to) spot
+    const strikesBelow = data.levels
+      .filter(r => r.strike <= spot)
+      .sort((a, b) => b.strike - a.strike)
+      .slice(0, 5);
+
+    // Combine into 10 strikes
+    const top10Strikes = [...strikesAbove, ...strikesBelow];
+
+    let upCount = 0, dnCount = 0;
+
+    top10Strikes.forEach(r => {
+      // CE (rev_up) if value > spot
+      if (r.rev_up != null && r.rev_up > spot) {
+        try {
+          srLinesSeries[type].push(candleSeries.createPriceLine({
+            price: r.rev_up,
+            color: '#ff1744', // RED for CE Resistance
+            lineWidth: 1,
+            lineStyle: 1,   // Dotted
+            axisLabelVisible: true,
+            title: `${type}↑ ${r.strike}`,
+          }));
+          upCount++;
+        } catch(e) {}
+      }
+
+      // PE (rev_down) if value < spot
+      if (r.rev_down != null && r.rev_down < spot) {
+        try {
+          srLinesSeries[type].push(candleSeries.createPriceLine({
+            price: r.rev_down,
+            color: '#00e676', // GREEN for PE Support
+            lineWidth: 1,
+            lineStyle: 1,   // Dotted
+            axisLabelVisible: true,
+            title: `${type}↓ ${r.strike}`,
+          }));
+          dnCount++;
+        } catch(e) {}
+      }
+    });
+
+    if (!window[`_${type}Loaded`]) {
+      showToast(`📊 ${type} Lines — ↑${upCount} CE | ↓${dnCount} PE`);
+      window[`_${type}Loaded`] = true;
+    }
+  } catch(e) {
+    console.warn(`${type} Reversal fetch failed:`, e.message);
+  }
+}
+
+
+function _clearSR(type) {
+  srLinesSeries[type].forEach(pl => { try { candleSeries.removePriceLine(pl); } catch(e){} });
+  srLinesSeries[type] = [];
+}
+
+function toggleSR(type) {
+  srVisible[type] = !srVisible[type];
+  if (srVisible[type]) fetchAndDrawSR(type); else _clearSR(type);
+}
+
 // ═══════════════════════════════════════════════════════
 //  VIEW DROPDOWN MENU
 // ═══════════════════════════════════════════════════════
@@ -1374,6 +1480,17 @@ function vdToggleWeeklyRange() {
   const pill = document.getElementById('vd-wr-pill');
   item.classList.toggle('on', isOn);
   pill.textContent = isOn ? 'ON' : 'OFF';
+}
+
+// SR (LSR, ESR, DSR) (View Menu)
+function vdToggleSR(type) {
+  toggleSR(type);
+  const isOn = srVisible[type];
+  const item = document.getElementById(`vd-sr-${type.toLowerCase()}`);
+  const pill = document.getElementById(`vd-${type.toLowerCase()}-pill`);
+  item.classList.toggle('on', isOn);
+  pill.textContent = isOn ? 'ON' : 'OFF';
+  window[`_${type}Loaded`] = false; // हर बार fresh toast दिखाएं
 }
 
 // Table (View Menu)
@@ -1433,8 +1550,10 @@ function loadSettings() {
       
       if (settings.reversalVisible === false) {
         reversalVisible = false;
-        document.getElementById('reversal-toggle-btn').classList.remove('active');
-        document.getElementById('rv-label').textContent = 'Reversal ✗';
+        const rvItem = document.getElementById('vd-reversal');
+        const rvPill = document.getElementById('vd-rv-pill');
+        if (rvItem) rvItem.classList.remove('on');
+        if (rvPill) rvPill.textContent = 'OFF';
       }
       
       if (settings.alertsEnabled === true) {
@@ -1446,8 +1565,6 @@ function loadSettings() {
       if (settings.tableVisible === true) {
         tableVisible = true;
         document.getElementById('table-section').style.display = 'block';
-        document.getElementById('table-toggle-btn').classList.add('active');
-        document.getElementById('table-label').textContent = 'Table ✓';
       }
       
     } catch (e) {
@@ -1532,6 +1649,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // LTP Lines — chart load के बाद एक बार fetch करो (7 दिन तक valid)
   setTimeout(fetchAndDrawLtpLines, 1500);
+  // Static Reversal — visible होने पर ही fetch (default OFF)
+  // User View menu से ON करेगा
 
   // 👇 यहाँ टिकर चालू करें 👇
   startLiveTicker();

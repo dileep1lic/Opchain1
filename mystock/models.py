@@ -364,22 +364,6 @@ class TradingJournal(models.Model):
         return f"{self.date} | {self.trade_type.upper()} | {self.get_trade_level_display()}"
 
 
-class VoiceCommand(models.Model):
-    order      = models.PositiveIntegerField(default=0, db_index=True)   # क्रम नंबर
-    text       = models.TextField(verbose_name="कमांड टेक्स्ट")          # बोला जाने वाला टेक्स्ट
-    is_active  = models.BooleanField(default=True)                        # चालू/बंद
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering            = ['order']
-        verbose_name        = "Voice Command"
-        verbose_name_plural = "Voice Commands"
-
-    def __str__(self):
-        return f"#{self.order} — {self.text[:60]}"
-
-
 class LtpLevels(models.Model):
     """
     LTP से calculate किए गए Support/Resistance Levels store करने के लिए।
@@ -422,3 +406,50 @@ class LtpLevels(models.Model):
 
     def __str__(self):
         return f"{self.symbol} | {self.saved_at.strftime('%d-%b %H:%M')} | MP={self.market_price} | LTP={self.ltp_total}"
+
+
+# ════════════════════════════════════════════════════════════════
+#  Static Reversal Model
+#  Formula (per strike row, sorted by Strike_Price):
+#    rev_up[i]   = (PE_LTP[i]   - CE_LTP[i+1]) + spot   ← shift(-1) on CE
+#    rev_down[i] = (PE_LTP[i-1] - CE_LTP[i])   + spot   ← shift(+1) on PE
+#
+#  Types:
+#    LSR = Live Static Reversal  (Cache से, market hours में)
+#    ESR = Expiry Static Reversal (OptionChain DB, Expiry_Date filter)
+#    DSR = Date Static Reversal   (OptionChain DB, Time__date filter)
+#
+#  Unique: (symbol, reversal_type, filter_value) — save करने पर replace होगा।
+# ════════════════════════════════════════════════════════════════
+class StaticReversal(models.Model):
+
+    class ReversalType(models.TextChoices):
+        LSR = 'LSR', 'Live Static Reversal'
+        ESR = 'ESR', 'Expiry Static Reversal'
+        DSR = 'DSR', 'Date Static Reversal'
+
+    symbol          = models.CharField(max_length=50, db_index=True,
+                                       verbose_name="Symbol")
+    reversal_type   = models.CharField(max_length=3,
+                                       choices=ReversalType.choices,
+                                       default=ReversalType.LSR,
+                                       verbose_name="Type (LSR/ESR/DSR)")
+    filter_value    = models.CharField(max_length=20, blank=True, default="",
+                                       verbose_name="Filter Value (expiry/date string)")
+    saved_at        = models.DateTimeField(auto_now=True,
+                                           verbose_name="Last Saved At")
+    spot_price      = models.FloatField(verbose_name="Spot Price at Save Time")
+
+    # JSON field — list of dicts:
+    #   [{"strike": 24200, "rev_up": 24310.5, "rev_down": 24090.0}, ...]
+    levels_json     = models.JSONField(default=list,
+                                       verbose_name="Reversal Levels (JSON)")
+
+    class Meta:
+        ordering        = ['symbol', 'reversal_type']
+        verbose_name    = "Static Reversal"
+        unique_together = [('symbol', 'reversal_type', 'filter_value')]
+
+    def __str__(self):
+        fv = f" [{self.filter_value}]" if self.filter_value else ""
+        return f"{self.symbol} {self.reversal_type}{fv} | Spot={self.spot_price} | {self.saved_at.strftime('%d-%b %H:%M')}"

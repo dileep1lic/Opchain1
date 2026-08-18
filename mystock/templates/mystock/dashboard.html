@@ -279,6 +279,8 @@
         /* --- COLUMN TOGGLE HIDE STYLES --- */
         body.hide-iv .col-iv { display: none !important; }
         body.hide-range .col-range { display: none !important; }
+        body.hide-iv-opt .col-iv-opt { display: none !important; }
+        body.hide-tv .col-tv { display: none !important; }
         body.hide-chg-oi .col-chg-oi { display: none !important; }
         body.hide-oi .col-oi { display: none !important; }
         body.hide-vol .col-vol { display: none !important; }
@@ -661,8 +663,10 @@
                 <span style="font-size: 10px;">▼</span>
             </button>
             <div class="dropdown-content checkbox-menu" style="min-width: 140px; padding: 5px 0;">
-                <label><input type="checkbox" id="chk-iv" onchange="toggleColumn('iv')" checked> IV(Δ)</label>
+                <label><input type="checkbox" id="chk-iv" onchange="toggleColumn('iv')" checked> IV(&Delta;)</label>
                 <label><input type="checkbox" id="chk-range" onchange="toggleColumn('range')" checked> Range</label>
+                <label><input type="checkbox" id="chk-iv-opt" onchange="toggleColumn('iv-opt')" checked> <span style="color:#fbbf24;">IV</span> (Intrinsic)</label>
+                <label><input type="checkbox" id="chk-tv" onchange="toggleColumn('tv')" checked> <span style="color:#a78bfa;">TV</span> (Time Val)</label>
                 <label><input type="checkbox" id="chk-chg-oi" onchange="toggleColumn('chg-oi')" checked> CHG OI</label>
                 <label><input type="checkbox" id="chk-oi" onchange="toggleColumn('oi')" checked> OI</label>
                 <label><input type="checkbox" id="chk-vol" onchange="toggleColumn('vol')" checked> VOL</label>
@@ -682,13 +686,12 @@
             </button>
             <div class="dropdown-content">
                 <a href="{% url 'resistance_dashboard' %}" target="_blank"><span>📊 SR Dashboard</span> <span style="color: #64b5f6;">PANEL ↗</span></a>
+                <a href="{% url 'news_page' %}" target="_blank"><span>📰 Market News</span> <span style="color: #f59e0b;">LIVE ↗</span></a>
                 <a href="{% url 'search_dashboard' %}" target="_blank"><span>Search</span> <span style="color: #64b5f6;">OPEN ↗</span></a>
                 <a href="{% url 'stock_dashboard' %}" target="_blank"><span>Market</span> <span style="color: #64b5f6;">ALL ↗</span></a>
                 <a href="{% url 'chart' %}" target="_blank"><span>Chart View</span> <span style="color: #64b5f6;">NIFTY ↗</span></a>
                 <a href="{% url 'market_replay' %}" target="_blank" class="replay-link"><span>Market Replay</span> <span>▶ REPLAY</span></a>
-                <a href="{% url 'backtest' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank" style="color: var(--accent-yellow);">
-                    <span>⚡ Run Backtest</span> <span>TEST ↗</span>
-                </a>
+
                 <a href="{% url 'live_trades' %}?symbol={{ data.0.Symbol|default:'NIFTY' }}" target="_blank">
                     <span>🤖 Live Paper Trades</span> <span style="color: #64b5f6;">BOT ↗</span>
                 </a>
@@ -803,7 +806,7 @@ function getCookie(name) {
 }
 
 // --- COLUMN TOGGLE & COLSPAN FIX LOGIC ---
-const columnsList = ['iv', 'range', 'chg-oi', 'oi', 'vol', 'ltp', 'reversl'];
+const columnsList = ['iv', 'range', 'iv-opt', 'tv', 'chg-oi', 'oi', 'vol', 'ltp', 'reversl'];
 
 function fixTableColspans() {
     const ceHeader = document.getElementById('ce-header');
@@ -989,12 +992,7 @@ let originalChartUrl = "{% url 'dashboard_chart' %}?symbol={{ data.0.Symbol|defa
 
 // पेज लोड होने पर चार्ट का ओरिजिनल URL सेव कर लें
 window.addEventListener('DOMContentLoaded', () => {
-    // const iframe = document.getElementById('mainChartFrame');
-    // if(iframe) {
-    //     originalChartUrl = iframe.src;
-    // }
     loadColumnPreferences();
-    // loadColumnPreferences नीचे page init में call होगा — duplicate नहीं
 });
 
 // 1. Chart ON/OFF Function
@@ -1004,36 +1002,30 @@ function toggleChart() {
     const tableContainer = document.getElementById('table-container');
     const btn = document.getElementById('chartToggleBtn');
     const btnText = document.getElementById('chartToggleText');
-    const iframeChart = document.getElementById('mainChartFrame'); // Iframe सेलेक्ट किया
+    const iframeChart = document.getElementById('mainChartFrame');
 
     chartVisible = !chartVisible;
     
     if (chartVisible) {
         chartContainer.style.display = 'flex';
         resizer.style.display = 'flex';
-        tableContainer.style.width = '60%'; // वापस डिफ़ॉल्ट 60% पर सेट
+        tableContainer.style.width = '60%';
         chartContainer.style.width = '40%';
         btn.style.borderColor = 'var(--accent-green)';
         btnText.innerHTML = '📈 Chart: ON';
-        
-        // चार्ट वापस दिखने पर URL फिर से सेट करें ताकि डेटा लोड हो
         if (iframeChart && originalChartUrl) {
             iframeChart.src = originalChartUrl;
         }
     } else {
         chartContainer.style.display = 'none';
         resizer.style.display = 'none';
-        tableContainer.style.width = '100%'; // चार्ट छुपने पर टेबल फुल स्क्रीन
+        tableContainer.style.width = '100%';
         btn.style.borderColor = 'var(--text-secondary)';
         btnText.innerHTML = '📉 Chart: OFF';
-        
-        // चार्ट छुपने पर src हटा दें ताकि बैकग्राउंड में डेटा लोड होना बंद हो जाए
         if (iframeChart) {
             iframeChart.src = "";
         }
     }
-    
-    // लेआउट बदलने के बाद Table Headers को फिक्स करना
     setTimeout(fixTableColspans, 100);
 }
 
@@ -1048,24 +1040,15 @@ resizer.addEventListener('mousedown', function(e) {
     isResizing = true;
     resizer.classList.add('active');
     document.body.style.cursor = 'col-resize';
-    // खींचते समय iframe के अंदर माउस न फंसे, इसलिए इसे disable कर देते हैं
     iframeChart.style.pointerEvents = 'none'; 
 });
 
 document.addEventListener('mousemove', function(e) {
     if (!isResizing) return;
-    
-    // स्क्रीन की कुल चौड़ाई
     const containerWidth = document.querySelector('.dashboard-layout').clientWidth;
-    
-    // माउस जहाँ है, उसके हिसाब से नई चौड़ाई (% में)
     let newLeftWidth = (e.clientX / containerWidth) * 100;
-    
-    // लिमिट लगाना (ताकि कोई भी हिस्सा 20% से कम न हो)
     if (newLeftWidth < 20) newLeftWidth = 20;
     if (newLeftWidth > 80) newLeftWidth = 80;
-
-    // दोनों को नई चौड़ाई देना
     leftSide.style.width = `${newLeftWidth}%`;
     rightSide.style.width = `${100 - newLeftWidth}%`;
 });
@@ -1075,9 +1058,7 @@ document.addEventListener('mouseup', function(e) {
         isResizing = false;
         resizer.classList.remove('active');
         document.body.style.cursor = 'default';
-        iframeChart.style.pointerEvents = 'auto'; // माउस छोड़ते ही iframe चालू
-        
-        // ड्रैग खत्म होने के बाद एक बार हेडर फिक्स करें
+        iframeChart.style.pointerEvents = 'auto';
         fixTableColspans();
     }
 });
@@ -1085,15 +1066,8 @@ document.addEventListener('mouseup', function(e) {
 
 // ── Page Init ──────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-    // const iframe = document.getElementById('mainChartFrame');
-    // if (iframe) originalChartUrl = iframe.src;
     loadColumnPreferences();
-
-    // FIX: Page load पर तुरंत table fetch करो (shell है, data नहीं आया)
-    // इससे user को spinner/empty state की जगह data दिखेगा
     refreshData();
-    
-    // Start tracking reversal base
     fetchReversalBase();
     setInterval(fetchReversalBase, 60000);
 });
@@ -1107,10 +1081,8 @@ function fetchReversalBase(reset = false) {
     fetch(url)
     .then(r => r.json())
     .then(data => {
-        // Update UI
         document.getElementById('base-r-time').textContent = data.captured_at || '--:--';
         document.getElementById('base-s-time').textContent = data.captured_at || '--:--';
-        
         document.getElementById('base-r-val').textContent = data.r_base || '--';
         document.getElementById('base-s-val').textContent = data.s_base || '--';
         
@@ -1132,7 +1104,6 @@ function fetchReversalBase(reset = false) {
             sPct.style.color = '#fff';
         }
         
-        // Show reset button only if locked
         document.getElementById('reset-base-btn').style.display = data.base_locked ? 'inline' : 'none';
     }).catch(e => console.error("Error fetching reversal base:", e));
 }
@@ -1151,9 +1122,9 @@ let _pollTimer = null;
 let socket = null;
 let isSocketConnected = false;
 
-// 1. डेटा फेच करने वाला फंक्शन (वही रहेगा, बस अब ये WebSocket के कहने पर चलेगा)
+// 1. डेटा फेच करने वाला फंक्शन
 function refreshData() {
-    if (_refreshInFlight || document.hidden) return; // अगर टैब हाईड है तो रिफ्रेश मत करो
+    if (_refreshInFlight || document.hidden) return;
     _refreshInFlight = true;
 
     if (_abortController) _abortController.abort();
@@ -1162,7 +1133,6 @@ function refreshData() {
     const headers = {};
     if (_tableEtag) headers['If-None-Match'] = _tableEtag;
 
-    // यहाँ अपने URL को सही करें (जैसे '/api/table-update/')
     fetch('/table-update-url/', { headers, signal: _abortController.signal })
     .then(response => {
         _refreshInFlight = false;
@@ -1194,6 +1164,8 @@ function refreshData() {
         }
         fixTableColspans();
         setTimeout(() => { addSRLabelsToLine(); }, 50);
+        // IV और TV calculate करो
+        calculateIVandTV();
     })
     .catch(err => {
         _refreshInFlight = false;
@@ -1276,6 +1248,56 @@ function stopPolling() {
 
 // === इनिशियलाइज़ करें ===
 connectWebSocket(); // सबसे पहले WebSocket कनेक्ट करने की कोशिश करें
+
+
+// ==========================================
+// --- IV & TV CALCULATOR (Client-Side) ---
+// ==========================================
+// DB में कुछ save नहीं होता। Pure JavaScript calculation.
+// Call IV = max(0, Spot - Strike) | Put IV = max(0, Strike - Spot)
+// Time Value = max(0, LTP - IV)
+function calculateIVandTV() {
+    const spotEl = document.getElementById('header-spot');
+    if (!spotEl) return;
+    const spot = parseFloat(spotEl.innerText) || 0;
+    if (!spot) return;
+
+    document.querySelectorAll('.col-iv-opt[data-opt-type="CE"]').forEach(cell => {
+        const strike = parseFloat(cell.dataset.strike) || 0;
+        const iv_val = Math.max(0, spot - strike);
+        const ivSpan = cell.querySelector('.calc-iv');
+        if (ivSpan) ivSpan.textContent = iv_val.toFixed(2);
+    });
+    document.querySelectorAll('.col-tv[data-opt-type="CE"]').forEach(cell => {
+        const strike = parseFloat(cell.dataset.strike) || 0;
+        const ltp    = parseFloat(cell.dataset.ceLtp) || 0;
+        const iv_val = Math.max(0, spot - strike);
+        const tv_val = ltp - iv_val;   // negative भी दिखाओ
+        const tvSpan = cell.querySelector('.calc-tv');
+        if (tvSpan) {
+            tvSpan.textContent = tv_val.toFixed(2);
+            tvSpan.style.color = tv_val < 0 ? '#ff5252' : '#a78bfa';
+        }
+    });
+    document.querySelectorAll('.col-iv-opt[data-opt-type="PE"]').forEach(cell => {
+        const strike = parseFloat(cell.dataset.strike) || 0;
+        const iv_val = Math.max(0, strike - spot);
+        const ivSpan = cell.querySelector('.calc-iv');
+        if (ivSpan) ivSpan.textContent = iv_val.toFixed(2);
+    });
+    document.querySelectorAll('.col-tv[data-opt-type="PE"]').forEach(cell => {
+        const strike = parseFloat(cell.dataset.strike) || 0;
+        const ltp    = parseFloat(cell.dataset.peLtp) || 0;
+        const iv_val = Math.max(0, strike - spot);
+        const tv_val = ltp - iv_val;   // negative भी दिखाओ
+        const tvSpan = cell.querySelector('.calc-tv');
+        if (tvSpan) {
+            tvSpan.textContent = tv_val.toFixed(2);
+            tvSpan.style.color = tv_val < 0 ? '#ff5252' : '#a78bfa';
+        }
+    });
+}
+window.addEventListener('DOMContentLoaded', () => { setTimeout(calculateIVandTV, 800); });
 
 // ==========================================
 // --- DROPDOWN CLICK LOGIC (Hover Fix) ---

@@ -283,49 +283,46 @@ def get_groq_messages(user_message, history=None, user_name=None):
 
 # ── Helper: Gemini से Monika का जवाब (Non-Streaming) ────────────────────
 def get_ai_reply(user_message, history=None, user_name=None):
-    api_key  = getattr(settings, 'GEMINI_API_KEY', None)
-    groq_key = getattr(settings, 'GROQ_API_KEY', None)
+    api_key = getattr(settings, 'GEMINI_API_KEY', None)
+    if not api_key:
+        return "क्षमा करें, API Key सेट नहीं है।"
+
     sys_inst, formatted_contents = get_gemini_contents(user_message, history, user_name)
-    reply = None
-
-    # Gemini try करें (key हो तो)
-    if api_key:
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=formatted_contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=sys_inst,
-                    temperature=0.7,
-                    max_output_tokens=800,
-                )
+    
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=formatted_contents,
+            config=types.GenerateContentConfig(
+                system_instruction=sys_inst,
+                temperature=0.7,
+                max_output_tokens=800,
             )
-            reply = response.text.strip()
-        except Exception as e:
-            print(f"Gemini Error, Groq fallback: {e}")
-
-    # Groq fallback
-    if not reply and groq_key:
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"Gemini Error (Falling back to Groq): {e}")
         try:
             from groq import Groq
+            groq_key = getattr(settings, 'GROQ_API_KEY', None)
+            if not groq_key:
+                return "Gemini की लिमिट पूरी हो गई है और Groq API Key सेट नहीं है।"
+            
             groq_client = Groq(api_key=groq_key)
-            groq_messages = get_groq_messages(user_message, history, user_name)
-            for model_name in ["gpt-oss-120b", "qwen-qwq-32b", "llama3-70b-8192"]:
-                try:
-                    resp = groq_client.chat.completions.create(
-                        model=model_name, messages=groq_messages,
-                        temperature=0.7, max_tokens=800,
-                    )
-                    reply = resp.choices[0].message.content.strip()
-                    print(f"✅ Groq non-stream: {model_name}")
-                    break
-                except Exception:
-                    continue
+            groq_messages = get_groq_messages(user_message, history)
+            
+            response = groq_client.chat.completions.create(
+                # model="llama-3.3-70b-versatile",
+                model="gpt-oss-120b",
+                messages=groq_messages,
+                temperature=0.7,
+                max_tokens=800,
+            )
+            return response.choices[0].message.content.strip()
         except Exception as groq_e:
             print(f"Groq Fallback Error: {groq_e}")
-
-    return reply or "क्षमा करें, अभी नेटवर्क या लिमिट में समस्या है। कृपया थोड़ी देर बाद प्रयास करें।"
+            return "क्षमा करें, अभी नेटवर्क या लिमिट में समस्या है। कृपया थोड़ी देर बाद प्रयास करें।"
 
 # ── Page ──────────────────────────────────────────────
 def index(request):
@@ -365,167 +362,24 @@ def get_user_name_api(request):
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # WEB CHAT API (Non-Streaming — Fallback)
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# WEB CHAT API (Non-Streaming — Fallback)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-@csrf_exempt
-@require_http_methods(["POST"])
-def voice_chat_api(request):
-    try:
-        data      = json.loads(request.body)
-        message   = data.get('message', '').strip()
-        history   = data.get('history', [])
-        user_name = get_logged_in_user_name(request)
-
-        if not message:
-            return JsonResponse({'success': False, 'error': 'Message खाली है'}, status=400)
-
-        api_key  = getattr(settings, 'GEMINI_API_KEY', None)
-        groq_key = getattr(settings, 'GROQ_API_KEY', None)
-        sys_inst, formatted_contents = get_gemini_contents(message, history, user_name)
-        reply = None
-
-        # Gemini try करें
-        if api_key:
-            try:
-                client = genai.Client(api_key=api_key)
-                resp = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=formatted_contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=sys_inst,
-                        temperature=0.7,
-                        max_output_tokens=800
-                    )
-                )
-                reply = resp.text.strip()
-            except Exception as e:
-                print(f"Gemini non-stream error: {e}")
-
-        # Groq fallback
-        if not reply and groq_key:
+# ━━━━━━━━━━━━━━━━━━━━━━        if fallback_to_groq:
+            print("⚡ Groq Streaming Fallback शुरू...")
             try:
                 from groq import Groq
-                groq_client = Groq(api_key=groq_key)
-                groq_msgs = get_groq_messages(message, history, user_name)
-                for model_name in ["gpt-oss-120b", "qwen-qwq-32b", "llama3-70b-8192"]:
-                    try:
-                        resp = groq_client.chat.completions.create(
-                            model=model_name, messages=groq_msgs,
-                            temperature=0.7, max_tokens=800
-                        )
-                        reply = resp.choices[0].message.content.strip()
-                        break
-                    except Exception:
-                        continue
-            except Exception as e2:
-                print(f"Groq fallback error: {e2}")
-
-        if not reply:
-            reply = "क्षमा करें, अभी नेटवर्क या लिमिट में समस्या है। कृपया थोड़ी देर बाद प्रयास करें।"
-
-        updated_history = history + [
-            {"role": "user",      "content": message},
-            {"role": "assistant", "content": reply},
-        ]
-        return JsonResponse({
-            'success': True, 'reply': reply,
-            'history': updated_history,
-            'user_name': user_name or ''
-        })
-
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)}, status=500)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🚀 STREAMING CHAT API (SSE — Real-time Tokens)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-@csrf_exempt
-@require_http_methods(["POST"])
-def voice_chat_stream(request):
-    """
-    Server-Sent Events (SSE) endpoint.
-    Gemini → Groq fallback (automatic, even if Gemini key is missing)
-    """
-    try:
-        data      = json.loads(request.body)
-        message   = data.get('message', '').strip()
-        history   = data.get('history', [])
-        user_name = get_logged_in_user_name(request)
-
-        if not message:
-            def error_gen():
-                yield 'data: ' + json.dumps({'error': 'Message खाली है'}) + '\n\n'
-            return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
-
-        api_key  = getattr(settings, 'GEMINI_API_KEY', None)
-        groq_key = getattr(settings, 'GROQ_API_KEY', None)
-
-        if not api_key and not groq_key:
-            def error_gen():
-                yield 'data: ' + json.dumps({'error': 'Gemini और Groq दोनों API Key सेट नहीं हैं।'}) + '\n\n'
-            return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
-
-    except Exception as e:
-        def error_gen():
-            yield 'data: ' + json.dumps({'error': str(e)}) + '\n\n'
-        return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
-
-    def sse_generator():
-        """Gemini → Groq automatic fallback streaming"""
-        sys_inst, formatted_contents = get_gemini_contents(message, history, user_name)
-        groq_messages_list = get_groq_messages(message, history, user_name)
-        full_reply = ""
-        fallback_to_groq = not api_key  # Gemini key नहीं तो सीधे Groq
-
-        if not fallback_to_groq:
-            try:
-                client = genai.Client(api_key=api_key)
-                stream = client.models.generate_content_stream(
-                    model="gemini-2.5-flash",
-                    contents=formatted_contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=sys_inst,
-                        temperature=0.7,
-                        max_output_tokens=800,
-                    )
-                )
-                for chunk in stream:
-                    token = chunk.text
-                    if token:
-                        full_reply += token
-                        yield 'data: ' + json.dumps({'token': token}, ensure_ascii=False) + '\n\n'
-
-                updated_history = history + [
-                    {"role": "user",      "content": message},
-                    {"role": "assistant", "content": full_reply.strip()},
-                ]
-                yield 'data: ' + json.dumps({
-                    'done': True, 'reply': full_reply.strip(),
-                    'history': updated_history
-                }, ensure_ascii=False) + '\n\n'
-                return  # सफल — Groq की जरूरत नहीं
-
-            except Exception as e:
-                print(f"Gemini Streaming Error: {e}")
-                if not full_reply:
-                    fallback_to_groq = True
-                    print("⚡ Groq fallback शुरू...")
-                else:
-                    yield 'data: ' + json.dumps({'error': f'नेटवर्क में समस्या: {str(e)}'}, ensure_ascii=False) + '\n\n'
+                if not groq_key:
+                    yield 'data: ' + json.dumps({'error': 'Gemini लिमिट पूरी हो गई और Groq Key भी सेट नहीं है।'}, ensure_ascii=False) + '\n\n'
                     return
 
-        if fallback_to_groq:
-            if not groq_key:
-                yield 'data: ' + json.dumps({'error': 'Gemini की लिमिट पूरी हो गई और Groq Key भी सेट नहीं है।'}, ensure_ascii=False) + '\n\n'
-                return
-            try:
-                from groq import Groq
                 groq_client = Groq(api_key=groq_key)
+
+                # कई models try करें (अगर एक ना काम करे)
+                groq_models = [
+                    "llama-3.3-70b-versatile",
+                    "llama3-70b-8192",
+                    "mixtral-8x7b-32768",
+                ]
                 stream = None
-                for model_name in ["gpt-oss-120b", "qwen-qwq-32b", "llama3-70b-8192"]:
+                for model_name in groq_models:
                     try:
                         stream = groq_client.chat.completions.create(
                             model=model_name,
@@ -534,14 +388,15 @@ def voice_chat_stream(request):
                             max_tokens=800,
                             stream=True,
                         )
-                        print(f"✅ Groq model: {model_name}")
+                        print(f"✅ Groq model सफल: {model_name}")
                         break
                     except Exception as model_err:
-                        print(f"❌ Groq {model_name}: {model_err}")
+                        print(f"❌ Groq model {model_name} fail: {model_err}")
                         stream = None
+                        continue
 
                 if stream is None:
-                    yield 'data: ' + json.dumps({'error': 'Groq का कोई भी model काम नहीं कर रहा।'}, ensure_ascii=False) + '\n\n'
+                    yield 'data: ' + json.dumps({'error': 'Groq का कोई भी model काम नहीं कर रहा है। कृपया थोड़ी देर बाद कोशिश करें।'}, ensure_ascii=False) + '\n\n'
                     return
 
                 for chunk in stream:
@@ -555,7 +410,8 @@ def voice_chat_stream(request):
                     {"role": "assistant", "content": full_reply.strip()},
                 ]
                 yield 'data: ' + json.dumps({
-                    'done': True, 'reply': full_reply.strip(),
+                    'done': True,
+                    'reply': full_reply.strip(),
                     'history': updated_history
                 }, ensure_ascii=False) + '\n\n'
 
@@ -566,4 +422,121 @@ def voice_chat_stream(request):
     response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
+    return response
+� नाम को override करें
+        user_name = get_logged_in_user_name(request)
+
+        if not message:
+            def error_gen():
+                yield 'data: ' + json.dumps({'error': 'Message खाली है'}) + '\n\n'
+            return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
+
+        api_key = getattr(settings, 'GEMINI_API_KEY', None)
+        groq_key = getattr(settings, 'GROQ_API_KEY', None)
+
+        if not api_key and not groq_key:
+            def error_gen():
+                yield 'data: ' + json.dumps({'error': 'Gemini और Groq दोनों API Key सेट नहीं हैं।'}) + '\n\n'
+            return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
+
+    except Exception as e:
+        def error_gen():
+            yield 'data: ' + json.dumps({'error': str(e)}) + '\n\n'
+        return StreamingHttpResponse(error_gen(), content_type='text/event-stream')
+
+    def sse_generator():
+        """Gemini Streaming से tokens yield करना, अगर ना हो तो Groq Fallback"""
+        sys_inst, formatted_contents = get_gemini_contents(message, history, user_name)
+        groq_messages_list = get_groq_messages(message, history, user_name)
+        full_reply = ""
+        fallback_to_groq = False
+
+        # अगर Gemini key ही नहीं है तो सीधे Groq
+        if not api_key:
+            print("❌ Gemini Key नहीं — Groq pr direct fallback")
+            fallback_to_groq = True
+
+        if not fallback_to_groq:
+            try:
+                client = genai.Client(api_key=api_key)
+                stream = client.models.generate_content_stream(
+                    model="gemini-2.5-flash",
+                    contents=formatted_contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=sys_inst,
+                        temperature=0.7,
+                        max_output_tokens=800,
+                    )
+                )
+
+                for chunk in stream:
+                    token = chunk.text
+                    if token:
+                        full_reply += token
+                        yield 'data: ' + json.dumps({'token': token}, ensure_ascii=False) + '\n\n'
+
+                # Stream पूरा होने पर updated history भेजें
+                updated_history = history + [
+                    {"role": "user",      "content": message},
+                    {"role": "assistant", "content": full_reply.strip()},
+                ]
+                yield 'data: ' + json.dumps({
+                    'done': True,
+                    'reply': full_reply.strip(),
+                    'history': updated_history
+                }, ensure_ascii=False) + '\n\n'
+                return  # सफल — Groq की जरूरत नहीं
+
+            except Exception as e:
+                print(f"Gemini Streaming Error: {e}")
+                if not full_reply:
+                    fallback_to_groq = True
+                else:
+                    yield 'data: ' + json.dumps({'error': f'नेटवर्क में समस्या: {str(e)}'}, ensure_ascii=False) + '\n\n'
+                    return
+
+        if fallback_to_groq:
+            print("Falling back to Groq Streaming...")
+            try:
+                from groq import Groq
+                groq_key = getattr(settings, 'GROQ_API_KEY', None)
+                if not groq_key:
+                    yield 'data: ' + json.dumps({'error': 'Gemini लिमिट पूरी हो गई है और Groq Key सेट नहीं है।'}, ensure_ascii=False) + '\n\n'
+                    return
+                
+                groq_client = Groq(api_key=groq_key)
+                groq_messages = get_groq_messages(message, history, user_name)
+                
+                stream = groq_client.chat.completions.create(
+                    # model="llama-3.3-70b-versatile",
+                    model="gpt-oss-120b",
+                    messages=groq_messages,
+                    temperature=0.7,
+                    max_tokens=800,
+                    stream=True,
+                )
+                
+                for chunk in stream:
+                    token = chunk.choices[0].delta.content
+                    if token:
+                        full_reply += token
+                        yield 'data: ' + json.dumps({'token': token}, ensure_ascii=False) + '\n\n'
+                        
+                updated_history = history + [
+                    {"role": "user",      "content": message},
+                    {"role": "assistant", "content": full_reply.strip()},
+                ]
+                yield 'data: ' + json.dumps({
+                    'done': True,
+                    'reply': full_reply.strip(),
+                    'history': updated_history
+                }, ensure_ascii=False) + '\n\n'
+                
+            except Exception as groq_e:
+                print(f"Groq Streaming Error: {groq_e}")
+                yield 'data: ' + json.dumps({'error': f'नेटवर्क या लिमिट में समस्या (Groq Fallback Failed): {str(groq_e)}'}, ensure_ascii=False) + '\n\n'
+
+    response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'   # Nginx buffering बंद करें
     return response

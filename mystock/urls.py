@@ -1,5 +1,6 @@
 from django.urls import path
 from django.http import JsonResponse
+from django.db.models.functions import TruncDate
 from . import views, seed_voice
 from . import replay_views
 
@@ -26,6 +27,7 @@ urlpatterns = [
     path('api/close-all-trades/', views.close_all_open_trades_api, name='close_all_open_trades_api'),
     path('api/db-cleanup/',       views.db_cleanup_api,            name='db_cleanup_api'),
     path('api/db-cleanup-preview/', views.db_cleanup_preview_api,  name='db_cleanup_preview_api'),
+    path('api/db-size/',            views.db_size_api,             name='db_size_api'),
     
     # ── Git Release ──────────────────────────────────────────────
     path('git-release/',              views.git_release_page,         name='git_release_page'),
@@ -45,6 +47,7 @@ urlpatterns = [
 
     # यह लाइन जोड़ें ताकि Django हमारे कस्टम लॉगिन व्यू को कॉल करे
     path('accounts/login/', views.login_view, name='login'), 
+    path('inactive-account/', views.inactive_account_view, name='inactive_account'),
     
     # रजिस्टर का URL (अगर आपने पहले जोड़ लिया है तो ठीक है)
     path('register/', views.register_user, name='register_user'),
@@ -87,6 +90,7 @@ urlpatterns = [
 
     path("chart/",         views.chart_view,   name="chart"),        # मुख्य chart page
     path("api/candle/",    views.candle_api,    name="candle_api"),   # AJAX JSON data
+    path("api/reversal-lines/", views.reversal_lines_api, name="reversal_lines_api"),  # 🔴 Live Reversal Lines only
     path("api/symbols/",   views.symbol_search, name="symbol_search"),# Autocomplete
 
     path('dashboard-chart/', views.dashboard_chart_view, name='dashboard_chart'),
@@ -102,9 +106,7 @@ urlpatterns = [
     # पुराने ट्रैड डेसबोर्ड के url 
     path('trade-journal/', views.trade_dashboard, name='trade_journal'),
 
-    # बैकटेस्ट Trade के लिए URL:
-    path('backtesta/', views.backtest_view, name='backtest'),
-    path('api/backtest/run/', views.backtest_run_api, name='backtest_run'),
+
 
     # Trade journal backtest ricord के लिए URLs
     path('journal/',                    views.journal_list,   name='journal_list'),
@@ -123,4 +125,13 @@ urlpatterns = [
     # ── LTP Levels (बटन क्लिक पर DB में save) ──────────────────
     path('api/save-ltp-levels/',  views.save_ltp_levels_api, name='save_ltp_levels'),
     path('api/get-ltp-levels/',   views.get_ltp_levels_api,  name='get_ltp_levels'),
+
+    # ── Static Reversal (बटन क्लिक पर calculate + DB save) ──────
+    path('api/save-static-reversal/', views.save_static_reversal_api, name='save_static_reversal'),
+    path('api/get-static-reversal/',  views.get_static_reversal_api,  name='get_static_reversal'),
+    path('api/get-sr-filters/',       views.get_sr_filters_api,       name='get_sr_filters'),
+
+    # ── 📰 Upstox News ────────────────────────────────────────────
+    path('news/',          views.news_page, name='news_page'),   # HTML पेज
+    path('api/news/',      views.news_api,  name='news_api'),    # Proxy API
 ]
