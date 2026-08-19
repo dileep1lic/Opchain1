@@ -3112,20 +3112,68 @@ def db_size_api(request):
     """
     Database की size और हर table का record count दिखाता है।
     Admin Panel → DB Cleanup section में "DB Size देखें" बटन से call होता है।
+    SQLite (local) और PostgreSQL (Render) दोनों को handle करता है।
     """
     import os
     from django.db import connection
 
     try:
-        # ── 1. DB File Size (SQLite) ──────────────────────────────
-        db_path = connection.settings_dict.get('NAME', '')
+        db_engine     = connection.vendor   # 'sqlite' या 'postgresql'
         db_size_bytes = 0
         db_size_mb    = 0.0
-        if db_path and os.path.exists(str(db_path)):
-            db_size_bytes = os.path.getsize(str(db_path))
-            db_size_mb    = round(db_size_bytes / (1024 * 1024), 2)
+        page_info     = {}
 
-        # ── 2. हर Table का Record Count ──────────────────────────
+        # ── SQLite: file size + PRAGMA ──────────────────────────────
+        if db_engine == 'sqlite':
+            db_path = connection.settings_dict.get('NAME', '')
+            if db_path and os.path.exists(str(db_path)):
+                db_size_bytes = os.path.getsize(str(db_path))
+                db_size_mb    = round(db_size_bytes / (1024 * 1024), 2)
+
+            with connection.cursor() as cursor:
+                cursor.execute("PRAGMA page_count;")
+                page_count = cursor.fetchone()[0]
+                cursor.execute("PRAGMA page_size;")
+                page_size  = cursor.fetchone()[0]
+                cursor.execute("PRAGMA freelist_count;")
+                free_pages = cursor.fetchone()[0]
+
+                used_pages = page_count - free_pages
+                used_bytes = used_pages * page_size
+                used_mb    = round(used_bytes / (1024 * 1024), 2)
+                free_mb    = round((free_pages * page_size) / (1024 * 1024), 2)
+                fill_pct   = round((used_pages / page_count * 100), 1) if page_count > 0 else 0
+
+                page_info = {
+                    "page_count": page_count,
+                    "page_size":  page_size,
+                    "free_pages": free_pages,
+                    "used_pages": used_pages,
+                    "used_mb":    used_mb,
+                    "free_mb":    free_mb,
+                    "fill_pct":   fill_pct,
+                }
+
+        # ── PostgreSQL: pg_database_size() ────────────────────────
+        elif db_engine == 'postgresql':
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_database_size(current_database());")
+                db_size_bytes = cursor.fetchone()[0] or 0
+                db_size_mb    = round(db_size_bytes / (1024 * 1024), 2)
+
+                # Render free plan = 1 GB limit
+                limit_mb = 1024.0
+                fill_pct = min(round((db_size_mb / limit_mb) * 100, 1), 100.0)
+                free_mb  = round(max(0, limit_mb - db_size_mb), 2)
+
+                page_info = {
+                    "used_mb":  db_size_mb,
+                    "free_mb":  free_mb,
+                    "fill_pct": fill_pct,
+                    "limit_mb": limit_mb,
+                }
+
+        # ── हर Table का Record Count ────────────────────────────────
         TABLE_MAP = {
             "OptionChain":       OptionChain,
             "SupportResistance": SupportResistance,
@@ -3136,7 +3184,7 @@ def db_size_api(request):
             "LtpLevels":         LtpLevels,
         }
 
-        table_counts = {}
+        table_counts  = {}
         total_records = 0
         for name, model in TABLE_MAP.items():
             try:
@@ -3146,33 +3194,6 @@ def db_size_api(request):
             table_counts[name] = cnt
             total_records += cnt
 
-        # ── 3. SQLite Page Info (optional deep info) ──────────────
-        page_info = {}
-        if connection.vendor == 'sqlite':
-            with connection.cursor() as cursor:
-                cursor.execute("PRAGMA page_count;")
-                page_count = cursor.fetchone()[0]
-                cursor.execute("PRAGMA page_size;")
-                page_size  = cursor.fetchone()[0]
-                cursor.execute("PRAGMA freelist_count;")
-                free_pages = cursor.fetchone()[0]
-
-                used_pages  = page_count - free_pages
-                used_bytes  = used_pages * page_size
-                used_mb     = round(used_bytes / (1024 * 1024), 2)
-                free_mb     = round((free_pages * page_size) / (1024 * 1024), 2)
-                fill_pct    = round((used_pages / page_count * 100), 1) if page_count > 0 else 0
-
-                page_info = {
-                    "page_count":  page_count,
-                    "page_size":   page_size,
-                    "free_pages":  free_pages,
-                    "used_pages":  used_pages,
-                    "used_mb":     used_mb,
-                    "free_mb":     free_mb,
-                    "fill_pct":    fill_pct,
-                }
-
         return JsonResponse({
             "status":        "ok",
             "db_size_mb":    db_size_mb,
@@ -3180,7 +3201,7 @@ def db_size_api(request):
             "total_records": total_records,
             "table_counts":  table_counts,
             "page_info":     page_info,
-            "db_engine":     connection.vendor,
+            "db_engine":     db_engine,
         })
 
     except Exception as e:

@@ -279,8 +279,7 @@
         /* --- COLUMN TOGGLE HIDE STYLES --- */
         body.hide-iv .col-iv { display: none !important; }
         body.hide-range .col-range { display: none !important; }
-        body.hide-iv-opt .col-iv-opt { display: none !important; }
-        body.hide-tv .col-tv { display: none !important; }
+        body.hide-ivtv .col-ivtv { display: none !important; }
         body.hide-chg-oi .col-chg-oi { display: none !important; }
         body.hide-oi .col-oi { display: none !important; }
         body.hide-vol .col-vol { display: none !important; }
@@ -665,8 +664,7 @@
             <div class="dropdown-content checkbox-menu" style="min-width: 140px; padding: 5px 0;">
                 <label><input type="checkbox" id="chk-iv" onchange="toggleColumn('iv')" checked> IV(&Delta;)</label>
                 <label><input type="checkbox" id="chk-range" onchange="toggleColumn('range')" checked> Range</label>
-                <label><input type="checkbox" id="chk-iv-opt" onchange="toggleColumn('iv-opt')" checked> <span style="color:#fbbf24;">IV</span> (Intrinsic)</label>
-                <label><input type="checkbox" id="chk-tv" onchange="toggleColumn('tv')" checked> <span style="color:#a78bfa;">TV</span> (Time Val)</label>
+                <label><input type="checkbox" id="chk-ivtv" onchange="toggleColumn('ivtv')" checked> <span style="color:#fbbf24;">IV</span> / <span style="color:#a78bfa;">TV</span></label>
                 <label><input type="checkbox" id="chk-chg-oi" onchange="toggleColumn('chg-oi')" checked> CHG OI</label>
                 <label><input type="checkbox" id="chk-oi" onchange="toggleColumn('oi')" checked> OI</label>
                 <label><input type="checkbox" id="chk-vol" onchange="toggleColumn('vol')" checked> VOL</label>
@@ -806,7 +804,7 @@ function getCookie(name) {
 }
 
 // --- COLUMN TOGGLE & COLSPAN FIX LOGIC ---
-const columnsList = ['iv', 'range', 'iv-opt', 'tv', 'chg-oi', 'oi', 'vol', 'ltp', 'reversl'];
+const columnsList = ['iv', 'range', 'ivtv', 'chg-oi', 'oi', 'vol', 'ltp', 'reversl'];
 
 function fixTableColspans() {
     const ceHeader = document.getElementById('ce-header');
@@ -1262,35 +1260,30 @@ function calculateIVandTV() {
     const spot = parseFloat(spotEl.innerText) || 0;
     if (!spot) return;
 
-    document.querySelectorAll('.col-iv-opt[data-opt-type="CE"]').forEach(cell => {
-        const strike = parseFloat(cell.dataset.strike) || 0;
-        const iv_val = Math.max(0, spot - strike);
-        const ivSpan = cell.querySelector('.calc-iv');
-        if (ivSpan) ivSpan.textContent = iv_val.toFixed(2);
-    });
-    document.querySelectorAll('.col-tv[data-opt-type="CE"]').forEach(cell => {
+    // CE: combined col-ivtv cell में IV और TV दोनों calculate करो
+    document.querySelectorAll('.col-ivtv[data-opt-type="CE"]').forEach(cell => {
         const strike = parseFloat(cell.dataset.strike) || 0;
         const ltp    = parseFloat(cell.dataset.ceLtp) || 0;
-        const iv_val = Math.max(0, spot - strike);
-        const tv_val = ltp - iv_val;   // negative भी दिखाओ
+        const iv_val = Math.max(0, spot - strike);   // Call: Spot - Strike
+        const tv_val = ltp - iv_val;                 // TV = LTP - IV (negative भी)
+        const ivSpan = cell.querySelector('.calc-iv');
         const tvSpan = cell.querySelector('.calc-tv');
+        if (ivSpan) ivSpan.textContent = iv_val.toFixed(2);
         if (tvSpan) {
             tvSpan.textContent = tv_val.toFixed(2);
             tvSpan.style.color = tv_val < 0 ? '#ff5252' : '#a78bfa';
         }
     });
-    document.querySelectorAll('.col-iv-opt[data-opt-type="PE"]').forEach(cell => {
-        const strike = parseFloat(cell.dataset.strike) || 0;
-        const iv_val = Math.max(0, strike - spot);
-        const ivSpan = cell.querySelector('.calc-iv');
-        if (ivSpan) ivSpan.textContent = iv_val.toFixed(2);
-    });
-    document.querySelectorAll('.col-tv[data-opt-type="PE"]').forEach(cell => {
+
+    // PE: combined col-ivtv cell में IV और TV दोनों calculate करो
+    document.querySelectorAll('.col-ivtv[data-opt-type="PE"]').forEach(cell => {
         const strike = parseFloat(cell.dataset.strike) || 0;
         const ltp    = parseFloat(cell.dataset.peLtp) || 0;
-        const iv_val = Math.max(0, strike - spot);
-        const tv_val = ltp - iv_val;   // negative भी दिखाओ
+        const iv_val = Math.max(0, strike - spot);   // Put: Strike - Spot
+        const tv_val = ltp - iv_val;                 // TV = LTP - IV (negative भी)
+        const ivSpan = cell.querySelector('.calc-iv');
         const tvSpan = cell.querySelector('.calc-tv');
+        if (ivSpan) ivSpan.textContent = iv_val.toFixed(2);
         if (tvSpan) {
             tvSpan.textContent = tv_val.toFixed(2);
             tvSpan.style.color = tv_val < 0 ? '#ff5252' : '#a78bfa';
