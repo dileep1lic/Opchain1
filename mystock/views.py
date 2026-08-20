@@ -3123,36 +3123,31 @@ def db_size_api(request):
         db_size_mb    = 0.0
         page_info     = {}
 
-        # ── SQLite: file size + PRAGMA ──────────────────────────────
+        # ── SQLite: file size + limit-based fill calculation ──────────
         if db_engine == 'sqlite':
             db_path = connection.settings_dict.get('NAME', '')
             if db_path and os.path.exists(str(db_path)):
                 db_size_bytes = os.path.getsize(str(db_path))
                 db_size_mb    = round(db_size_bytes / (1024 * 1024), 2)
 
-            with connection.cursor() as cursor:
-                cursor.execute("PRAGMA page_count;")
-                page_count = cursor.fetchone()[0]
-                cursor.execute("PRAGMA page_size;")
-                page_size  = cursor.fetchone()[0]
-                cursor.execute("PRAGMA freelist_count;")
-                free_pages = cursor.fetchone()[0]
+            # Frontend से limit_gb लेना, default 10 GB
+            try:
+                limit_gb = float(request.GET.get('limit_gb', 10.0))
+                if limit_gb <= 0: limit_gb = 10.0
+            except (ValueError, TypeError):
+                limit_gb = 10.0
 
-                used_pages = page_count - free_pages
-                used_bytes = used_pages * page_size
-                used_mb    = round(used_bytes / (1024 * 1024), 2)
-                free_mb    = round((free_pages * page_size) / (1024 * 1024), 2)
-                fill_pct   = round((used_pages / page_count * 100), 1) if page_count > 0 else 0
+            limit_mb = limit_gb * 1024.0
+            fill_pct = min(round((db_size_mb / limit_mb) * 100, 1), 100.0)
+            free_mb  = round(max(0, limit_mb - db_size_mb), 2)
 
-                page_info = {
-                    "page_count": page_count,
-                    "page_size":  page_size,
-                    "free_pages": free_pages,
-                    "used_pages": used_pages,
-                    "used_mb":    used_mb,
-                    "free_mb":    free_mb,
-                    "fill_pct":   fill_pct,
-                }
+            page_info = {
+                "used_mb":  db_size_mb,
+                "free_mb":  free_mb,
+                "fill_pct": fill_pct,
+                "limit_mb": limit_mb,
+                "limit_gb": limit_gb,
+            }
 
         # ── PostgreSQL: pg_database_size() ────────────────────────
         elif db_engine == 'postgresql':
@@ -3161,8 +3156,14 @@ def db_size_api(request):
                 db_size_bytes = cursor.fetchone()[0] or 0
                 db_size_mb    = round(db_size_bytes / (1024 * 1024), 2)
 
-                # Render free plan = 1 GB limit
-                limit_mb = 1024.0
+                # Frontend से limit_gb लेना, default 1 GB
+                try:
+                    limit_gb = float(request.GET.get('limit_gb', 1.0))
+                    if limit_gb <= 0: limit_gb = 1.0
+                except ValueError:
+                    limit_gb = 1.0
+
+                limit_mb = limit_gb * 1024.0
                 fill_pct = min(round((db_size_mb / limit_mb) * 100, 1), 100.0)
                 free_mb  = round(max(0, limit_mb - db_size_mb), 2)
 
@@ -3171,9 +3172,11 @@ def db_size_api(request):
                     "free_mb":  free_mb,
                     "fill_pct": fill_pct,
                     "limit_mb": limit_mb,
+                    "limit_gb": limit_gb,
                 }
 
-        # ── हर Table का Record Count ────────────────────────────────
+
+        # ── हर Table का Record Count + Date Range ──────────────────
         TABLE_MAP = {
             "OptionChain":       OptionChain,
             "SupportResistance": SupportResistance,
@@ -3184,15 +3187,60 @@ def db_size_api(request):
             "LtpLevels":         LtpLevels,
         }
 
-        table_counts  = {}
-        total_records = 0
-        for name, model in TABLE_MAP.items():
+        # हर table का date field (COUNT+MIN+MAX एक साथ)
+        TABLE_DATE_FIELD = {
+            "OptionChain":       "Time",
+            "SupportResistance": "Time",
+            "TempOptionChain":   "Time",
+            "LiveSRData":        "Time",
+            "PaperTrade":        "trade_date",
+            "TradingJournal":    "date",
+            "LtpLevels":         "saved_at",
+        }
+
+        from django.db.models import Count, Min, Max
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import django
+
+        def fmt_date(d):
+            if d is None:
+                return None
+            if hasattr(d, 'date'):
+                d = d.date()
+            return d.strftime("%d-%b-%Y")
+
+        def query_table(name, model, date_field):
+            """एक table का count + min + max एक ही query में"""
+            django.db.close_old_connections()
             try:
-                cnt = model.objects.count()
+                agg = model.objects.aggregate(
+                    total=Count('id'),
+                    min_date=Min(date_field) if date_field else None,
+                    max_date=Max(date_field) if date_field else None,
+                )
+                cnt = agg.get('total') or 0
+                return name, cnt, {
+                    "from": fmt_date(agg.get('min_date')),
+                    "to":   fmt_date(agg.get('max_date')),
+                }
             except Exception:
-                cnt = 0
-            table_counts[name] = cnt
-            total_records += cnt
+                return name, 0, {"from": None, "to": None}
+
+        table_counts  = {}
+        table_ranges  = {}
+        total_records = 0
+
+        # ── सभी tables की queries एक साथ (Parallel) ──────────────
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {
+                pool.submit(query_table, name, model, TABLE_DATE_FIELD.get(name)): name
+                for name, model in TABLE_MAP.items()
+            }
+            for future in as_completed(futures):
+                name, cnt, date_range = future.result()
+                table_counts[name] = cnt
+                table_ranges[name] = date_range
+                total_records += cnt
 
         return JsonResponse({
             "status":        "ok",
@@ -3200,6 +3248,7 @@ def db_size_api(request):
             "db_size_bytes": db_size_bytes,
             "total_records": total_records,
             "table_counts":  table_counts,
+            "table_ranges":  table_ranges,
             "page_info":     page_info,
             "db_engine":     db_engine,
         })

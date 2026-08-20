@@ -488,8 +488,26 @@
        onmouseout="this.style.background='linear-gradient(135deg,rgba(124,111,255,.2),rgba(74,158,255,.15))'">
       💾 DB Size देखें
     </button>
+
+    <!-- Custom DB Limit Input -->
+    <div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);padding:6px 10px;border-radius:8px;">
+      <span style="font-size:12px;color:var(--muted);">Total Capacity (GB):</span>
+      <input type="number" id="db-limit-input" value="1" min="0.1" step="0.1" style="width:50px;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:600;outline:none;">
+    </div>
+
     <div id="db-size-summary" style="font-size:13px;color:var(--muted);">(बटन दबाऐं — database कितनी भरी है यह दिखेगा)</div>
   </div>
+
+  <script>
+      // Load saved DB limit from localStorage
+      document.addEventListener('DOMContentLoaded', () => {
+          const limitInput = document.getElementById('db-limit-input');
+          if (limitInput) {
+              const saved = localStorage.getItem('db_limit_gb');
+              if (saved) limitInput.value = saved;
+          }
+      });
+  </script>
 
   <div id="db-size-result" style="display:none;">
 
@@ -1316,11 +1334,17 @@ function getCsrfToken() {
 async function checkDbSize() {
     const btn = document.getElementById('dbSizeBtn');
     const summary = document.getElementById('db-size-summary');
+    const limitInput = document.getElementById('db-limit-input');
+    
+    // Get custom limit and save to localStorage
+    const limitGb = limitInput ? (parseFloat(limitInput.value) || 1.0) : 1.0;
+    if (limitInput) localStorage.setItem('db_limit_gb', limitGb);
+
     btn.innerHTML = '⏳ लोड हो रहा है...';
     btn.disabled = true;
 
     try {
-        const resp = await fetch('/api/db-size/');
+        const resp = await fetch(`/api/db-size/?limit_gb=${limitGb}`);
         const data = await resp.json();
 
         if (data.status !== 'ok') {
@@ -1332,24 +1356,46 @@ async function checkDbSize() {
 
         // ── Overview Cards ──
         const cardsEl = document.getElementById('db-size-cards');
-        const fillColor = data.page_info.fill_pct > 80
-            ? '#ef4444' : data.page_info.fill_pct > 50 ? '#f59e0b' : '#00d4a0';
+        const sizeMB  = data.db_size_mb;
+        const sizeGB  = (data.db_size_bytes / 1024 / 1024 / 1024).toFixed(3);
+        const totalCap = data.page_info ? (data.page_info.limit_gb || limitGb) : limitGb;
+
+        const fillColor = (data.page_info && data.page_info.fill_pct > 80)
+            ? '#ef4444' : (data.page_info && data.page_info.fill_pct > 50) ? '#f59e0b' : '#00d4a0';
 
         cardsEl.innerHTML = `
-            <div style="background:var(--bg);border:1px solid rgba(124,111,255,.3);border-radius:12px;padding:16px;text-align:center;">
-                <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📂 DB File Size</div>
-                <div style="font-size:24px;font-weight:700;color:#c4b8ff;">${data.db_size_mb} <span style="font-size:14px;">MB</span></div>
-                <div style="font-size:10px;color:var(--muted);margin-top:4px;">${(data.db_size_bytes / 1024 / 1024 / 1024).toFixed(3)} GB</div>
+            <!-- ── DB SIZE : Used + Total prominent ── -->
+            <div style="background:var(--bg);border:1px solid rgba(124,111,255,.35);border-radius:12px;padding:16px 20px;grid-column:span 2;">
+                <div style="display:flex;align-items:center;justify-content:center;gap:0;">
+                    <!-- Used DB Size -->
+                    <div style="flex:1;text-align:center;padding:8px 12px;">
+                        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📂 Used Database</div>
+                        <div style="font-size:28px;font-weight:800;color:#c4b8ff;line-height:1;">${sizeGB} <span style="font-size:14px;">GB</span></div>
+                        <div style="font-size:12px;color:var(--muted);margin-top:6px;">(${sizeMB} MB)</div>
+                    </div>
+                    <!-- Divider -->
+                    <div style="width:1px;height:70px;background:rgba(124,111,255,.3);flex-shrink:0;"></div>
+                    <!-- Total Capacity -->
+                    <div style="flex:1;text-align:center;padding:8px 12px;">
+                        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📊 Total Capacity</div>
+                        <div style="font-size:28px;font-weight:800;color:#7c6fff;line-height:1;">${totalCap} <span style="font-size:14px;">GB</span></div>
+                        <div style="font-size:12px;color:var(--muted);margin-top:6px;">(Limit)</div>
+                    </div>
+                </div>
             </div>
+
+            <!-- ── Total Records ── -->
             <div style="background:var(--bg);border:1px solid rgba(0,212,160,.3);border-radius:12px;padding:16px;text-align:center;">
                 <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📋 Total Records</div>
-                <div style="font-size:24px;font-weight:700;color:var(--green);">${data.total_records.toLocaleString()}</div>
+                <div style="font-size:26px;font-weight:700;color:var(--green);">${data.total_records.toLocaleString()}</div>
                 <div style="font-size:10px;color:var(--muted);margin-top:4px;">सभी tables मिलाकर</div>
             </div>
+
+            <!-- ── Fill Level ── -->
             ${data.page_info && data.page_info.fill_pct !== undefined ? `
             <div style="background:var(--bg);border:1px solid rgba(${data.page_info.fill_pct > 80 ? '239,68,68' : data.page_info.fill_pct > 50 ? '245,158,11' : '0,212,160'},.3);border-radius:12px;padding:16px;text-align:center;">
                 <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📊 Fill Level</div>
-                <div style="font-size:24px;font-weight:700;color:${fillColor};">${data.page_info.fill_pct}<span style="font-size:14px;">%</span></div>
+                <div style="font-size:26px;font-weight:700;color:${fillColor};">${data.page_info.fill_pct}<span style="font-size:14px;">%</span></div>
                 <div style="font-size:10px;color:var(--muted);margin-top:4px;">${data.db_engine.toUpperCase()} Database</div>
             </div>
             ` : ''}
@@ -1379,20 +1425,32 @@ async function checkDbSize() {
             'PaperTrade': '📋', 'TradingJournal': '📓',
             'LtpLevels': '📐'
         };
+        const ranges = data.table_ranges || {};
         let gridHtml = '';
         for (const [tbl, cnt] of Object.entries(data.table_counts)) {
-            const icon = TABLE_ICONS[tbl] || '🗄️';
-            const highlight = cnt > 100000 ? 'rgba(245,158,11,.15)' : 'var(--bg)';
+            const icon      = TABLE_ICONS[tbl] || '🗄️';
+            const highlight = cnt > 100000 ? 'rgba(245,158,11,.1)' : 'var(--bg)';
             const textColor = cnt > 500000 ? '#ef4444' : cnt > 100000 ? '#f59e0b' : 'var(--text)';
+            const range     = ranges[tbl] || {};
+            const dateRange = (range.from && range.to)
+                ? `<div style="display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap;">
+                       <span style="font-size:10px;background:rgba(124,111,255,.15);color:#a89fff;border-radius:4px;padding:2px 7px;white-space:nowrap;">📅 ${range.from}</span>
+                       <span style="font-size:9px;color:var(--muted);">→</span>
+                       <span style="font-size:10px;background:rgba(0,212,160,.12);color:#00d4a0;border-radius:4px;padding:2px 7px;white-space:nowrap;">📅 ${range.to}</span>
+                   </div>`
+                : (cnt === 0
+                    ? `<div style="font-size:10px;color:var(--muted);margin-top:6px;">— कोई data नहीं —</div>`
+                    : '');
+
             gridHtml += `
-                <div style="background:${highlight};border:1px solid var(--border);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
-                    <div>
+                <div style="background:${highlight};border:1px solid var(--border);border-radius:10px;padding:12px 16px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
                         <div style="font-size:12px;font-weight:600;">${icon} ${tbl}</div>
-                        <div style="font-size:10px;color:var(--muted);margin-top:2px;">Records</div>
+                        <div style="font-size:20px;font-weight:700;color:${textColor};font-variant-numeric:tabular-nums;">
+                            ${cnt.toLocaleString()}
+                        </div>
                     </div>
-                    <div style="font-size:20px;font-weight:700;color:${textColor};font-variant-numeric:tabular-nums;">
-                        ${cnt.toLocaleString()}
-                    </div>
+                    ${dateRange}
                 </div>
             `;
         }
