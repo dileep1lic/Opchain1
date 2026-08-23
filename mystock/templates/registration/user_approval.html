@@ -6,204 +6,468 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpChain — User Management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
         :root {
-            --bg: #0a0c10; --card: #111318; --border: #1e2230;
-            --accent: #3b82f6; --accent2: #6366f1; --green: #22c55e;
-            --red: #ef4444; --text: #f1f5f9; --muted: #64748b; 
-            --input-bg: #0f1117;
+            --bg: #060912;
+            --surface: #0d1117;
+            --card: #111827;
+            --card2: #161d2e;
+            --border: #1f2937;
+            --border2: #243044;
+            --accent: #3b82f6;
+            --accent2: #6366f1;
+            --accent3: #8b5cf6;
+            --green: #10b981;
+            --green2: #34d399;
+            --red: #ef4444;
+            --orange: #f97316;
+            --yellow: #f59e0b;
+            --text: #f9fafb;
+            --text2: #e5e7eb;
+            --muted: #6b7280;
+            --muted2: #4b5563;
         }
+
         body {
-            font-family: 'Inter','Segoe UI',system-ui,sans-serif;
-            background: var(--bg); color: var(--text);
-            min-height: 100vh; padding: 40px 20px;
-            display: flex; flex-direction: column; align-items: center;
-            position: relative; overflow-x: hidden;
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
         }
-        body::before {
-            content: ''; position: fixed; inset: 0;
-            background-image: linear-gradient(rgba(59,130,246,.02) 1px,transparent 1px),
-                              linear-gradient(90deg,rgba(59,130,246,.02) 1px,transparent 1px);
-            background-size: 40px 40px; pointer-events: none;
-        }
-        .orb { position: fixed; border-radius: 50%; filter: blur(100px); opacity: .1; pointer-events: none; }
-        .orb-1 { width:500px; height:500px; background:var(--accent); top:-150px; left:-100px; }
-        .orb-2 { width:450px; height:450px; background:var(--accent2); bottom:-100px; right:-100px; }
 
-        .container { width: 100%; max-width: 900px; position: relative; z-index: 10; }
-        
-        .header-section { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-        .logo-wrap { display: flex; align-items: center; gap: 12px; }
-        .logo-icon {
-            width: 44px; height: 44px;
-            background: linear-gradient(135deg, var(--accent), var(--accent2));
-            border-radius: 12px; display: flex; align-items: center; justify-content: center;
-            font-size: 20px; box-shadow: 0 4px 16px rgba(59,130,246,.25);
+        /* ── Animated Background ── */
+        .bg-glow {
+            position: fixed; inset: 0; pointer-events: none; z-index: 0;
+            background:
+                radial-gradient(ellipse 80% 50% at -10% 20%, rgba(59,130,246,.12) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 60% at 110% 80%, rgba(99,102,241,.1) 0%, transparent 60%),
+                radial-gradient(ellipse 50% 40% at 50% 0%, rgba(139,92,246,.06) 0%, transparent 50%);
         }
-        .logo-text h1 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
-        .logo-text p { font-size: 12px; color: var(--muted); }
-        
+        .grid-lines {
+            position: fixed; inset: 0; pointer-events: none; z-index: 0;
+            background-image:
+                linear-gradient(rgba(59,130,246,.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,.025) 1px, transparent 1px);
+            background-size: 48px 48px;
+        }
+
+        /* ── Layout ── */
+        .layout { display: flex; min-height: 100vh; position: relative; z-index: 1; }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: 260px; flex-shrink: 0;
+            background: rgba(13,17,23,.9);
+            border-right: 1px solid var(--border);
+            display: flex; flex-direction: column;
+            padding: 28px 20px;
+            backdrop-filter: blur(20px);
+            position: sticky; top: 0; height: 100vh;
+        }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
+        .brand-icon {
+            width: 42px; height: 42px;
+            background: linear-gradient(135deg, var(--accent), var(--accent3));
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 19px;
+            box-shadow: 0 6px 20px rgba(59,130,246,.3);
+        }
+        .brand-name { font-size: 17px; font-weight: 800; letter-spacing: -.3px; }
+        .brand-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+        .nav-label { font-size: 10px; font-weight: 700; color: var(--muted2); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; padding-left: 4px; }
+        .nav-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px; border-radius: 10px;
+            font-size: 13px; font-weight: 500; color: var(--muted);
+            text-decoration: none; margin-bottom: 2px;
+            transition: all .2s;
+        }
+        .nav-item:hover { background: rgba(255,255,255,.04); color: var(--text); }
+        .nav-item.active { background: rgba(59,130,246,.12); color: var(--accent); border: 1px solid rgba(59,130,246,.15); }
+        .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+        .sidebar-footer { margin-top: auto; }
+        .stat-mini {
+            background: var(--card2); border: 1px solid var(--border);
+            border-radius: 12px; padding: 14px; margin-bottom: 10px;
+        }
+        .stat-mini-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 6px; }
+        .stat-mini-val { font-size: 22px; font-weight: 800; }
+        .stat-mini-val.green { color: var(--green2); }
+        .stat-mini-val.red { color: #fca5a5; }
+
+        /* ── Main Content ── */
+        .main {
+            flex: 1; padding: 32px 32px 60px;
+            min-width: 0;
+        }
+
+        /* ── Top Bar ── */
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 32px;
+        }
+        .page-title h2 { font-size: 24px; font-weight: 800; letter-spacing: -.4px; }
+        .page-title p { font-size: 13px; color: var(--muted); margin-top: 3px; }
+
+        .topbar-actions { display: flex; gap: 10px; align-items: center; }
         .btn-back {
-            padding: 10px 16px; background: var(--card); border: 1px solid var(--border);
-            border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px;
-            transition: all .2s; font-weight: 600;
+            display: inline-flex; align-items: center; gap: 7px;
+            padding: 9px 16px;
+            background: var(--card); border: 1px solid var(--border2);
+            border-radius: 10px; color: var(--text2); text-decoration: none;
+            font-size: 13px; font-weight: 600; transition: all .2s;
         }
-        .btn-back:hover { border-color: var(--accent); background: rgba(59,130,246,.05); }
+        .btn-back:hover { border-color: var(--accent); background: rgba(59,130,246,.08); color: var(--accent); }
 
-        /* Messages */
+        /* ── Alert ── */
+        .alert {
+            display: flex; align-items: center; gap: 10px;
+            padding: 13px 16px; border-radius: 12px; font-size: 13px;
+            margin-bottom: 24px; font-weight: 500;
+            animation: slideIn .3s ease;
+        }
         .alert-success {
-            background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.25);
-            border-radius: 10px; padding: 12px 16px; font-size: 13px; color: #86efac;
-            margin-bottom: 24px; display: flex; align-items: center; gap: 8px;
+            background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.25);
+            color: #6ee7b7;
         }
+        @keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
 
-        /* Glassmorphic Table Card */
+        /* ── Stats Row ── */
+        .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+        .stat-card {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 20px 20px 16px;
+            position: relative; overflow: hidden;
+            transition: transform .2s, border-color .2s;
+        }
+        .stat-card:hover { transform: translateY(-2px); border-color: var(--border2); }
+        .stat-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+            border-radius: 14px 14px 0 0;
+        }
+        .stat-card.blue::before { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+        .stat-card.green::before { background: linear-gradient(90deg, var(--green), var(--green2)); }
+        .stat-card.orange::before { background: linear-gradient(90deg, var(--orange), var(--yellow)); }
+        .stat-card-icon { font-size: 22px; margin-bottom: 10px; }
+        .stat-card-val { font-size: 32px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+        .stat-card-label { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+        /* ── Table Card ── */
         .table-card {
-            background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-            padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,.4); overflow: hidden;
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 16px; overflow: hidden;
+            box-shadow: 0 24px 64px rgba(0,0,0,.4);
         }
-        .table-responsive { width: 100%; overflow-x: auto; }
-        
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
-        th { padding: 14px 16px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
-        td { padding: 16px; border-bottom: 1px solid rgba(255,255,255,.02); color: var(--text); vertical-align: middle; }
-        tr:hover td { background: rgba(255,255,255,0.01); }
-
-        .user-name { font-weight: 600; color: var(--text); display: block; }
-        .user-email { font-size: 12px; color: var(--muted); margin-top: 2px; display: block; }
-
-        /* Badges */
-        .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-        .badge-active { background: rgba(34,197,94,.1); color: #4ade80; border: 1px solid rgba(34,197,94,.2); }
-        .badge-pending { background: rgba(239,68,68,.1); color: #fca5a5; border: 1px solid rgba(239,68,68,.2); }
-        .dot { width: 6px; height: 6px; border-radius: 50%; }
-        .badge-active .dot { background: var(--green); }
-        .badge-pending .dot { background: var(--red); }
-
-        /* Action Button */
-        .btn-action {
-            padding: 8px 14px; border: none; border-radius: 8px; font-size: 12px; font-weight: 700;
-            cursor: pointer; transition: all .2s; width: 100px; color: #fff;
+        .table-header {
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
         }
-        .btn-approve { background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 4px 12px rgba(34,197,94,.2); }
-        .btn-approve:hover { opacity: .9; transform: translateY(-1px); }
-        .btn-reject { background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 4px 12px rgba(239,68,68,.2); }
-        .btn-reject:hover { opacity: .9; transform: translateY(-1px); }
-        .btn-action:active { transform: translateY(0); }
+        .table-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .table-count {
+            background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.2);
+            color: var(--accent); font-size: 11px; font-weight: 700;
+            padding: 2px 8px; border-radius: 20px;
+        }
 
-        .btn-reset { background: linear-gradient(135deg, #f97316, #ea580c); box-shadow: 0 4px 12px rgba(249,115,22,.2); }
-        .btn-reset:hover { opacity: .9; transform: translateY(-1px); }
-        .empty-state { text-align: center; padding: 40px 0; color: var(--muted); font-size: 14px; }
-        .actions-cell { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .table-responsive { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        thead { background: rgba(255,255,255,.02); }
+        th {
+            padding: 12px 18px; color: var(--muted); font-size: 10.5px;
+            font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+            border-bottom: 1px solid var(--border); white-space: nowrap;
+            text-align: left;
+        }
+        td {
+            padding: 15px 18px; border-bottom: 1px solid rgba(255,255,255,.03);
+            color: var(--text2); vertical-align: middle;
+        }
+        tbody tr { transition: background .15s; }
+        tbody tr:hover td { background: rgba(255,255,255,.02); }
+        tbody tr:last-child td { border-bottom: none; }
+
+        /* ── User Cell ── */
+        .user-cell { display: flex; align-items: center; gap: 12px; }
+        .avatar {
+            width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+            background: linear-gradient(135deg, var(--accent), var(--accent3));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 800; color: #fff;
+            box-shadow: 0 0 0 2px rgba(59,130,246,.2);
+        }
+        .user-name { font-weight: 700; color: var(--text); font-size: 13.5px; }
+        .user-email { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+        /* ── Date Cell ── */
+        .date-val { font-weight: 600; color: var(--text2); }
+        .date-sub { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+        /* ── Login Status Badge ── */
+        .login-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 20px;
+            font-size: 11px; font-weight: 700; white-space: nowrap;
+        }
+        .login-success { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.25); color: #6ee7b7; }
+        .login-failed  { background: rgba(239,68,68,.12);  border: 1px solid rgba(239,68,68,.25);  color: #fca5a5; }
+        .login-pending { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.25); color: #fcd34d; }
+        .login-info { font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+        /* ── Status Badge ── */
+        .status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 700;
+        }
+        .status-approved { background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.22); color: #34d399; }
+        .status-pending  { background: rgba(239,68,68,.1);  border: 1px solid rgba(239,68,68,.22);  color: #fca5a5; }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .status-approved .status-dot { background: var(--green2); box-shadow: 0 0 6px var(--green2); animation: pulse 2s infinite; }
+        .status-pending  .status-dot { background: #f87171; box-shadow: 0 0 6px #f87171; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+
+        /* ── Action Buttons ── */
+        .btn {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 7px 14px; border: none; border-radius: 8px;
+            font-size: 12px; font-weight: 700; cursor: pointer;
+            transition: all .2s; color: #fff; white-space: nowrap;
+        }
+        .btn:hover { transform: translateY(-1px); opacity: .92; }
+        .btn:active { transform: translateY(0); }
+        .btn-approve { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16,185,129,.25); }
+        .btn-deactivate { background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 4px 12px rgba(239,68,68,.25); }
+        .btn-reset { background: linear-gradient(135deg, #f97316, #ea580c); box-shadow: 0 4px 12px rgba(249,115,22,.22); }
+
+        .actions-wrap { display: flex; gap: 7px; align-items: center; flex-wrap: nowrap; }
+
+        /* ── Empty State ── */
+        .empty-state {
+            text-align: center; padding: 60px 20px; color: var(--muted);
+        }
+        .empty-icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-text { font-size: 15px; font-weight: 600; color: var(--muted); }
+        .empty-sub { font-size: 12px; margin-top: 4px; }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .main { padding: 20px 16px 40px; }
+            .stats-row { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 560px) {
+            .stats-row { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
-<div class="orb orb-1"></div>
-<div class="orb orb-2"></div>
 
-<div class="container">
-    <div class="header-section">
-        <div class="logo-wrap">
-            <div class="logo-icon">👥</div>
-            <div class="logo-text">
-                <h1>यूज़र मैनेजमेंट पैनल</h1>
-                <p>अकाउंट वेरिफिकेशन और अप्रूवल सिस्टम</p>
+<div class="bg-glow"></div>
+<div class="grid-lines"></div>
+
+<div class="layout">
+
+    <!-- ── Sidebar ── -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">⛓️</div>
+            <div>
+                <div class="brand-name">OpChain</div>
+                <div class="brand-sub">Admin Console</div>
             </div>
         </div>
-        <a href="{% url 'admin_panel' %}" class="btn-back">← Admin Panel</a>
-    </div>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert-success">✅ {{ message }}</div>
-        {% endfor %}
-    {% endif %}
+        <div class="nav-label">Navigation</div>
+        <a href="{% url 'admin_panel' %}" class="nav-item">
+            <span class="icon">🏠</span> Dashboard
+        </a>
+        <a href="#" class="nav-item active">
+            <span class="icon">👥</span> User Management
+        </a>
 
-    <div class="table-card">
-        <div class="table-responsive">
-            <table>
-                <thead>
-                    <tr>
-                        <th>👤 यूज़र विवरण</th>
-                        <th>📅 जॉइनिंग डेट</th>
-                        <th>🕐 लास्ट लॉगिन</th>
-                        <th>📋 लॉगिन स्टेटस</th>
-                        <th>⚡ स्थिति (Status)</th>
-                        <th>⚙️ एक्शन</th>
-                        <th>🔑 पासवर्ड रिसेट</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for u in managed_users %}
-                    <tr>
-                        <td>
-                            <span class="user-name">{{ u.first_name }}</span>
-                            <span class="user-email">{{ u.username }}</span>
-                        </td>
-                        <td>{{ u.date_joined|date:"d M, Y" }}</td>
-                        <td>
-                            {% if u.last_login %}
-                                <span style="color: var(--text);">{{ u.last_login|localtime|date:"d M, Y" }}</span><br>
-                                <span style="font-size:11px; color: var(--muted);">{{ u.last_login|localtime|time:"h:i A" }}</span>
-                            {% else %}
-                                <span style="color: var(--muted); font-size:12px;">कभी नहीं</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% with log=last_logs|get_item:u.id %}
-                            {% if log %}
-                                {% if log.status == 'success' %}
-                                    <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#4ade80;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">✅ सफल</span>
-                                {% elif log.status == 'failed' %}
-                                    <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">❌ गलत पासवर्ड</span>
-                                {% elif log.status == 'inactive' %}
-                                    <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.3);color:#fcd34d;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;">⏳ पेंडिंग</span>
+        <div class="sidebar-footer">
+            <div class="stat-mini">
+                <div class="stat-mini-label">Total Users</div>
+                <div class="stat-mini-val" style="color:var(--accent);">{{ total_count }}</div>
+            </div>
+            <div class="stat-mini">
+                <div class="stat-mini-label">Pending Approval</div>
+                <div class="stat-mini-val red">{{ pending_count }}</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── Main ── -->
+    <main class="main">
+
+        <!-- Top Bar -->
+        <div class="topbar">
+            <div class="page-title">
+                <h2>👥 यूज़र मैनेजमेंट</h2>
+                <p>अकाउंट वेरिफिकेशन और अप्रूवल सिस्टम</p>
+            </div>
+            <div class="topbar-actions">
+                <a href="{% url 'admin_panel' %}" class="btn-back">← Admin Panel</a>
+            </div>
+        </div>
+
+        <!-- Alert Messages -->
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-success">
+                <span>✅</span> {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+
+        <!-- Stats Row -->
+        <div class="stats-row">
+            <div class="stat-card blue">
+                <div class="stat-card-icon">👤</div>
+                <div class="stat-card-val" style="color:var(--accent);">{{ total_count }}</div>
+                <div class="stat-card-label">कुल यूज़र्स</div>
+            </div>
+            <div class="stat-card green">
+                <div class="stat-card-icon">✅</div>
+                <div class="stat-card-val" style="color:var(--green2);">{{ approved_count }}</div>
+                <div class="stat-card-label">Approved यूज़र्स</div>
+            </div>
+            <div class="stat-card orange">
+                <div class="stat-card-icon">⏳</div>
+                <div class="stat-card-val" style="color:var(--yellow);">{{ pending_count }}</div>
+                <div class="stat-card-label">Pending Approval</div>
+            </div>
+        </div>
+
+        <!-- Table Card -->
+        <div class="table-card">
+            <div class="table-header">
+                <div class="table-title">
+                    🗂️ रजिस्टर्ड यूज़र्स
+                    <span class="table-count">{{ total_count }} total</span>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>👤 यूज़र</th>
+                            <th>📅 जॉइनिंग</th>
+                            <th>🕐 लास्ट लॉगिन</th>
+                            <th>📋 लॉगिन स्टेटस</th>
+                            <th>⚡ स्थिति</th>
+                            <th>⚙️ एक्शन</th>
+                            <th>🔑 पासवर्ड</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in managed_users %}
+                        <tr>
+                            <!-- User Info -->
+                            <td>
+                                <div class="user-cell">
+                                    <div class="avatar">{{ u.first_name|slice:":1"|upper }}</div>
+                                    <div>
+                                        <div class="user-name">{{ u.first_name }}</div>
+                                        <div class="user-email">{{ u.username }}</div>
+                                    </div>
+                                </div>
+                            </td>
+
+                            <!-- Joining Date -->
+                            <td>
+                                <div class="date-val">{{ u.date_joined|date:"d M, Y" }}</div>
+                            </td>
+
+                            <!-- Last Login -->
+                            <td>
+                                {% if u.last_login %}
+                                    <div class="date-val">{{ u.last_login|localtime|date:"d M, Y" }}</div>
+                                    <div class="date-sub">{{ u.last_login|localtime|time:"h:i A" }}</div>
+                                {% else %}
+                                    <span style="color:var(--muted2);font-size:12px;">कभी नहीं</span>
                                 {% endif %}
-                                <br><span style="font-size:10px;color:var(--muted);margin-top:3px;display:block;">{{ log.timestamp|localtime|date:"d M, H:i" }}</span>
-                                {% if log.ip_address %}<span style="font-size:10px;color:var(--muted);">📍 {{ log.ip_address }}</span>{% endif %}
-                            {% else %}
-                                <span style="color:var(--muted);font-size:12px;">—</span>
-                            {% endif %}
-                            {% endwith %}
-                        </td>
-                        <td>
-                            {% if u.is_active %}
-                                <div class="badge badge-active"><span class="dot"></span>Approved</div>
-                            {% else %}
-                                <div class="badge badge-pending"><span class="dot"></span>Pending</div>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <div class="actions-cell">
+                            </td>
+
+                            <!-- Login Status -->
+                            <td>
+                                {% with log=last_logs|get_item:u.id %}
+                                {% if log %}
+                                    {% if log.status == 'success' %}
+                                        <span class="login-badge login-success">✅ सफल</span>
+                                    {% elif log.status == 'failed' %}
+                                        <span class="login-badge login-failed">❌ गलत पासवर्ड</span>
+                                    {% elif log.status == 'inactive' %}
+                                        <span class="login-badge login-pending">⏳ पेंडिंग</span>
+                                    {% endif %}
+                                    <div class="login-info">{{ log.timestamp|localtime|date:"d M, H:i" }}{% if log.ip_address %} · 📍 {{ log.ip_address }}{% endif %}</div>
+                                {% else %}
+                                    <span style="color:var(--muted2);font-size:12px;">—</span>
+                                {% endif %}
+                                {% endwith %}
+                            </td>
+
+                            <!-- Status -->
+                            <td>
+                                {% if u.is_active %}
+                                    <span class="status-badge status-approved">
+                                        <span class="status-dot"></span> Approved
+                                    </span>
+                                {% else %}
+                                    <span class="status-badge status-pending">
+                                        <span class="status-dot"></span> Pending
+                                    </span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Action (Approve / Deactivate) -->
+                            <td>
                                 <form method="POST" action="{% url 'toggle_user_status' u.id %}">
                                     {% csrf_token %}
                                     {% if u.is_active %}
-                                        <button type="submit" class="btn-action btn-reject">Deactivate</button>
+                                        <button type="submit" class="btn btn-deactivate">🚫 Deactivate</button>
                                     {% else %}
-                                        <button type="submit" class="btn-action btn-approve">Approve</button>
+                                        <button type="submit" class="btn btn-approve">✅ Approve</button>
                                     {% endif %}
                                 </form>
-                            </div>
-                        </td>
-                        <td>
-                            <form method="POST" action="{% url 'admin_reset_password' u.id %}" onsubmit="return confirm('क्या आप {{ u.first_name }} का पासवर्ड डिफ़ॉल्ट (12345) पर रिसेट करना चाहते हैं?')">
-                                {% csrf_token %}
-                                <button type="submit" class="btn-action btn-reset" title="पासवर्ड 12345 पर रिसेट करें">🔑 Reset</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="7" class="empty-state">
-                            अभी तक कोई भी यूज़र रजिस्टर्ड नहीं हुआ है।
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            </td>
+
+                            <!-- Password Reset -->
+                            <td>
+                                <form method="POST" action="{% url 'admin_reset_password' u.id %}"
+                                      onsubmit="return confirm('क्या आप {{ u.first_name }} का पासवर्ड डिफ़ॉल्ट (12345) पर रिसेट करना चाहते हैं?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-reset" title="पासवर्ड 12345 पर रिसेट करें">🔑 Reset</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="7">
+                                <div class="empty-state">
+                                    <div class="empty-icon">📭</div>
+                                    <div class="empty-text">कोई यूज़र नहीं मिला</div>
+                                    <div class="empty-sub">अभी तक कोई भी यूज़र रजिस्टर्ड नहीं हुआ है।</div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </div>
+
+    </main>
 </div>
+
 </body>
 </html>

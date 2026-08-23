@@ -474,9 +474,16 @@ def user_approval_list(request):
         log = LoginLog.objects.filter(user=u).first()  # ordering=-timestamp से first = latest
         last_logs[u.id] = log
 
+    total_count    = managed_users.count()
+    approved_count = managed_users.filter(is_active=True).count()
+    pending_count  = managed_users.filter(is_active=False).count()
+
     return render(request, 'registration/user_approval.html', {
-        'managed_users': managed_users,
-        'last_logs': last_logs,
+        'managed_users':  managed_users,
+        'last_logs':      last_logs,
+        'total_count':    total_count,
+        'approved_count': approved_count,
+        'pending_count':  pending_count,
     })
 
 # @user_passes_test(is_superuser_check, login_url='/dashboard/')
