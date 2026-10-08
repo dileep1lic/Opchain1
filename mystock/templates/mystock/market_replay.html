@@ -311,7 +311,9 @@
                 }
                 userScrolled = false; // नया data load — auto-follow ON
                 rebuildCandles(); // interval के हिसाब से aggregate करो
-                setTimeout(() => mainChart.timeScale().fitContent(), 100);
+                setTimeout(() => {
+                    mainChart.timeScale().applyOptions({ rightOffset: 5, barSpacing: 10 });
+                }, 100);
 
                 document.getElementById('loading-overlay').style.display = 'none';
                 renderFrame(0); // Pehla frame render karo

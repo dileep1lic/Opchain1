@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.core.cache import caches
 from django.db.models import Q
 from .models import OptionChain, LiveSRData, PaperTrade
+from .levels_logic import calculate_eff_res, calculate_eff_sup, parse_status_type, STEP_MAP, parse_sr_status
 
 
 # ========================================================
@@ -59,7 +60,19 @@ def get_master_levels(symbol, selected_date=None):
     if selected_date is None:
         selected_date = timezone.now().date()
 
-    step      = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+    symbol_upper = re.sub(r'[^A-Z]', '', symbol.upper()) # (ex: 'NSE_INDEX|NIFTY 50' से सिर्फ 'NIFTY' निकालें)
+    step = STEP_MAP.get(symbol_upper, 50)
+
+    # step      = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+    # symbol_upper = symbol.upper()
+    
+    # if "MIDCPNIFTY" in symbol_upper:
+    #     step = 25
+    # elif "BANKNIFTY" in symbol_upper or "SENSEX" in symbol_upper:
+    #     step = 100
+    # else:
+    #     step = 50 # NIFTY, FINNIFTY या कोई और हो तो 50
+
     tolerance = 30.0
 
     levels = {
@@ -76,7 +89,7 @@ def get_master_levels(symbol, selected_date=None):
     if not sr:
         return levels
 
-    def get_rev_val(strike, side, period=100):
+    def get_rev_val(strike, side, period=1):
         today = timezone.now().date()
 
         if selected_date == today:
@@ -113,79 +126,61 @@ def get_master_levels(symbol, selected_date=None):
 
         return round(total_val / valid_count, 2) if valid_count > 0 else None
 
+    # # ==========================================
+    # # PARSE SR STATUS
+    # # ==========================================
+    # res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
+    # res_base   = float(sr.resistance_strike) if sr.resistance_strike else 0
+    # m_res      = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
+    # res_target = float(m_res.group(1)) if m_res else res_base
+
+    # sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
+    # sup_base   = float(sr.supprt_strike) if sr.supprt_strike else 0
+    # m_sup      = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
+    # sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
+    # # def parse_status_type(status: str) -> str:
+    # #     """
+    # #     "Support (Vol) Shifted WTT 24400" → "SHIFTED WTT"
+    # #     "Support (Vol) WTB 24300"         → "WTB"
+    # #     "Strong Support"                  → "STRONG"
+    # #     """
+    # #     s = status.upper()
+    # #     if "SHIFTED" in s and "WTT" in s: return "SHIFTED WTT"
+    # #     if "SHIFTED" in s and "WTB" in s: return "SHIFTED WTB"
+    # #     if "WTT" in s:                    return "WTT"
+    # #     if "WTB" in s:                    return "WTB"
+    # #     if "STRONG" in s:                 return "STRONG"
+    # #     return ""
+
+    # # Parse करो
+    # res_type = parse_status_type(res_status)
+    # sup_type = parse_status_type(sup_status)
+
+    # # Number निकालो (Regex अब सिर्फ number के लिए)
+    # m_res = re.search(r'(\d{4,6})', res_status)
+    # m_sup = re.search(r'(\d{4,6})', sup_status)
+    # res_target = float(m_res.group(1)) if m_res else res_base
+    # sup_target = float(m_sup.group(1)) if m_sup else sup_base
+
     # ==========================================
-    # PARSE SR STATUS
+    # PARSE SR STATUS (अब levels_logic.py से)
     # ==========================================
-    res_status = str(sr.resistance_status).upper() if sr.resistance_status else ""
-    res_base   = float(sr.resistance_strike) if sr.resistance_strike else 0
-    m_res      = re.search(r'(?:WTB|WTT)\s+(\d+)', res_status)
-    res_target = float(m_res.group(1)) if m_res else res_base
+    parsed_sr = parse_sr_status(sr)
+    
+    res_status = parsed_sr["res_status"]
+    res_base = parsed_sr["res_base"]
+    res_target = parsed_sr["res_target"]
+    res_type = parsed_sr["res_type"]
+    
+    sup_status = parsed_sr["sup_status"]
+    sup_base = parsed_sr["sup_base"]
+    sup_target = parsed_sr["sup_target"]
+    sup_type = parsed_sr["sup_type"]
 
-    sup_status = str(sr.supprt_status).upper() if sr.supprt_status else ""
-    sup_base   = float(sr.supprt_strike) if sr.supprt_strike else 0
-    m_sup      = re.search(r'(?:WTB|WTT)\s+(\d+)', sup_status)
-    sup_target = float(m_sup.group(1)) if m_sup else sup_base
+    eff_res = calculate_eff_res(res_type, sup_type, res_base, res_target, step)
 
-    def parse_status_type(status: str) -> str:
-        """
-        "Support (Vol) Shifted WTT 24400" → "SHIFTED WTT"
-        "Support (Vol) WTB 24300"         → "WTB"
-        "Strong Support"                  → "STRONG"
-        """
-        s = status.upper()
-        if "SHIFTED" in s and "WTT" in s: return "SHIFTED WTT"
-        if "SHIFTED" in s and "WTB" in s: return "SHIFTED WTB"
-        if "WTT" in s:                    return "WTT"
-        if "WTB" in s:                    return "WTB"
-        if "STRONG" in s:                 return "STRONG"
-        return ""
-
-    # Parse करो
-    res_type = parse_status_type(res_status)
-    sup_type = parse_status_type(sup_status)
-
-    # Number निकालो (Regex अब सिर्फ number के लिए)
-    m_res = re.search(r'(\d{4,6})', res_status)
-    m_sup = re.search(r'(\d{4,6})', sup_status)
-    res_target = float(m_res.group(1)) if m_res else res_base
-    sup_target = float(m_sup.group(1)) if m_sup else sup_base
-
-    # ==========================================
-    # RESISTANCE (PUT Trade के लिए)
-    # ==========================================
-    # --------res wtb-------------
-    if res_type == "WTB"            and sup_type == "WTB"           : eff_res = res_target + step # test ok
-    elif res_type == "WTB"          and sup_type == "WTT"           : eff_res = res_base + step # test ok
-    elif res_type == "WTB"          and sup_type == "STRONG"        : eff_res = res_base - step # test ok
-    elif res_type == "WTB"          and sup_type == "SHIFTED WTB"   : eff_res = res_base + step # test ok
-    elif res_type == "WTB"          and sup_type == "SHIFTED WTT"   : eff_res = res_base        # test ok
-    #--------res wtt-------------
-    elif res_type == "WTT"          and sup_type == "WTB"           : 
-        eff_res = res_target if (res_target - res_base) <= step else (res_target - step) 
-    elif res_type == "WTT"          and sup_type == "WTT"           : eff_res = res_target + step
-    elif res_type == "WTT"          and sup_type == "STRONG"        :
-        eff_res = res_target if (res_target - res_base) <= step else (res_target - step) 
-    elif res_type == "WTT"          and sup_type == "SHIFTED WTB"   : eff_res = res_target + step
-    elif res_type == "WTT"          and sup_type == "SHIFTED WTT"   : eff_res = res_base 
-    #--------res strong-------------
-    elif res_type == "STRONG"       and sup_type == "WTB"           : eff_res = res_base + step # test ok temp
-    elif res_type == "STRONG"       and sup_type == "WTT"           : eff_res = res_base + step
-    elif res_type == "STRONG"       and sup_type == "STRONG"        : eff_res = res_base + step
-    elif res_type == "STRONG"       and sup_type == "SHIFTED WTB"   : eff_res = res_base + step
-    elif res_type == "STRONG"       and sup_type == "SHIFTED WTT"   : eff_res = res_base
-    #--------res shifted wtb-------------
-    elif res_type == "SHIFTED WTB" and sup_type == "WTB"            : eff_res = res_base 
-    elif res_type == "SHIFTED WTB" and sup_type == "WTT"            : eff_res = res_base + step
-    elif res_type == "SHIFTED WTB" and sup_type == "STRONG"         : eff_res = res_base + step
-    elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTB"    : eff_res = res_base + step
-    elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTT"    : eff_res = res_base
-    #--------res shifted wtt-------------
-    elif res_type == "SHIFTED WTT" and sup_type == "WTB"            : eff_res = res_target - step
-    elif res_type == "SHIFTED WTT" and sup_type == "WTT"            : eff_res = res_target
-    elif res_type == "SHIFTED WTT" and sup_type == "STRONG"         : eff_res = res_target 
-    elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTB"    : eff_res = res_target - step
-    elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTT"    : eff_res = res_base
-    else: eff_res =                                 res_base + step
+    
        
 
     # ✅ FIX Bug 2: float() cast — Decimal vs float mismatch fix
@@ -258,42 +253,10 @@ def get_master_levels(symbol, selected_date=None):
     levels["R"]["sl"]     = get_rev_val(eff_res + step, 'CE')
     levels["R"]["tag"]    = 'R' if eff_res == original_eff_res else 'R_SHIFTED'
 
-    # ==========================================
-    # SUPPORT (CALL Trade के लिए)
-    # ==========================================
-     # --------sup wtb-------------
-    if sup_type == "WTB"            and res_type == "WTB"           : eff_sup = sup_target 
-    elif sup_type == "WTB"          and res_type == "WTT"           : eff_sup = sup_target 
-    elif sup_type == "WTB" and res_type == "STRONG":
-        eff_sup = sup_target if (sup_base - sup_target) <= step else (sup_target + step) # test ok
-    elif sup_type == "WTB"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base
-    elif sup_type == "WTB"          and res_type == "SHIFTED WTT"   : eff_sup = sup_target 
-    #--------sup wtt-------------
-    elif sup_type == "WTT"          and res_type == "WTB"           : eff_sup = sup_base - step # test ok
-    elif sup_type == "WTT"          and res_type == "WTT"           : eff_sup = sup_base 
-    elif sup_type == "WTT"          and res_type == "STRONG"        : eff_sup = sup_base 
-    elif sup_type == "WTT"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base + step
-    elif sup_type == "WTT"          and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
-    #--------sup strong-------------
-    elif sup_type == "STRONG"       and res_type == "WTB"           : eff_sup = sup_base - step # Test ok
-    elif sup_type == "STRONG"       and res_type == "WTT"           : eff_sup = sup_base - step # test ok
-    elif sup_type == "STRONG"       and res_type == "STRONG"        : eff_sup = sup_base - step
-    elif sup_type == "STRONG"       and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
-    elif sup_type == "STRONG"       and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
-    #--------sup shifted wtb-------------
-    elif sup_type == "SHIFTED WTB"  and res_type == "WTB"           : eff_sup = sup_target 
-    elif sup_type == "SHIFTED WTB"  and res_type == "WTT"           : eff_sup = sup_target + step
-    elif sup_type == "SHIFTED WTB"  and res_type == "STRONG"        : eff_sup = sup_target + step # test ok
-    elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTB"   : eff_sup = sup_target 
-    elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTT"   : eff_sup = sup_target - step
-    #--------sup shifted wtt-------------
-    elif sup_type == "SHIFTED WTT"  and res_type == "WTB"           : eff_sup = sup_base - step # test ok
-    elif sup_type == "SHIFTED WTT"  and res_type == "WTT"           : eff_sup = sup_base 
-    elif sup_type == "SHIFTED WTT"  and res_type == "STRONG"        : eff_sup = sup_base - step
-    elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
-    elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
-    else:                                          eff_sup = sup_base - step
-                                    
+    eff_sup = calculate_eff_sup(res_type, sup_type, sup_base, sup_target, step)
+
+
+         
 
     # ✅ FIX Bug 2: float() cast
     last_call   = (

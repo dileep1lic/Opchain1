@@ -351,10 +351,62 @@ function checkReversalAlerts(currentPrice, reversals) {
       lastReversals = reversals;
       const chartContainer = document.getElementById("chart");
 
-      if (!candles || candles.length === 0) { 
-          document.getElementById("message").style.display = "block"; 
-          document.getElementById("message").innerText = "No Data Available"; 
-          return; 
+      if (!candles || candles.length === 0) {
+          // ── अगर आज का दिन है और मार्केट अभी-अभी खुला है ──
+          const fromDate = document.getElementById('ctrl-from').value;
+          const toDate   = document.getElementById('ctrl-to').value;
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+          const isToday = (fromDate === todayStr && toDate === todayStr);
+
+          if (isToday) {
+              document.getElementById("loading").style.display = "none";
+              document.getElementById("message").style.display = "none";
+              showToast('⏳ मार्केट खुल गया है। पहली candle का इंतज़ार...');
+
+              // ✅ KEY FIX: chart initialize करो ताकि WebSocket live candle बना सके
+              // (candles नहीं हैं लेकिन chart object बनाना ज़रूरी है)
+              if (!mainChart) {
+                  chartContainer.innerHTML = "";
+                  const cWidth  = chartContainer.clientWidth  || window.innerWidth  || 800;
+                  const cHeight = chartContainer.clientHeight || window.innerHeight || 400;
+
+                  mainChart = LightweightCharts.createChart(chartContainer, {
+                      width: cWidth, height: cHeight,
+                      layout: { background: { color: "#0d1117" }, textColor: "#8b949e" },
+                      grid:   { vertLines: { color: "#21262d" }, horzLines: { color: "#21262d" } },
+                      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                      rightPriceScale: { borderColor: "#30363d" },
+                      timeScale: { borderColor: "#30363d", timeVisible: true },
+                  });
+
+                  candleSeries = mainChart.addCandlestickSeries({
+                      upColor: "#3fb950", downColor: "#f85149",
+                      borderUpColor: "#3fb950", borderDownColor: "#f85149",
+                      wickUpColor: "#3fb950", wickDownColor: "#f85149",
+                  });
+
+                  new ResizeObserver(entries => {
+                      if (!entries.length || !mainChart) return;
+                      const r = entries[0].contentRect;
+                      if (r.width > 0 && r.height > 0) mainChart.applyOptions({ width: r.width, height: r.height });
+                  }).observe(chartContainer);
+
+                  mainChart.subscribeCrosshairMove(param => {
+                      if (param.time) {
+                          const d = param.seriesData.get(candleSeries);
+                          if (d) updateLegend(d);
+                      }
+                  });
+
+                  // ✅ Price scale auto-scale करो ताकि पहली candle दिखे
+                  try { mainChart.priceScale('right').applyOptions({ autoScale: true }); } catch(e) {}
+              }
+              return; // data नहीं — WebSocket candle बनाएगा
+          }
+          document.getElementById("message").style.display = "block";
+          document.getElementById("message").innerText = "No Data Available";
+          return;
       }
       document.getElementById("message").style.display = "none";
 
@@ -430,10 +482,18 @@ function checkReversalAlerts(currentPrice, reversals) {
                       const savedTimeRange = JSON.parse(savedTimeRangeStr);
                       mainChart.timeScale().setVisibleRange(savedTimeRange);
                   } catch (e) {
-                      mainChart.timeScale().fitContent();
+                      if (cdData.length < 30) {
+                          mainChart.timeScale().applyOptions({ rightOffset: 5, barSpacing: 15 });
+                      } else {
+                          mainChart.timeScale().fitContent();
+                      }
                   }
               } else {
-                  mainChart.timeScale().fitContent();
+                  if (cdData.length < 30) {
+                      mainChart.timeScale().applyOptions({ rightOffset: 5, barSpacing: 15 });
+                  } else {
+                      mainChart.timeScale().fitContent();
+                  }
               }
           }, 50);
 
@@ -448,7 +508,6 @@ function checkReversalAlerts(currentPrice, reversals) {
       if (candleSeries) {
           candleSeries.setData(cdData); // <--- यही लाइन ज़ूम को टूटने नहीं देगी
       }
-      // 👇 यहाँ से यह नया कोड जोड़ें 👇
       if (cdData.length > 0) {
           const last = cdData[cdData.length - 1];
           currentBar = {
@@ -462,28 +521,31 @@ function checkReversalAlerts(currentPrice, reversals) {
           checkReversalAlerts(last.close, reversals);
       }
 
-      // 5. Reversal Lines (Straight Lines) अपडेट करें
-      if (window._reversalSeries) {
-          window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
-      }
-      window._reversalSeries = [];
+      // 5. Reversal Lines — setData() के बाद chart render होने का इंतज़ार करो
+      // ✅ FIX: setTimeout(0) से lines skip नहीं होंगी
+      setTimeout(() => {
+          if (window._reversalSeries) {
+              window._reversalSeries.forEach(s => { try { mainChart.removeSeries(s); } catch(e){} });
+          }
+          window._reversalSeries = [];
 
-      if (reversalMode === 1) {
-          const validReversals = reversals.filter(r => r && r.price > 0);
-          validReversals.forEach(rev => {
-              try {
-                  const ls = mainChart.addLineSeries({ 
-                      color: rev.color, lineWidth: rev.width || 1, lineStyle: rev.dash || 0, 
-                      priceLineVisible: false, lastValueVisible: true, title: rev.label || '' 
-                  });
-                  const lineData = cdData.map(c => ({ time: c.time, value: Number(rev.price) }));
-                  if (lineData.length > 0) { ls.setData(lineData); }
-                  window._reversalSeries.push(ls);
-              } catch (e) {
-                  console.warn("Reversal line error:", e.message);
-              }
-          });
-      }
+          if (reversalMode === 1) {
+              const validReversals = reversals.filter(r => r && r.price > 0);
+              validReversals.forEach(rev => {
+                  try {
+                      const ls = mainChart.addLineSeries({
+                          color: rev.color, lineWidth: rev.width || 1, lineStyle: rev.dash || 0,
+                          priceLineVisible: false, lastValueVisible: true, title: rev.label || ''
+                      });
+                      const lineData = cdData.map(c => ({ time: c.time, value: Number(rev.price) }));
+                      if (lineData.length > 0) { ls.setData(lineData); }
+                      window._reversalSeries.push(ls);
+                  } catch (e) {
+                      console.warn("Reversal line error:", e.message);
+                  }
+              });
+          }
+      }, 0);
   }
 
   function toggleReversalLines() {
@@ -582,7 +644,7 @@ function checkReversalAlerts(currentPrice, reversals) {
   //  WEBSOCKET LIVE TICKER FOR DASHBOARD
   // ══════════════════════════════════════════════════════
   function updateLiveCandle(liveSpotPrice, serverTimeStr) {
-      if (!candleSeries || !currentBar) return;
+      if (!candleSeries) return;
 
       const unit = document.getElementById('ctrl-unit').value;
       const interval = parseInt(document.getElementById('ctrl-interval').value) || 5;
@@ -600,7 +662,10 @@ function checkReversalAlerts(currentPrice, reversals) {
 
       const currentTimestamp = Math.floor(now.getTime() / 1000) + 19800; // IST Offset
 
-      if (currentBar.time !== currentTimestamp) {
+      const isFirstCandle = !currentBar;
+
+      // ✅ FIX: currentBar null हो (9:15 market open) तो नई candle बनाओ
+      if (!currentBar || currentBar.time !== currentTimestamp) {
           currentBar = { time: currentTimestamp, open: liveSpotPrice, high: liveSpotPrice, low: liveSpotPrice, close: liveSpotPrice };
       } else {
           currentBar.close = liveSpotPrice;
@@ -608,7 +673,20 @@ function checkReversalAlerts(currentPrice, reversals) {
           if (liveSpotPrice < currentBar.low)  currentBar.low  = liveSpotPrice;
       }
 
-      candleSeries.update(currentBar);
+      try {
+          candleSeries.update(currentBar);
+          // पहली candle आई — price scale fit करो ताकि candle दिखे
+          if (isFirstCandle && mainChart) {
+              try { mainChart.priceScale('right').applyOptions({ autoScale: true }); } catch(e) {}
+              setTimeout(() => { 
+                  try { 
+                      mainChart.timeScale().applyOptions({ rightOffset: 5, barSpacing: 15 }); 
+                  } catch(e) {} 
+              }, 100);
+          }
+      } catch(e) {
+          console.warn('candleSeries.update error:', e.message);
+      }
       document.getElementById('tp-close').textContent = liveSpotPrice.toFixed(2);
   }
 
@@ -684,10 +762,12 @@ function checkReversalAlerts(currentPrice, reversals) {
       liveSocket.onopen = function() { console.log("🟢 Dashboard WS Connected!"); };
 
       liveSocket.onmessage = function(e) {
-          if (!isAutoRefresh) return;
+          // ✅ FIX: isAutoRefresh check हटाया — live candle हमेशा update हो
           try {
               const data = JSON.parse(e.data);
-              if (data.symbol === symbol && data.spot_price) {
+              // ✅ FIX: symbol हर message पर live DOM से पढ़ो (stale closure नहीं)
+              const currentSymbol = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
+              if (data.symbol === currentSymbol && data.spot_price) {
                   // ─ Candle live update ─
                   updateLiveCandle(parseFloat(data.spot_price), data.data_time);
 

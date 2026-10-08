@@ -25,6 +25,9 @@ from django.db import close_old_connections
 from mystock.trade_logic import get_master_levels
 from channels.layers import get_channel_layer
 
+# ── Fixed Index Symbols (अलग-अलग loops में चलेंगे) ──
+FIXED_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+
 # --- SMART CACHE LOGIC START ---
 def set_smart_cache(key, value, timeout):
     """
@@ -84,16 +87,20 @@ bulk_create_async = sync_to_async(OptionChain.objects.bulk_create)
 get_control_async = sync_to_async(SyncControl.objects.get_or_create)
 
 class Command(BaseCommand):
-    help = 'High-Speed Async Engine with Smart Expiry'
-    
-    # FIXED variables हटा दें, अब हम डायनामिक लाएंगे
-    FIXED_SYMOL = "NIFTY" 
-    # pri market hours: 9:00 AM to 3:30 PM
-    is_market_hours = lambda self: dt_time(9, 0, 0) <= datetime.now().time() <= dt_time(20, 30, 0)
-    # Trading hours: 9:15 AM to 3:30 PM
+    help = 'High-Speed Async Engine with Smart Expiry — Multi-Symbol'
+
+    # Market / Trading hours
+    is_market_hours  = lambda self: dt_time(9,  0, 0) <= datetime.now().time() <= dt_time(20, 30, 0)
     is_trading_hours = lambda self: dt_time(9, 15, 5) <= datetime.now().time() <= dt_time(15, 30, 5)
-    # Bot trading hours: 9:20 AM to 2:45 PM (थोड़ा कम ताकि पेपर ट्रेडिंग के लिए समय रहे)
-    is_trad_hours = lambda self: dt_time(9, 20) <= datetime.now().time() <= dt_time(15, 30)
+    is_trad_hours    = lambda self: dt_time(9, 20)    <= datetime.now().time() <= dt_time(15, 30)
+
+    # SyncControl name mapping: symbol → DB loop name
+    LOOP_NAMES = {
+        "NIFTY":       "nifty_loop",
+        "BANKNIFTY":   "banknifty_loop",
+        "FINNIFTY":    "finnifty_loop",
+        "MIDCPNIFTY":  "midcpnifty_loop",
+    }
 
     def handle(self, *args, **options):
         logger.info('🚀 Starting High-Speed Async Engine...') 
@@ -102,78 +109,58 @@ class Command(BaseCommand):
         except KeyboardInterrupt:
             logger.warning('Stopped by user.')
 
-    # 1. शुरुआत में एक बार लोड करें
-    # load_master_contract()
     async def main_loop(self):
-        n_key, n_lot, n_expiries = None, 1, []
-        other_symbols = [s for s in all_symbols if s != "NIFTY"]
-        
+        """Startup: Instrument DB refresh, expiry fetch, सभी loops launch करो"""
         # --- 1. SMART UPDATE CHECK ---
         today = datetime.now().date()
         store_count = await sync_to_async(InstrumentStore.objects.count)()
-        
         if store_count == 0 or datetime.now().weekday() == 2:
             last_entry = await sync_to_async(InstrumentStore.objects.first)()
-            if not last_entry or last_entry.last_updated != today:
+            if not last_entry or last_entry.last_updated.date() != today:
                 logger.info("🔄 Refreshing Instrument Database...")
                 await sync_to_async(update_instrument_store_bulk)()
 
-        # --- 2. FETCH FROM DB ---
-        n_key, n_lot, n_expiries = await get_instrument_from_db("NIFTY")
-        
-        if not n_key or not n_expiries:
-            logger.error("❌ Critical: NIFTY data missing. Engine stopping.")
-            return 
+        # --- 2. हर Fixed Symbol की Expiry DB से fetch करो ---
+        logger.info('⏳ Fetching expiries from InstrumentStore...')
+        symbol_expiries = {}   # {"NIFTY": "2025-01-30", "BANKNIFTY": ...}
+        for sym in FIXED_SYMBOLS:
+            key, lot, expiries = await get_instrument_from_db(sym)
+            if not key or not expiries:
+                logger.error(f"❌ {sym} data missing in InstrumentStore. Skipping.")
+                continue
+            symbol_expiries[sym] = expiries[0]
+            logger.info(f"✅ {sym} Expiry: {expiries[0]}")
 
-
-        nifty_expiry = n_expiries[0]
-
-        # बाकी का लूप अब सीधे डेटाबेस (InstrumentStore) से डेटा उठाएगा
-        other_symbols = [s for s in all_symbols if s != "NIFTY"]
-        if not n_expiries:
-            logger.error("❌ NIFTY Expiry not found! Make sure update_instrument_store_bulk is working.")
+        if not symbol_expiries:
+            logger.error("❌ कोई भी Fixed Symbol का expiry नहीं मिला। Engine बंद।")
             return
 
-        nifty_expiry = n_expiries[0]
-        
-        logger.info('⏳ Fetching Data from InstrumentStore...')
-        
-        # --- 2. NIFTY Data Fetch ---
-        # get_instrument_from_db अब (key, lot, expiry_list) रिटर्न करता है
-        n_key, n_lot, n_expiries = await get_instrument_from_db("NIFTY")
-        
-        if n_expiries and len(n_expiries) > 0:
-            nifty_expiry = n_expiries[0] # Current Week Expiry
-        else:
-            logger.error("❌ NIFTY Expiry not found in Database!")
-            # बैकअप के तौर पर पुराना फंक्शन चला सकते हैं अगर DB खाली हो
-            return
+        # --- 3. Others (stocks) Expiry ---
+        other_symbols = [s for s in all_symbols if s not in FIXED_SYMBOLS]
+        common_expiry = None
+        if other_symbols:
+            s_key, s_lot, s_expiries = await get_instrument_from_db(other_symbols[0])
+            if s_expiries:
+                common_expiry = s_expiries[0]
+                logger.info(f"✅ Stocks Expiry: {common_expiry}")
+            else:
+                logger.warning("⚠️ Stock Expiry not found. Others loop won't start.")
 
-        # --- 3. STOCKS Expiry Fetch ---
-        # हम किसी भी एक स्टॉक (जैसे पहले स्टॉक) की एक्सपायरी लिस्ट उठा लेते हैं
-        s_key, s_lot, s_expiries = await get_instrument_from_db(other_symbols[0])
-        
-        if s_expiries and len(s_expiries) > 0:
-            # स्टॉक्स के लिए आमतौर पर मंथली एक्सपायरी [0] पर ही होती है
-            common_expiry = s_expiries[0] 
-        else:
-            logger.error("❌ Stock Expiry not found in Database!")
-            return
-
-        logger.info(f"✅ NIFTY Expiry: {nifty_expiry} | Stocks Expiry: {common_expiry}")
-
-        # --- 4. START ASYNC LOOPS ---
+        # --- 4. सभी Loops एक साथ Start करो ---
         async with aiohttp.ClientSession() as session:
-            await asyncio.gather(
-                # NIFTY loop: डायनामिक एक्सपायरी के साथ
-                self.nifty_loop(session, nifty_expiry, self.FIXED_SYMOL),
-                # Others loop: सभी स्टॉक्स और उनकी कॉमन एक्सपायरी के साथ
-                self.others_sr_loop(session, other_symbols, common_expiry)
-            )
+            loops = []
+            for sym in FIXED_SYMBOLS:
+                if sym in symbol_expiries:
+                    loops.append(self.nifty_loop(session, symbol_expiries[sym], sym))
+            if common_expiry and other_symbols:
+                loops.append(self.others_sr_loop(session, other_symbols, common_expiry))
+
+            logger.info(f"🚀 Starting {len(loops)} async loops: {list(symbol_expiries.keys()) + (['others'] if common_expiry else [])}")
+            await asyncio.gather(*loops)
 
 
     async def nifty_loop(self, session, expiry, fixes_sym):
-        """NIFTY Loop - Optimized Cleanup before Trading Hours"""
+        """Index Symbol Loop — NIFTY / BANKNIFTY / FINNIFTY / MIDCPNIFTY"""
         # 
         last_db_save_time = 0
         # 🟢 NEW: मार्केट की हलचल ट्रैक करने के लिए वेरिएबल्स
@@ -187,13 +174,14 @@ class Command(BaseCommand):
             #     continue
             await sync_to_async(close_old_connections)()
             
-            # 1. DB Control Check
+            # 1. DB Control Check — हर symbol का अपना control name
+            loop_ctrl_name = self.LOOP_NAMES.get(fixes_sym, "nifty_loop")
             try:
-                ctrl, _ = await get_control_async(name="nifty_loop")
+                ctrl, _ = await get_control_async(name=loop_ctrl_name)
             except Exception as e:
-                logger.error(f"DB Connection Error, retrying in 10s: {e}")
+                logger.error(f"DB Connection Error [{fixes_sym}], retrying in 10s: {e}")
                 await asyncio.sleep(10)
-                continue 
+                continue
     
             # ❌ यहाँ से डुप्लीकेट 'ctrl' कॉल को हटा दिया गया है
 
@@ -328,7 +316,7 @@ class Command(BaseCommand):
                                 last_db_save_time = current_time
                             
                     else:
-                        print("⏸️  NIFTY Loop Outside Trading Hours.")
+                        print(f"⏸️  [{fixes_sym}] Loop Outside Trading Hours.")
 
                     # 🚀 ✅ FIX: इसे 10 सेकंड की पाबंदी से बाहर निकालें (हर टिक पर चलेगा)
                     try:
@@ -408,7 +396,8 @@ class Command(BaseCommand):
 
                     # 🤖 Bot trading trigger 
                     # (यहाँ डुप्लीकेट self.is_trading_hourst() हटा दिया गया है)
-                    bot_ctrl, _ = await get_control_async(name="bot_loop") # नाम बदल दिया ताकि कन्फ्यूजन न हो
+                    bot_loop_name = f"{fixes_sym.lower()}_bot"  # nifty_bot, banknifty_bot, finnifty_bot, midcpnifty_bot
+                    bot_ctrl, _ = await get_control_async(name=bot_loop_name)
                     if bot_ctrl.is_active:
                         if self.is_trad_hours():  # Bot trading hours check
                             if master_levels is not None:
@@ -428,18 +417,17 @@ class Command(BaseCommand):
                     #     print("⏸️  NIFTY Loop Outside Trading Hours.")
                         
                 else:
-                    print(f"⚠️ [NIFTY] No data returned for expiry {expiry}.")
-                    
+                    print(f"⚠️ [{fixes_sym}] No data returned for expiry {expiry}.")
+
             except Exception as e:
-                logger.error(f"NIFTY Loop Error: {e}")
-                
-            # 🟢 ट्रेडिंग आवर्स में 5 सेकंड आराम करेगा, मार्केट आवर्स मे 15 और अन्य टाइम में 60 सेकंड
+                logger.error(f"[{fixes_sym}] Loop Error: {e}")
+            # ट्रेडिंग आवर्स में 1s, मार्केट आवर्स में 15s, बाकी 60s
             if self.is_trading_hours():
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
             elif self.is_market_hours():
                 await asyncio.sleep(15)
             else:
-                print("⏸️  NIFTY Loop Outside Market Hours. Sleeping for 60s.")
+                print(f"⏸️  [{fixes_sym}] Loop Outside Market Hours. Sleeping for 60s.")
                 await asyncio.sleep(60)
             
     async def others_sr_loop(self, session, symbols, expiry):

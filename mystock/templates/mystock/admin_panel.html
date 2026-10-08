@@ -221,13 +221,79 @@
     </div>
   </div>
 
+  <!-- BANKNIFTY Loop -->
+  <div class="loop-card" id="card-banknifty_loop">
+    <div class="loop-card-top">
+      <div class="loop-icon green">🏦</div>
+      <div style="flex:1">
+        <div class="loop-name">BANKNIFTY Loop</div>
+        <div class="loop-desc">BANKNIFTY का live option chain data fetch करता है। हर 5 सेकंड में DB में save होता है।</div>
+      </div>
+      <div class="status-dot" id="dot-banknifty_loop"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-banknifty_loop">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-banknifty_loop" onchange="toggleLoop('banknifty_loop', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-banknifty_loop">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINNIFTY Loop -->
+  <div class="loop-card" id="card-finnifty_loop">
+    <div class="loop-card-top">
+      <div class="loop-icon green">💹</div>
+      <div style="flex:1">
+        <div class="loop-name">FINNIFTY Loop</div>
+        <div class="loop-desc">FINNIFTY का live option chain data fetch करता है। हर 5 सेकंड में DB में save होता है।</div>
+      </div>
+      <div class="status-dot" id="dot-finnifty_loop"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-finnifty_loop">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-finnifty_loop" onchange="toggleLoop('finnifty_loop', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-finnifty_loop">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MIDCPNIFTY Loop -->
+  <div class="loop-card" id="card-midcpnifty_loop">
+    <div class="loop-card-top">
+      <div class="loop-icon green">📈</div>
+      <div style="flex:1">
+        <div class="loop-name">MIDCPNIFTY Loop</div>
+        <div class="loop-desc">MIDCPNIFTY (MidCap) का live option chain data fetch करता है। हर 5 सेकंड में DB में save होता है।</div>
+      </div>
+      <div class="status-dot" id="dot-midcpnifty_loop"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-midcpnifty_loop">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-midcpnifty_loop" onchange="toggleLoop('midcpnifty_loop', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-midcpnifty_loop">—</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Others Loop -->
   <div class="loop-card" id="card-others_loop">
     <div class="loop-card-top">
       <div class="loop-icon blue">🔄</div>
       <div style="flex:1">
         <div class="loop-name">Others Loop</div>
-        <div class="loop-desc">BANKNIFTY, FINNIFTY, SENSEX आदि सभी stocks का data batch में fetch करता है।</div>
+        <div class="loop-desc">RELIANCE, HDFCBANK आदि सभी stocks का data batch में fetch करता है।</div>
       </div>
       <div class="status-dot" id="dot-others_loop"></div>
     </div>
@@ -243,24 +309,90 @@
     </div>
   </div>
 
-  <!-- Bot Loop -->
-  <div class="loop-card" id="card-bot_loop">
+  <!-- NIFTY Bot -->
+  <div class="loop-card" id="card-nifty_bot">
     <div class="loop-card-top">
       <div class="loop-icon red">🤖</div>
       <div style="flex:1">
-        <div class="loop-name">Bot Loop (Paper Trade)</div>
-        <div class="loop-desc">R/S levels hit होने पर automatic paper trades execute करता है। बंद करने पर trade नहीं होगा।</div>
+        <div class="loop-name">NIFTY Bot 🟢</div>
+        <div class="loop-desc">NIFTY पर Paper Trade Bot — R/S hit पर auto trade।</div>
       </div>
-      <div class="status-dot" id="dot-bot_loop"></div>
+      <div class="status-dot" id="dot-nifty_bot"></div>
     </div>
     <div class="loop-card-bottom">
-      <span class="status-text" id="txt-bot_loop">—</span>
+      <span class="status-text" id="txt-nifty_bot">—</span>
       <div class="toggle-wrap">
         <label class="toggle">
-          <input type="checkbox" id="tog-bot_loop" onchange="toggleLoop('bot_loop', this)">
+          <input type="checkbox" id="tog-nifty_bot" onchange="toggleLoop('nifty_bot', this)">
           <span class="slider"></span>
         </label>
-        <span class="toggle-label" id="lbl-bot_loop">—</span>
+        <span class="toggle-label" id="lbl-nifty_bot">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- BANKNIFTY Bot -->
+  <div class="loop-card" id="card-banknifty_bot">
+    <div class="loop-card-top">
+      <div class="loop-icon red">🤖</div>
+      <div style="flex:1">
+        <div class="loop-name">BANKNIFTY Bot 🏦</div>
+        <div class="loop-desc">BANKNIFTY पर Paper Trade Bot — R/S hit पर auto trade।</div>
+      </div>
+      <div class="status-dot" id="dot-banknifty_bot"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-banknifty_bot">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-banknifty_bot" onchange="toggleLoop('banknifty_bot', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-banknifty_bot">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINNIFTY Bot -->
+  <div class="loop-card" id="card-finnifty_bot">
+    <div class="loop-card-top">
+      <div class="loop-icon red">🤖</div>
+      <div style="flex:1">
+        <div class="loop-name">FINNIFTY Bot 💹</div>
+        <div class="loop-desc">FINNIFTY पर Paper Trade Bot — R/S hit पर auto trade।</div>
+      </div>
+      <div class="status-dot" id="dot-finnifty_bot"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-finnifty_bot">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-finnifty_bot" onchange="toggleLoop('finnifty_bot', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-finnifty_bot">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MIDCPNIFTY Bot -->
+  <div class="loop-card" id="card-midcpnifty_bot">
+    <div class="loop-card-top">
+      <div class="loop-icon red">🤖</div>
+      <div style="flex:1">
+        <div class="loop-name">MIDCPNIFTY Bot 📈</div>
+        <div class="loop-desc">MIDCPNIFTY पर Paper Trade Bot — R/S hit पर auto trade।</div>
+      </div>
+      <div class="status-dot" id="dot-midcpnifty_bot"></div>
+    </div>
+    <div class="loop-card-bottom">
+      <span class="status-text" id="txt-midcpnifty_bot">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="tog-midcpnifty_bot" onchange="toggleLoop('midcpnifty_bot', this)">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label" id="lbl-midcpnifty_bot">—</span>
       </div>
     </div>
   </div>
@@ -304,7 +436,7 @@
     <option value="NIFTY">NIFTY</option>
     <option value="BANKNIFTY">BANKNIFTY</option>
     <option value="FINNIFTY">FINNIFTY</option>
-    <option value="MIDCAPNIFTY">MIDCAPNIFTY</option>
+    <option value="MIDCPNIFTY">MIDCPNIFTY</option>
     <option value="SENSEX">SENSEX</option>
   </select>
   <button class="mega-btn" id="skipRBtn" onclick="skipTrade('R')"
@@ -614,7 +746,7 @@
         <option value="NIFTY">NIFTY</option>
         <option value="BANKNIFTY">BANKNIFTY</option>
         <option value="FINNIFTY">FINNIFTY</option>
-        <option value="MIDCAPNIFTY">MIDCAPNIFTY</option>
+        <option value="MIDCPNIFTY">MIDCPNIFTY</option>
         <option value="SENSEX">SENSEX</option>
       </select>
     </div>
@@ -706,12 +838,11 @@
           background:var(--bg);border:1px solid var(--border);
           color:var(--text);border-radius:8px;padding:8px 14px;
           font-size:13px;font-family:inherit;cursor:pointer;
-      " onchange="loadAdminLtpHistory()">
+      " onchange="loadAdminLtpHistory(); _ltpAdminSpotRefresh();">
         <option value="NIFTY">NIFTY</option>
         <option value="BANKNIFTY">BANKNIFTY</option>
         <option value="FINNIFTY">FINNIFTY</option>
-        <option value="MIDCAPNIFTY">MIDCAPNIFTY</option>
-        <option value="SENSEX">SENSEX</option>
+        <option value="MIDCPNIFTY">MIDCPNIFTY</option>
       </select>
     </div>
 
@@ -935,7 +1066,8 @@
 
 <script>
 const CSRF = '{{ csrf_token }}';
-const LOOPS = ['nifty_loop', 'others_loop', 'bot_loop'];
+const LOOPS = ['nifty_loop', 'banknifty_loop', 'finnifty_loop', 'midcpnifty_loop', 'others_loop',
+               'nifty_bot', 'banknifty_bot', 'finnifty_bot', 'midcpnifty_bot'];
 
 // ── Clock ───────────────────────────────────────────────
 function updateClock() {
@@ -1604,15 +1736,17 @@ fetchGitVersionMini();
 //  LTP LEVELS — Admin Panel Functions
 // ════════════════════════════════════════════════════════════
 
-// Spot price auto-update from admin-status
+// Spot price auto-update — selected symbol का सही spot दिखाएं
 async function _ltpAdminSpotRefresh() {
     try {
-        const resp = await fetch('/api/admin-status/');
+        const sym = document.getElementById('ltp-sym')?.value || 'NIFTY';
+        // dashboard-data API से symbol-specific spot लो
+        const resp = await fetch(`/api/dashboard-data/?symbol=${sym}`);
         if (!resp.ok) return;
         const data = await resp.json();
-        const spot = data.stats?.spot;
-        if (spot) {
-            document.getElementById('ltp-spot-display').textContent = spot.toFixed(2);
+        const spot = data.triggers?.spot;
+        if (spot && spot > 0) {
+            document.getElementById('ltp-spot-display').textContent = parseFloat(spot).toFixed(2);
         }
     } catch(e) {}
 }

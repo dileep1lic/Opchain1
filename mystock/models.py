@@ -180,6 +180,8 @@ class InstrumentStore(models.Model):
     # हम यहाँ expiry_date को JSONField या String की तरह रख सकते हैं 
     # क्योंकि एक सिंबल की कई एक्सपायरी होती हैं
     expiry_dates = models.JSONField(default=list, blank=True) 
+    # स्ट्राइक प्राइस के हिसाब से CE/PE instrument keys
+    option_keys = models.JSONField(default=dict, blank=True)
     last_updated = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -226,9 +228,16 @@ class LiveSRData(models.Model):
 
     def __str__(self):
         return f"{self.Symbol} - {self.Time.strftime('%H:%M:%S')}"
-    
 
+    class Meta:
+        indexes = [
+            # ⚡ dashboard queries: Symbol + Time__date filter के लिए
+            models.Index(fields=['Symbol', 'Time'], name='idx_lsr_symbol_time'),
+            # ⚡ Symbol-only filter के लिए
+            models.Index(fields=['Symbol'], name='idx_lsr_symbol'),
+        ]
     
+ 
 class PaperTrade(models.Model):
     symbol = models.CharField(max_length=20, db_index=True)
     trade_date = models.DateField(default=timezone.now, db_index=True)

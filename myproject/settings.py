@@ -57,7 +57,6 @@ if not DEBUG:
     SESSION_COOKIE_SECURE   = True
     CSRF_COOKIE_SECURE      = True
 
-# DEBUG = True  # ❌ यह हटाया — ऊपर env variable से control होता है
 
 # Application definition
 

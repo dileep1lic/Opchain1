@@ -712,9 +712,12 @@ function updateChartData(candles, reversals) {
   }));
 
   candleSeries.setData(cdData);
-  updateReversalLines(candles, reversals, cdData);
 
-  // 👇 यह नया कोड यहाँ जोड़ें (आखिरी कैंडल का डेटा currentBar में सेव करें) 👇
+  // ✅ FIX: setData() के बाद chart render complete होने का इंतज़ार करो
+  // फिर reversal lines draw करो — वरना lines skip हो जाती हैं
+  setTimeout(() => updateReversalLines(candles, reversals), 0);
+
+  // आखिरी कैंडल का डेटा currentBar में सेव करें
   if (candles.length > 0) {
       const last = candles[candles.length - 1];
       currentBar = {
@@ -727,7 +730,18 @@ function updateChartData(candles, reversals) {
   }
 
   if (!window._chartInitialized) {
-    mainChart.timeScale().fitContent();
+    // ✅ KEY FIX: Symbol बदलने पर price scale को नए range में reset करो
+    // वरना BANKNIFTY→NIFTY पर Y-axis 57000 पर stuck रहता है और NIFTY candles दिखती नहीं
+    try {
+      mainChart.priceScale('right').applyOptions({ autoScale: true });
+    } catch(e) {}
+    
+    if (candles.length < 30) {
+      mainChart.timeScale().applyOptions({ rightOffset: 5, barSpacing: 20 });
+    } else {
+      mainChart.timeScale().fitContent();
+    }
+    
     window._chartInitialized = true;
   }
 
@@ -786,7 +800,21 @@ function updateLiveCandle(liveSpotPrice, serverTimeStr) {
         if (liveSpotPrice < currentBar.low)  currentBar.low  = liveSpotPrice;
     }
 
-    candleSeries.update(currentBar);
+    // ── अगर chart में अभी कोई data नहीं है (पहली candle) तो
+    // price scale और time scale fit करो ताकि candle दिखे
+    if (!window._chartInitialized) {
+        try {
+            mainChart.priceScale('right').applyOptions({ autoScale: true });
+        } catch(e) {}
+        window._chartInitialized = true;
+    }
+
+    try {
+        candleSeries.update(currentBar);
+    } catch(e) {
+        // अगर candle series में पहली बार data जा रहा है
+        console.warn('candleSeries.update error:', e.message);
+    }
     document.getElementById('tp-close').textContent = liveSpotPrice.toFixed(2);
 }
 
@@ -938,6 +966,10 @@ async function loadChart() {
   showLoading(true); 
   hideMsg();
 
+  // ✅ FIX 5: नया chart load होने से पहले पुरानी overlay lines साफ करो
+  _clearLtpLines();
+  ['LSR', 'ESR', 'DSR'].forEach(t => _clearSR(t));
+
   try {
     // आपके views.py में मौजूद 'candle_api' को कॉल
     const url = `/api/candle/?symbol=${symbol}&unit=${unit}&interval=${interval}&from_date=${fromDate}&to_date=${toDate}&reversal=${reversal}`;
@@ -951,14 +983,38 @@ async function loadChart() {
         return;
     }
 
-    if (!data.candles || data.candles.length === 0) { 
-        showMsg('❌ इस range में कोई candle नहीं मिली'); 
-        return; 
+    if (!data.candles || data.candles.length === 0) {
+        // ── अगर आज का दिन है और मार्केट अभी-अभी खुला है (9:15–9:16 window)
+        // तो chart blank रखो — WebSocket live tick से खुद candle बनेगी
+        if (isToday) {
+            showLoading(false);
+            hideMsg();
+            // chart initialized mark करो ताकि WebSocket काम करे
+            window._chartInitialized = true;
+            // Status bar में message दिखाओ
+            showToast('⏳ मार्केट अभी-अभी खुला है। पहली candle का इंतज़ार हो रहा है...');
+            document.getElementById('live-dot').style.display = 'block';
+            return;
+        }
+        showMsg('❌ इस range में कोई candle नहीं मिली');
+        return;
     }
 
     // आज = reversal lines दिखाएं, past = खाली
     lastReversals = isToday ? (data.reversal_lines || []) : [];
+
+    // ✅ FIX 1: Symbol बदलने पर सभी overlay flags reset करो
     window._chartInitialized = false;
+    window._ltpLinesLoaded   = false;  // Weekly Range fresh fetch होगी
+    window._LSRLoaded        = false;  // SR Lines fresh fetch होगी
+    window._ESRLoaded        = false;
+    window._DSRLoaded        = false;
+
+    // ✅ FIX 2: currentBar reset करो ताकि live candle नए symbol से शुरू हो
+    currentBar = { time: null, open: null, high: null, low: null, close: null };
+
+    // ✅ FIX 3: previousSpotPrice reset ताकि false alerts न आएं
+    previousSpotPrice = null;
     
     updateChartData(data.candles, lastReversals);
     
@@ -1006,10 +1062,20 @@ async function silentRefresh() {
     const response = await fetch(url);
     const data = await response.json();
 
-    // अगर कोई एरर है या डेटा नहीं है, तो पुराना चार्ट ही रहने दें (कचरा न दिखाएं)
-    if (data.error || !data.candles || data.candles.length === 0) {
-      console.warn("Auto-refresh skipped: No new data or error occurred.");
-      return; 
+    // अगर कोई एरर है, तो पुराना चार्ट ही रहने दें
+    if (data.error) {
+      console.warn("Auto-refresh skipped: API error.");
+      return;
+    }
+    // अगर candle नहीं है — दो case हैं:
+    if (!data.candles || data.candles.length === 0) {
+      if (isToday) {
+        // आज का दिन है, मार्केट अभी-अभी खुला है — WebSocket candle बना रहा है, skip करो
+        console.info("Auto-refresh: Market just opened, no candles yet. WebSocket is live.");
+        return;
+      }
+      console.warn("Auto-refresh skipped: No candles for this date range.");
+      return;
     }
 
     // नया डेटा सफलतापूर्वक मिलने पर चार्ट अपडेट करें
@@ -1592,7 +1658,8 @@ function startLiveTicker() {
         liveSocket.close();
     }
 
-    const symbol = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
+    // ✅ FIX 4: हर बार WebSocket बनाते वक्त CURRENT symbol पढ़ो (stale closure नहीं)
+    // symbol variable यहाँ नहीं बनाते — onmessage में live read करेंगे
     
     // WebSocket URL बनाएं (HTTP है तो ws://, HTTPS है तो wss://)
     const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -1613,11 +1680,14 @@ function startLiveTicker() {
         try {
             const data = JSON.parse(e.data);
             
-           if (data.symbol === symbol && data.spot_price) {
-                let spotPrice = parseFloat(data.spot_price);   // ✅ इसे 'let' कर दें
+            // ✅ FIX 4: हर message पर DOM से live symbol पढ़ो — stale closure नहीं
+            const currentSymbol = document.getElementById('ctrl-symbol').value.trim() || 'NIFTY';
+
+            if (data.symbol === currentSymbol && data.spot_price) {
+                let spotPrice = parseFloat(data.spot_price);
                 const serverTime = data.data_time; 
 
-                // 👇 TESTING CODE START (कल सुबह लाइव मार्केट से पहले इसे हटा दें) 👇
+                // 👇 TESTING CODE START (लाइव मार्केट से पहले इसे हटा दें) 👇
                // const fakeOffset = (Math.random() * 20) - 10; 
                // spotPrice = spotPrice + fakeOffset;
                 
@@ -1660,6 +1730,8 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('refresh-interval').addEventListener('change', saveSettings);
   document.getElementById('ctrl-from').addEventListener('change', saveSettings);
   document.getElementById('ctrl-to').addEventListener('change', saveSettings);
+  // ✅ FIX: Symbol change होने पर settings save करो
+  document.getElementById('ctrl-symbol').addEventListener('change', saveSettings);
 });
 </script>
 </body>

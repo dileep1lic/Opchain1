@@ -62,7 +62,7 @@ from django.contrib.sessions.models import Session
 from functools import wraps
 from django.utils.module_loading import import_string
 from django.conf import settings
-
+from .levels_logic import calculate_eff_res, calculate_eff_sup, parse_status_type
 import math
 
 def sanitize_json_data(data):
@@ -329,7 +329,9 @@ def admin_status_api(request):
         return JsonResponse(cached)   # ← Cache hit: ~0.01s
 
     # ── 1. Loop Status ──
-    loop_names = ['nifty_loop', 'others_loop', 'bot_loop']
+    loop_names = ['nifty_loop', 'banknifty_loop', 'finnifty_loop',
+                  'midcpnifty_loop', 'others_loop',
+                  'nifty_bot', 'banknifty_bot', 'finnifty_bot', 'midcpnifty_bot']
     try:
         existing = {c.name: c.is_active 
                     for c in SyncControl.objects.filter(name__in=loop_names)}
@@ -1026,7 +1028,13 @@ def table_update_api(request):
     अगर data नहीं बदला तो 304 Not Modified return होगा (0 bytes transfer)।
     पहले हर 5 सेकंड 125KB भेजता था — अब सिर्फ तब जब data नया हो।
     """
-    latest_time, spot_price, expiry_date, display_data, all_data = _get_nifty_chain_context()
+    # 🔵 symbol param support — dashboard symbol switcher के लिए
+    VALID_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+    symbol = request.GET.get('symbol', 'NIFTY').upper()
+    if symbol not in VALID_SYMBOLS:
+        symbol = 'NIFTY'
+
+    latest_time, spot_price, expiry_date, display_data, all_data = _get_nifty_chain_context(symbol)
 
     if latest_time is None:
         return HttpResponse("")
@@ -1036,13 +1044,13 @@ def table_update_api(request):
     if request.META.get('HTTP_IF_NONE_MATCH') == etag:
         return HttpResponse(status=304)
 
-    # 🟢 भारी DB Aggregate की जगह सीधे Cache से Totals लें
-    totals = cache.get('live_nifty_totals_NIFTY')
-    
+    # 🟢 Cache से Totals लें (symbol-specific)
+    totals = cache.get(f'live_nifty_totals_{symbol}')
+
     if not totals:
-        # Fallback: अगर किसी वजह से कैश में नहीं है तो पुराना DB तरीका (Backup)
+        # Fallback: DB से
         totals = OptionChain.objects.filter(
-            Symbol='NIFTY',
+            Symbol=symbol,
             Time__range=(latest_time - TIME_WINDOW, latest_time + TIME_WINDOW)
         ).aggregate(
             total_ce_oi=Sum('CE_OI'),
@@ -1051,16 +1059,16 @@ def table_update_api(request):
             total_pe_coi=Sum('PE_COI')
         )
 
-    # 🟢 SR Data को भी कैश से लिया जा सकता है अगर आपने वहां सेट किया है
-    latest_sr = LiveSRData.objects.filter(Symbol='NIFTY').order_by('-Time').first()
+    # 🟢 SR Data (symbol-specific)
+    latest_sr = LiveSRData.objects.filter(Symbol=symbol).order_by('-Time').first()
 
     # 🟢 Calculate % change of reversal values from 9:20 base
     today_date = latest_time.date() if timezone.is_aware(latest_time) else timezone.make_aware(latest_time).date()
     # (Because latest_time from OptionChain is usually the row's Time)
     try:
-        base_reversals = _get_all_strikes_reversal_base('NIFTY', today_date)
+        base_reversals = _get_all_strikes_reversal_base(symbol, today_date)
     except Exception as e:
-        print(f"Error fetching base reversals: {e}")
+        print(f"Error fetching base reversals [{symbol}]: {e}")
         base_reversals = {}
         
     for row in display_data:
@@ -1125,7 +1133,9 @@ def toggle_sync(request, loop_name):
     if request.method != "POST":
         return JsonResponse({"error": "Invalid method"}, status=405)
 
-    allowed = ['nifty_loop', 'others_loop', 'bot_loop']
+    allowed = ['nifty_loop', 'banknifty_loop', 'finnifty_loop',
+               'midcpnifty_loop', 'others_loop',
+               'nifty_bot', 'banknifty_bot', 'finnifty_bot', 'midcpnifty_bot']
     if loop_name not in allowed:
         return JsonResponse({"error": f"Unknown loop: {loop_name}"}, status=400)
 
@@ -2613,15 +2623,19 @@ def support_resistance_view(request):
 @login_required
 def live_trades_view(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
-    
+
     # ✅ हमेशा आज की date
     today = timezone.now().date()
     day_start = timezone.make_aware(datetime.combine(today, dt_time.min))
     day_end   = timezone.make_aware(datetime.combine(today, dt_time.max))
 
-    trades = PaperTrade.objects.filter(
-        symbol=symbol, trade_date=today
-    ).order_by('-entry_time')
+    # ALL mode: JS सभी symbols fetch करेगा — यहाँ सिर्फ context pass करो
+    if symbol == 'ALL':
+        trades = PaperTrade.objects.none()
+    else:
+        trades = PaperTrade.objects.filter(
+            symbol=symbol, trade_date=today
+        ).order_by('-entry_time')
 
     total_trades = trades.count()
     wins   = trades.filter(result='TARGET').count()
@@ -2678,7 +2692,7 @@ async def dashboard_data_api(request):
     """
     return await sync_to_async(_dashboard_data_api_sync, thread_sensitive=True)(request)
 
-
+STEP_MAP = {'NIFTY': 50, 'BANKNIFTY': 100, 'FINNIFTY': 50, 'MIDCPNIFTY': 25, 'SENSEX': 100}
 def _dashboard_data_api_sync(request):
     symbol = request.GET.get('symbol', 'NIFTY').upper()
     date_str = request.GET.get('date')
@@ -2712,7 +2726,8 @@ def _dashboard_data_api_sync(request):
 
     # 4. MASTER LEVELS
     master_levels = get_master_levels(symbol, selected_date)
-    step = 100 if 'BANKNIFTY' in symbol or 'SENSEX' in symbol else 50
+    # STEP_MAP = {'NIFTY': 50, 'BANKNIFTY': 100, 'FINNIFTY': 50, 'MIDCPNIFTY': 25, 'SENSEX': 100}
+    step = STEP_MAP.get(symbol, 50)
 
     # 5. Trades Query
     trades_qs = PaperTrade.objects.filter(
@@ -2816,7 +2831,8 @@ def _dashboard_data_api_sync(request):
 
     # 6. Bot Status
     try:
-        ctrl, _ = SyncControl.objects.get_or_create(name="bot_loop")
+        symbol_bot_name = f"{symbol.lower()}_bot"
+        ctrl, _ = SyncControl.objects.get_or_create(name=symbol_bot_name)
         bot_active = ctrl.is_active
     except Exception:
         bot_active = False
@@ -3406,10 +3422,10 @@ def add_manual_trade_api(request):
 logger = logging.getLogger(__name__)
 
 # ✅ Fix #5: Magic Numbers को Constants में बदला
-STEP_MAP = {
-    'BANKNIFTY': 100,
-    'SENSEX': 100,
-}
+# STEP_MAP = {
+#     'BANKNIFTY': 100,
+#     'SENSEX': 100,
+# }
 DEFAULT_STEP = 50
 
 MARKET_START = dt_time(9, 15)
@@ -3610,75 +3626,79 @@ def _calc_eff_strikes_from_dict(sr_dict: dict, symbol: str) -> tuple:
         if "STRONG" in s:                 return "STRONG"
         return ""
 
-    res_type = _type(res_status)
-    sup_type = _type(sup_status)
+    # res_type = _type(res_status)
+    # sup_type = _type(sup_status)
+    res_type = parse_status_type(res_status)
+    sup_type = parse_status_type(sup_status)
 
     # ── Resistance (trade_logic.py की exact copy) ──
-    # --------res wtb-------------
-    if res_type == "WTB"            and sup_type == "WTB"           : eff_res = res_target + step # test ok
-    elif res_type == "WTB"          and sup_type == "WTT"           : eff_res = res_base 
-    elif res_type == "WTB"          and sup_type == "STRONG"        : eff_res = res_base - step # test ok
-    elif res_type == "WTB"          and sup_type == "SHIFTED WTB"   : eff_res = res_base + step # test ok
-    elif res_type == "WTB"          and sup_type == "SHIFTED WTT"   : eff_res = res_base # test ok
-    #--------res wtt-------------
-    elif res_type == "WTT"          and sup_type == "WTB"           : eff_res = res_target - step
-    elif res_type == "WTT"          and sup_type == "WTT"           : eff_res = res_target + step
-    elif res_type == "WTT"          and sup_type == "STRONG"        : eff_res = res_target - step
-    elif res_type == "WTT"          and sup_type == "SHIFTED WTB"   : eff_res = res_target + step
-    elif res_type == "WTT"          and sup_type == "SHIFTED WTT"   : eff_res = res_base 
-    #--------res strong-------------
-    elif res_type == "STRONG"       and sup_type == "WTB"           : eff_res = res_base 
-    elif res_type == "STRONG"       and sup_type == "WTT"           : eff_res = res_base + step
-    elif res_type == "STRONG"       and sup_type == "STRONG"        : eff_res = res_base + step
-    elif res_type == "STRONG"       and sup_type == "SHIFTED WTB"   : eff_res = res_base + step
-    elif res_type == "STRONG"       and sup_type == "SHIFTED WTT"   : eff_res = res_base
-    #--------res shifted wtb-------------
-    elif res_type == "SHIFTED WTB" and sup_type == "WTB"            : eff_res = res_base 
-    elif res_type == "SHIFTED WTB" and sup_type == "WTT"            : eff_res = res_base + step
-    elif res_type == "SHIFTED WTB" and sup_type == "STRONG"         : eff_res = res_base + step
-    elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTB"    : eff_res = res_base + step
-    elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTT"    : eff_res = res_base
-    #--------res shifted wtt-------------
-    elif res_type == "SHIFTED WTT" and sup_type == "WTB"            : eff_res = res_target - step
-    elif res_type == "SHIFTED WTT" and sup_type == "WTT"            : eff_res = res_target
-    elif res_type == "SHIFTED WTT" and sup_type == "STRONG"         : eff_res = res_target 
-    elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTB"    : eff_res = res_target - step
-    elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTT"    : eff_res = res_base
-    else: eff_res =                                 res_base + step
+    # # --------res wtb-------------
+    # if res_type == "WTB"            and sup_type == "WTB"           : eff_res = res_target + step # test ok
+    # elif res_type == "WTB"          and sup_type == "WTT"           : eff_res = res_base 
+    # elif res_type == "WTB"          and sup_type == "STRONG"        : eff_res = res_base - step # test ok
+    # elif res_type == "WTB"          and sup_type == "SHIFTED WTB"   : eff_res = res_base + step # test ok
+    # elif res_type == "WTB"          and sup_type == "SHIFTED WTT"   : eff_res = res_base # test ok
+    # #--------res wtt-------------
+    # elif res_type == "WTT"          and sup_type == "WTB"           : eff_res = res_target - step
+    # elif res_type == "WTT"          and sup_type == "WTT"           : eff_res = res_target + step
+    # elif res_type == "WTT"          and sup_type == "STRONG"        : eff_res = res_target - step
+    # elif res_type == "WTT"          and sup_type == "SHIFTED WTB"   : eff_res = res_target + step
+    # elif res_type == "WTT"          and sup_type == "SHIFTED WTT"   : eff_res = res_base 
+    # #--------res strong-------------
+    # elif res_type == "STRONG"       and sup_type == "WTB"           : eff_res = res_base 
+    # elif res_type == "STRONG"       and sup_type == "WTT"           : eff_res = res_base + step
+    # elif res_type == "STRONG"       and sup_type == "STRONG"        : eff_res = res_base + step
+    # elif res_type == "STRONG"       and sup_type == "SHIFTED WTB"   : eff_res = res_base + step
+    # elif res_type == "STRONG"       and sup_type == "SHIFTED WTT"   : eff_res = res_base
+    # #--------res shifted wtb-------------
+    # elif res_type == "SHIFTED WTB" and sup_type == "WTB"            : eff_res = res_base 
+    # elif res_type == "SHIFTED WTB" and sup_type == "WTT"            : eff_res = res_base + step
+    # elif res_type == "SHIFTED WTB" and sup_type == "STRONG"         : eff_res = res_base + step
+    # elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTB"    : eff_res = res_base + step
+    # elif res_type == "SHIFTED WTB" and sup_type == "SHIFTED WTT"    : eff_res = res_base
+    # #--------res shifted wtt-------------
+    # elif res_type == "SHIFTED WTT" and sup_type == "WTB"            : eff_res = res_target - step
+    # elif res_type == "SHIFTED WTT" and sup_type == "WTT"            : eff_res = res_target
+    # elif res_type == "SHIFTED WTT" and sup_type == "STRONG"         : eff_res = res_target 
+    # elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTB"    : eff_res = res_target - step
+    # elif res_type == "SHIFTED WTT" and sup_type == "SHIFTED WTT"    : eff_res = res_base
+    # else: eff_res =                                 res_base + step
 
 
-    # ── Support (trade_logic.py की exact copy) ──
-     # --------sup wtb-------------
-    if sup_type == "WTB"            and res_type == "WTB"           : eff_sup = sup_target - step
-    elif sup_type == "WTB"          and res_type == "WTT"           : eff_sup = sup_target 
-    elif sup_type == "WTB"          and res_type == "STRONG"        : eff_sup = sup_target + step # test ok
-    elif sup_type == "WTB"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base
-    elif sup_type == "WTB"          and res_type == "SHIFTED WTT"   : eff_sup = sup_target 
-    #--------sup wtt-------------
-    elif sup_type == "WTT"          and res_type == "WTB"           : eff_sup = sup_base
-    elif sup_type == "WTT"          and res_type == "WTT"           : eff_sup = sup_base 
-    elif sup_type == "WTT"          and res_type == "STRONG"        : eff_sup = sup_base 
-    elif sup_type == "WTT"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base + step
-    elif sup_type == "WTT"          and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
-    #--------sup strong-------------
-    elif sup_type == "STRONG"       and res_type == "WTB"           : eff_sup = sup_base - step
-    elif sup_type == "STRONG"       and res_type == "WTT"           : eff_sup = sup_base 
-    elif sup_type == "STRONG"       and res_type == "STRONG"        : eff_sup = sup_base - step
-    elif sup_type == "STRONG"       and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
-    elif sup_type == "STRONG"       and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
-    #--------sup shifted wtb-------------
-    elif sup_type == "SHIFTED WTB"  and res_type == "WTB"           : eff_sup = sup_target 
-    elif sup_type == "SHIFTED WTB"  and res_type == "WTT"           : eff_sup = sup_target + step
-    elif sup_type == "SHIFTED WTB"  and res_type == "STRONG"        : eff_sup = sup_target + step # test ok
-    elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTB"   : eff_sup = sup_base - step
-    elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTT"   : eff_sup = sup_target - step
-    #--------sup shifted wtt-------------
-    elif sup_type == "SHIFTED WTT"  and res_type == "WTB"           : eff_sup = sup_base - step # test ok
-    elif sup_type == "SHIFTED WTT"  and res_type == "WTT"           : eff_sup = sup_base 
-    elif sup_type == "SHIFTED WTT"  and res_type == "STRONG"        : eff_sup = sup_base - step
-    elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
-    elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
-    else:                                          eff_sup = sup_base - step
+    # # ── Support (trade_logic.py की exact copy) ──
+    #  # --------sup wtb-------------
+    # if sup_type == "WTB"            and res_type == "WTB"           : eff_sup = sup_target - step
+    # elif sup_type == "WTB"          and res_type == "WTT"           : eff_sup = sup_target 
+    # elif sup_type == "WTB"          and res_type == "STRONG"        : eff_sup = sup_target + step # test ok
+    # elif sup_type == "WTB"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base
+    # elif sup_type == "WTB"          and res_type == "SHIFTED WTT"   : eff_sup = sup_target 
+    # #--------sup wtt-------------
+    # elif sup_type == "WTT"          and res_type == "WTB"           : eff_sup = sup_base
+    # elif sup_type == "WTT"          and res_type == "WTT"           : eff_sup = sup_base 
+    # elif sup_type == "WTT"          and res_type == "STRONG"        : eff_sup = sup_base 
+    # elif sup_type == "WTT"          and res_type == "SHIFTED WTB"   : eff_sup = sup_base + step
+    # elif sup_type == "WTT"          and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
+    # #--------sup strong-------------
+    # elif sup_type == "STRONG"       and res_type == "WTB"           : eff_sup = sup_base - step
+    # elif sup_type == "STRONG"       and res_type == "WTT"           : eff_sup = sup_base 
+    # elif sup_type == "STRONG"       and res_type == "STRONG"        : eff_sup = sup_base - step
+    # elif sup_type == "STRONG"       and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
+    # elif sup_type == "STRONG"       and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
+    # #--------sup shifted wtb-------------
+    # elif sup_type == "SHIFTED WTB"  and res_type == "WTB"           : eff_sup = sup_target 
+    # elif sup_type == "SHIFTED WTB"  and res_type == "WTT"           : eff_sup = sup_target + step
+    # elif sup_type == "SHIFTED WTB"  and res_type == "STRONG"        : eff_sup = sup_target + step # test ok
+    # elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTB"   : eff_sup = sup_base - step
+    # elif sup_type == "SHIFTED WTB"  and res_type == "SHIFTED WTT"   : eff_sup = sup_target - step
+    # #--------sup shifted wtt-------------
+    # elif sup_type == "SHIFTED WTT"  and res_type == "WTB"           : eff_sup = sup_base - step # test ok
+    # elif sup_type == "SHIFTED WTT"  and res_type == "WTT"           : eff_sup = sup_base 
+    # elif sup_type == "SHIFTED WTT"  and res_type == "STRONG"        : eff_sup = sup_base - step
+    # elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTB"   : eff_sup = sup_base 
+    # elif sup_type == "SHIFTED WTT"  and res_type == "SHIFTED WTT"   : eff_sup = sup_base - step
+    # else:                                          eff_sup = sup_base - step
+    eff_res = calculate_eff_res(res_type, sup_type, res_base, res_target, step)
+    eff_sup = calculate_eff_sup(sup_type, res_type, sup_base, sup_target, step)
 
     return eff_res, eff_sup
 
@@ -3903,14 +3923,12 @@ def save_ltp_levels_api(request):
         if spot <= 0:
             return JsonResponse({"status": "error", "msg": "Spot Price invalid है"}, status=400)
 
-        # Step 1: Strike size determine करें
-        step = 100 if "BANKNIFTY" in symbol or "SENSEX" in symbol else 50
+        # Step 1: Strike size determine करें (symbol-specific)
+        # STEP_MAP = {'NIFTY': 50, 'BANKNIFTY': 100, 'FINNIFTY': 50, 'MIDCPNIFTY': 25, 'SENSEX': 100}
+        step = STEP_MAP.get(symbol, 50)
 
         # Step 2: CE Strike = spot से ऊपर की nearest strike
         #         PE Strike = spot से नीचे की nearest strike
-        # nearest strike = round to nearest step
-        # CE Strike ≥ spot  →  ceil(spot / step) * step
-        # PE Strike ≤ spot  →  floor(spot / step) * step
 
         import math as _math
 
@@ -3954,8 +3972,19 @@ def save_ltp_levels_api(request):
                     if strike == pe_strike:
                         pe_ltp = float(row.get('PE_LTP') or 0)
 
+                # Nearest strike fallback: अगर exact strike cache में नहीं, nearest वाली लो
+                if ce_ltp <= 0 and live_data:
+                    best = min(live_data, key=lambda r: abs(float(r.get('Strike_Price', 0)) - ce_strike))
+                    ce_ltp = float(best.get('CE_LTP') or 0)
+                    if not expiry:
+                        expiry = str(best.get('expiry') or "")
+                if pe_ltp <= 0 and live_data:
+                    best = min(live_data, key=lambda r: abs(float(r.get('Strike_Price', 0)) - pe_strike))
+                    pe_ltp = float(best.get('PE_LTP') or 0)
+
             # अगर Cache में नहीं मिला, तो DB से fallback
             if ce_ltp <= 0 or pe_ltp <= 0:
+                # Exact strike DB query
                 ce_row = (
                     OptionChain.objects
                     .filter(Symbol=symbol, Strike_Price=ce_strike)
@@ -3971,10 +4000,30 @@ def save_ltp_levels_api(request):
                     .first()
                 )
 
+                # Nearest strike DB fallback (अगर exact नहीं मिला)
+                if not ce_row or (ce_row and not ce_row.get("CE_LTP")):
+                    ce_row = (
+                        OptionChain.objects
+                        .filter(Symbol=symbol, Strike_Price__gte=ce_strike - step * 2,
+                                Strike_Price__lte=ce_strike + step * 2)
+                        .order_by("-Time", "Strike_Price")
+                        .values("CE_LTP", "Expiry_Date", "Strike_Price")
+                        .first()
+                    )
+                if not pe_row or (pe_row and not pe_row.get("PE_LTP")):
+                    pe_row = (
+                        OptionChain.objects
+                        .filter(Symbol=symbol, Strike_Price__gte=pe_strike - step * 2,
+                                Strike_Price__lte=pe_strike + step * 2)
+                        .order_by("-Time")
+                        .values("PE_LTP", "Strike_Price")
+                        .last()
+                    )
+
                 if not ce_row and ce_ltp <= 0:
-                    return JsonResponse({"status": "error", "msg": f"CE Data नहीं मिला: {symbol} Strike {ce_strike}"}, status=404)
+                    return JsonResponse({"status": "error", "msg": f"CE Data नहीं मिला: {symbol} Strike {ce_strike}. मार्केट खुला है और Engine चल रहा है?"}, status=404)
                 if not pe_row and pe_ltp <= 0:
-                    return JsonResponse({"status": "error", "msg": f"PE Data नहीं मिला: {symbol} Strike {pe_strike}"}, status=404)
+                    return JsonResponse({"status": "error", "msg": f"PE Data नहीं मिला: {symbol} Strike {pe_strike}. मार्केट खुला है और Engine चल रहा है?"}, status=404)
 
                 if ce_ltp <= 0 and ce_row:
                     ce_ltp = float(ce_row.get("CE_LTP") or 0)
@@ -3985,7 +4034,7 @@ def save_ltp_levels_api(request):
         if ce_ltp <= 0 or pe_ltp <= 0:
             return JsonResponse({
                 "status": "error",
-                "msg": f"LTP zero है — CE_LTP={ce_ltp}, PE_LTP={pe_ltp}. मार्केट खुला है?"
+                "msg": f"LTP zero है — CE_LTP={ce_ltp}, PE_LTP={pe_ltp}. Engine चल रहा है?"
             }, status=400)
 
 
@@ -4500,3 +4549,116 @@ def news_api(request):
         return JsonResponse({'status': 'error', 'message': 'Network error — Upstox API से connect नहीं हो पाया।'}, status=503)
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
+# ── Auto LTP Calculator API  (100% Cache — No DB) ────────────────────────────
+@login_required
+@require_GET
+def auto_ltp_reversal_api(request):
+    """
+    पूरी तरह cache से data लेता है — DB पर कोई query नहीं।
+    - base_strike: जिस ऑप्शन पर क्लिक किया गया है (जिसका LTP कैलकुलेट करना है)
+    - strike (target_strike): जो इनपुट बॉक्स में डाला गया है (जिसका reversal लेना है)
+    """
+    symbol   = request.GET.get('symbol', 'NIFTY').upper()
+    opt_type = request.GET.get('opt_type', 'CE').upper()
+    try:
+        target_strike = float(request.GET.get('strike', 0))
+        base_strike   = float(request.GET.get('base_strike', target_strike))
+    except (ValueError, TypeError):
+        return JsonResponse({'status': 'error', 'message': 'Invalid strike price'}, status=400)
+
+    if target_strike <= 0:
+        return JsonResponse({'status': 'error', 'message': 'Strike price 0 से बड़ा होना चाहिए'}, status=400)
+
+    # ── Cache से पूरी chain लो ───────────────────────────────────────
+    live_data = caches['default'].get(f'live_nifty_data_{symbol}')
+    spot      = caches['default'].get(f'live_nifty_spot_{symbol}')
+
+    if not live_data:
+        return JsonResponse({'status': 'error', 'message': 'Live data cache खाली है — लूप चल रहा है?'}, status=503)
+
+    spot = float(spot or 0)
+
+    adj_col = 'Reversl_Pe' if opt_type == 'CE' else 'Reversl_Ce'
+    ltp_key = 'CE_LTP'     if opt_type == 'CE' else 'PE_LTP'
+    dlt_key = 'CE_Delta'   if opt_type == 'CE' else 'PE_Delta'
+
+    try:
+        chain = sorted(live_data, key=lambda r: float(r.get('Strike_Price', 0)))
+    except Exception:
+        chain = live_data
+
+    # ── Base row (जिसका LTP निकालना है) और Target row (जिसका Reversal लेना है) 
+    base_row = next((r for r in chain if float(r.get('Strike_Price', -1)) == base_strike), None)
+    target_row = next((r for r in chain if float(r.get('Strike_Price', -1)) == target_strike), None)
+
+    if not base_row:
+        return JsonResponse({'status': 'error', 'message': f'Base Strike {base_strike} cache में नहीं मिली'}, status=404)
+    if not target_row:
+        return JsonResponse({'status': 'error', 'message': f'Target Strike {target_strike} cache में नहीं मिली'}, status=404)
+
+    # Base LTP & Delta
+    cur_ltp   = float(base_row.get(ltp_key) or 0)
+    cur_delta = float(base_row.get(dlt_key) or 0)
+
+    def est_ltp(rev):
+        if not rev or not spot:
+            return None
+        val = cur_ltp + (float(rev) - spot) * cur_delta
+        return round(max(val, 0.05), 2)
+
+    reversal    = target_row.get(adj_col)
+    target_spot = float(reversal) if reversal else None
+    estimated   = est_ltp(reversal)
+
+    # ── Adjacent strikes (Target strike के आस-पास) ───────────────────
+    strikes_list = [float(r.get('Strike_Price', 0)) for r in chain]
+    try:
+        tgt_idx = strikes_list.index(target_strike)
+    except ValueError:
+        tgt_idx = None
+
+    lower_row = chain[tgt_idx - 1] if tgt_idx is not None and tgt_idx > 0                  else None
+    upper_row = chain[tgt_idx + 1] if tgt_idx is not None and tgt_idx < len(chain) - 1     else None
+
+    def row_info(row):
+        if not row:
+            return None, None, None
+        sp   = float(row.get('Strike_Price', 0))
+        rv   = row.get(adj_col)
+        ltp  = est_ltp(rv)
+        return sp, (round(float(rv), 2) if rv else None), ltp
+
+    lower_strike, lower_rev, lower_ltp = row_info(lower_row)
+    upper_strike, upper_rev, upper_ltp = row_info(upper_row)
+
+    # CE: lower → SL,  upper → Target  |  PE: lower → Target, upper → SL
+    if opt_type == 'CE':
+        sl_strike,  sl_rev,  sl_ltp  = lower_strike, lower_rev, lower_ltp
+        tgt_strike, tgt_rev, tgt_ltp = upper_strike, upper_rev, upper_ltp
+    else:
+        tgt_strike, tgt_rev, tgt_ltp = lower_strike, lower_rev, lower_ltp
+        sl_strike,  sl_rev,  sl_ltp  = upper_strike, upper_rev, upper_ltp
+
+    return JsonResponse({
+        'status':        'ok',
+        'strike':        target_strike,
+        'base_strike':   base_strike,
+        'spot':          round(spot, 2),
+        'opt_type':      opt_type,
+        # Target strike
+        'reversal':      round(float(reversal), 2) if reversal else None,
+        'target_spot':   round(target_spot, 2)     if target_spot else None,
+        'current_ltp':   round(cur_ltp, 2),
+        'estimated_ltp': estimated,
+        # SL
+        'sl_strike':     sl_strike,
+        'sl_reversal':   sl_rev,
+        'sl_ltp':        sl_ltp,
+        # Target
+        'tgt_strike':    tgt_strike,
+        'tgt_reversal':  tgt_rev,
+        'tgt_ltp':       tgt_ltp,
+    })
+

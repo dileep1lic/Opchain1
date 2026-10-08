@@ -134,4 +134,7 @@ urlpatterns = [
     # ── 📰 Upstox News ────────────────────────────────────────────
     path('news/',          views.news_page, name='news_page'),   # HTML पेज
     path('api/news/',      views.news_api,  name='news_api'),    # Proxy API
+
+    # ── Auto LTP Calculator ──────────────────────────────────────
+    path('api/auto-ltp-reversal/', views.auto_ltp_reversal_api, name='auto_ltp_reversal_api'),
 ]
